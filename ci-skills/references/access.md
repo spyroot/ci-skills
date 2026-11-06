@@ -76,7 +76,7 @@ URL: `[gitlab_private]` may point at gitlab.com and `[gitlab_public]` at a self-
 ```toml
 [gitlab_routing]
 gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
-gitlab_public = { kubernetes = "kubernetes" }
+gitlab_public = {}
 
 [gitlab_private]
 url = "https://gitlab.example.test"
@@ -109,10 +109,13 @@ Rules, each checked before any provider request:
   no paired table.
 - A command that requires Kubernetes or Harbor, such as `gitlab_runner_manager.py deploy` or
   `image_build_readiness.py chain`, reads the table the selected row names. A row that omits it, or a target without
-  `[gitlab_routing]`, blocks with `target is missing required authority tables: <names>`. In the example above,
-  `--gitlab public` cannot deploy a runner, because the public row pairs no Harbor table. Commands that only read
-  optional authorities, such as `access_check.py`, are not affected. The legacy shape without `[gitlab_routing]` is
-  the one exception; see below.
+  `[gitlab_routing]`, blocks with `target is missing required authority tables: <names>` before any provider call;
+  `--dry-run` returns the same result. In the example above, `--gitlab public` cannot deploy a runner, because the
+  public row pairs no table. Commands that only read optional authorities, such as `access_check.py`, are not
+  affected. The legacy shape without `[gitlab_routing]` and without `--gitlab` is the one exception; see below.
+- A row is the person's own declaration of which cluster and registry belong to that GitLab; no key or host implies
+  one. [GitLab Agent connectivity](gitlab-agent.md) shows when a GitLab can use a cluster, for example a GitLab.com
+  project with a GitLab Agent in a lab cluster that has egress to GitLab.com.
 - A selector outside `private` and `public` blocks with `gitlab_selector_unknown`.
 - A table nested in the selected instance table, such as `[gitlab_public.com]` read with `--gitlab public`, blocks
   with a diagnostic that names the nested table.
@@ -161,9 +164,11 @@ Each load of a target that holds `[gitlab]`, and each use of `--gitlab-profile`,
 `gitlab_target_deprecated` diagnostic on standard error in the selected `--log-format`, at `--log-level warning` or
 below; a dry run does not write it to `--log-file`. `[gitlab_routing]` may sit beside the legacy tables; its row for
 an instance pairs the tables of whichever table answers that instance. Without `[gitlab_routing]`, a legacy route
-reports `kubernetes` and `harbor` as `null`, and a command that requires them reads `[kubernetes]` and `[harbor]`
-directly, as before this change. To migrate, rename `[gitlab]` to `[gitlab_private]` and `[gitlab.com]` to
-`[gitlab_public]`. Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
+reports `kubernetes` and `harbor` as `null`. A command that requires them then reads `[kubernetes]` and `[harbor]`
+directly only when the caller gives no `--gitlab`, which is how the legacy shape behaved before `--gitlab` existed;
+with `--gitlab private` or `--gitlab public` it blocks with the missing-tables reason, as on the new shape. The event's
+`table` names the legacy table, `gitlab` or `gitlab.NAME`. To migrate, rename `[gitlab]` to `[gitlab_private]` and
+`[gitlab.com]` to `[gitlab_public]`. Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
 
 ## Effective credential sources
 

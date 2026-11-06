@@ -56,7 +56,7 @@ repository = "owner/repository"
 # [gitlab.NAME] tables are read for one release and print a
 # gitlab_target_deprecated warning.
 [gitlab_routing]
-# Optional. Needed by commands that also use Kubernetes or Harbor, such as the
+# Optional. Needed by commands that require Kubernetes or Harbor, such as the
 # runner manager. The instance read when a command gets no --gitlab option;
 # omit it to read gitlab_private.
 default = "gitlab_private"
@@ -65,7 +65,16 @@ default = "gitlab_private"
 # paired table; a command that needs that table then blocks for this
 # instance. Every result reports the selection as its "routing" object.
 gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
-gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }
+# An empty row: this GitLab has no cluster and no registry of yours. Fill it
+# only when that GitLab can use them, for example a GitLab Agent or a runner in
+# a cluster that reaches it (ci-skills/references/gitlab-agent.md).
+gitlab_public = {}
+# The same row as a table, replacing the line above when filled:
+# [gitlab_routing.gitlab_public]
+# A cluster with egress to this GitLab.
+# kubernetes = "kubernetes"
+# A registry the jobs of this GitLab can reach.
+# harbor = "harbor"
 
 [gitlab_private]
 # The exact origin. A job URL on any other host is refused.

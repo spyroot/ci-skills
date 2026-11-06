@@ -5,6 +5,10 @@ and target documents consumed by those invocations. It does not execute code or
 resolve arbitrary helper calls. Synthetic origins apply only to their own
 invocation or target authority; receipt and assertion data are not operations.
 
+It also rejects a copy of a target-contract key or reason token as a string
+literal in any selected Python source other than the module that defines it
+(`contract_literals`). Docstrings are prose and are not checked.
+
 Author Mustafa Bayramov
 mbayramo@cisco.com
 spyroot@gmail.com
@@ -21,12 +25,19 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from itertools import product
 from pathlib import Path
+from types import MappingProxyType, ModuleType
 from typing import Final, Optional
 from urllib.parse import urlsplit
 
+from lib.python.core import catalog, endpoints
 from lib.python.core.endpoints import TARGET_CONTRACT, Role
 
 RUNTIME: Final = "__portability_runtime__"
+CONTRACT_LITERAL_RULE: Final = "contract_literal"
+CONTRACT_SELECTOR: Final = "contract"
+# A contract value matches only as a whole token: `gitlab_private` matches in
+# `[gitlab_private]` and `gitlab_private.url`, not inside `gitlab_private_x`.
+CONTRACT_TOKEN: Final = r"(?<![\w-]){value}(?![\w-])"
 MAX_SOURCE_BYTES: Final = 2 * 1024 * 1024
 MAX_NODES: Final = 100_000
 MAX_ALTERNATIVES: Final = 32
@@ -1140,6 +1151,121 @@ def scan_source(source: str, text: str) -> tuple[Finding, ...]:
         )
 
 
+def _owner(module: ModuleType) -> str:
+    """Name the repository path of one skill module.
+
+    :param module: Imported module under ``ci-skills/lib/python``.
+    :returns: Repository-relative POSIX path, such as
+        ``ci-skills/lib/python/core/endpoints.py``.
+    """
+    path = Path(str(module.__file__)).resolve()
+    skill = Path(endpoints.__file__).resolve().parents[3]
+    return path.relative_to(skill.parent).as_posix()
+
+
+def contract_literals() -> Mapping[str, str]:
+    """Map each owned target-contract literal to the module that defines it.
+
+    The values are read from the defining modules, so this gate holds no copy:
+    the GitLab instance and routing table names, the selection and routing
+    reason tokens, the deprecation event, and the ``--gitlab`` option.
+
+    :returns: Literal mapped to the repository path allowed to contain it.
+    """
+    instance_required = tuple(
+        endpoints.GITLAB_INSTANCE_REQUIRED.format(table=table)
+        for table in endpoints.GITLAB_SELECTORS.values()
+    )
+    pairing_unknown = tuple(
+        endpoints.GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+            routing=endpoints.GITLAB_ROUTING_TABLE, authority=authority
+        )
+        for authority in endpoints.GITLAB_ROUTED_AUTHORITIES
+    )
+    owned = (
+        *endpoints.GITLAB_SELECTORS.values(),
+        endpoints.GITLAB_ROUTING_TABLE,
+        endpoints.GITLAB_SELECTOR_CONFLICT,
+        endpoints.GITLAB_SELECTOR_UNKNOWN,
+        endpoints.GITLAB_SELECTION_REQUIRES_GITLAB,
+        endpoints.GITLAB_PROFILE_NAME_INVALID,
+        endpoints.GITLAB_PROFILE_UNKNOWN,
+        endpoints.GITLAB_PRIVATE_DECLARED_TWICE,
+        endpoints.GITLAB_ROUTING_DEFAULT_UNKNOWN,
+        endpoints.GITLAB_ROUTING_ROW_UNKNOWN,
+        endpoints.GITLAB_ROUTING_ROW_MISSING,
+        endpoints.GITLAB_DEPRECATION_EVENT,
+        *instance_required,
+        *pairing_unknown,
+    )
+    literals = dict.fromkeys(owned, _owner(endpoints))
+    literals[catalog.GITLAB_TARGET_OPTION] = _owner(catalog)
+    return MappingProxyType(literals)
+
+
+def _docstrings(tree: ast.AST) -> frozenset[int]:
+    """Identify docstring nodes, which are prose rather than values.
+
+    :param tree: Parsed module.
+    :returns: ``id`` of each module, class and function docstring constant.
+    """
+    owners = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+    return frozenset(
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, owners)
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    )
+
+
+def scan_contract_literals(
+    source: str, text: str, literals: Optional[Mapping[str, str]] = None
+) -> tuple[Finding, ...]:
+    """Reject copies of owned target-contract literals in one Python source.
+
+    :param source: Repository-relative Python source path.
+    :param text: UTF-8 source contents from the selected snapshot.
+    :param literals: Literal to owner path; ``contract_literals()`` when omitted.
+    :returns: One finding per offending line, or a parse finding.
+    """
+    owned = contract_literals() if literals is None else literals
+    checked = sorted(value for value, owner in owned.items() if owner != source)
+    if not checked:
+        return ()
+    pattern = re.compile(
+        "|".join(CONTRACT_TOKEN.format(value=re.escape(value)) for value in checked)
+    )
+    try:
+        tree = ast.parse(text, filename=source)
+    except (SyntaxError, ValueError) as exc:
+        return (
+            Finding(
+                source,
+                getattr(exc, "lineno", None) or 1,
+                "source_parse_error",
+                "source",
+            ),
+        )
+    prose = _docstrings(tree)
+    lines = sorted(
+        {
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in prose
+            and pattern.search(node.value)
+        }
+    )
+    return tuple(
+        Finding(source, line, CONTRACT_LITERAL_RULE, CONTRACT_SELECTOR)
+        for line in lines
+    )
+
+
 class PortabilityGate:
     """Inspect the existing blessing snapshot and its selected path inventory."""
 
@@ -1150,8 +1276,27 @@ class PortabilityGate:
         """
         self.root = root.resolve()
 
+    @staticmethod
+    def _operational(path: Path) -> bool:
+        """Select executable smoke and test sources for the selector rules.
+
+        :param path: Repository-relative source path.
+        :returns: True for a test or smoke source in a scanned language.
+        """
+        if (
+            not (path.parts and path.parts[0] == "tests")
+            and "smoke" not in path.stem.lower()
+        ):
+            return False
+        if path.suffix in DATA_SUFFIXES or path.parts[0] in {"docs", "inventory"}:
+            return False
+        return not path.suffix or path.suffix in SOURCE_SUFFIXES
+
     def run(self, paths: Sequence[str]) -> GateResult:
-        """Read only selected executable smoke and test sources.
+        """Read selected smoke and test sources, and every selected Python source.
+
+        Smoke and test sources get the selector rules; every Python source gets
+        the contract-literal rule.
 
         :param paths: Repository-relative paths from the existing NUL inventory.
         :returns: Checked sources and failures; missing or escaped sources fail closed.
@@ -1160,19 +1305,15 @@ class PortabilityGate:
         """
         checked = []
         findings = []
+        literals = contract_literals()
         for source in sorted(set(paths)):
             path = Path(source)
             if path.is_absolute() or ".." in path.parts:
                 findings.append(Finding(source, 0, "path_invalid", "source"))
                 continue
-            if (
-                not (path.parts and path.parts[0] == "tests")
-                and "smoke" not in path.stem.lower()
-            ):
-                continue
-            if path.suffix in DATA_SUFFIXES or path.parts[0] in {"docs", "inventory"}:
-                continue
-            if path.suffix and path.suffix not in SOURCE_SUFFIXES:
+            operational = self._operational(path)
+            contract = path.suffix == ".py"
+            if not (operational or contract):
                 continue
             checked.append(source)
             selected = self.root / path
@@ -1182,7 +1323,10 @@ class PortabilityGate:
                 text = selected.read_text(encoding="utf-8")
                 if not path.suffix and not text.startswith("#!"):
                     continue
-                findings.extend(scan_source(source, text))
+                if operational:
+                    findings.extend(scan_source(source, text))
+                if contract:
+                    findings.extend(scan_contract_literals(source, text, literals))
             except (OSError, UnicodeError):
                 findings.append(Finding(source, 0, "source_unreadable", "source"))
-        return GateResult(tuple(checked), tuple(findings))
+        return GateResult(tuple(checked), tuple(dict.fromkeys(findings)))

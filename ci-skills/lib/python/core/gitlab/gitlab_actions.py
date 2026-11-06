@@ -21,6 +21,7 @@ from typing import Optional, Union
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.cli import output_mode, parser
+from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
@@ -201,7 +202,7 @@ class ActionPlan(SkillAction):
         if self.kind == "gitlab_runner" and self.operation == "delete":
             data["runner_snapshot"] = self.runner_snapshot
         if self.routing is not None:
-            data["routing"] = self.routing.as_dict()
+            data[ROUTING_RESULT_KEY] = self.routing.as_dict()
         return plan_digest(data)
 
     def verified_target_id(
@@ -845,7 +846,7 @@ def _result(
     records = _array(fields.pop("records", []), "report_records")
     errors = _array(fields.pop("errors", []), "report_errors")
     routing: MutableMapping[str, JSONValue] = (
-        {"routing": plan.routing.as_dict()} if plan.routing is not None else {}
+        {ROUTING_RESULT_KEY: plan.routing.as_dict()} if plan.routing is not None else {}
     )
     return {
         "schema_version": ROUTED_RESULT_SCHEMA_VERSION,

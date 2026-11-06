@@ -877,3 +877,118 @@ def test_shell_declaration_assignments_preserve_selected_host_values(
         assert "host" in {finding.selector for finding in findings}
     else:
         assert findings == ()
+
+
+@pytest.fixture(scope="module")
+def contract() -> tuple[ModuleType, ModuleType]:
+    """Load the modules that define the contract values the gate protects.
+
+    :returns: ``core.endpoints`` and ``core.catalog`` from the repository skill.
+    """
+    return (
+        import_script_module("lib.python.core.endpoints"),
+        import_script_module("lib.python.core.catalog"),
+    )
+
+
+def _write_snapshot(root: Path, files: dict[str, str]) -> tuple[str, ...]:
+    """Write selected sources into a blessing snapshot root.
+
+    :param root: Snapshot root.
+    :param files: Repository-relative path mapped to source text.
+    :returns: The selected paths in input order.
+    """
+    for name, text in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return tuple(files)
+
+
+def test_contract_literals_outside_their_module_fail_with_line_numbers(
+    portability: ModuleType,
+    portability_schema: Draft202012Validator,
+    contract: tuple[ModuleType, ModuleType],
+    tmp_path: Path,
+) -> None:
+    """Reject a copied instance table name, reason token or option in code and tests.
+
+    :param portability: Shared gate implementation under test.
+    :param portability_schema: Validated repository-controlled output schema.
+    :param contract: Modules defining the protected values.
+    :param tmp_path: Snapshot root holding the selected sources.
+    :returns: None; assertions verify the rule, lines, selection and schema.
+    """
+    endpoints, catalog = contract
+    library = "ci-skills/lib/python/core/consumer.py"
+    test = "tests/python/test_consumer.py"
+    paths = _write_snapshot(
+        tmp_path,
+        {
+            library: (
+                '"""Read a target."""\n'
+                f'TABLE = "{endpoints.GITLAB_PUBLIC_TABLE}"\n'
+                f'FIELD = "{endpoints.GITLAB_PRIVATE_TABLE}.url"\n'
+            ),
+            test: (
+                f'REASON = "{endpoints.GITLAB_PRIVATE_DECLARED_TWICE}"\n'
+                f'ARGV = ["{catalog.GITLAB_TARGET_OPTION}", "x"]\n'
+                f'HEADER = "[{endpoints.GITLAB_ROUTING_TABLE}]"\n'
+            ),
+        },
+    )
+
+    record = portability.PortabilityGate(tmp_path).run(paths).record()
+
+    portability_schema.validate(record)
+    assert record["status"] == "FAIL"
+    assert set(record["checked_files"]) == {library, test}
+    contract_lines = {
+        (finding["source"], finding["line"])
+        for finding in record["findings"]
+        if finding["rule"] == portability.CONTRACT_LITERAL_RULE
+        and finding["selector"] == portability.CONTRACT_SELECTOR
+    }
+    assert contract_lines == {
+        (library, 2),
+        (library, 3),
+        (test, 1),
+        (test, 2),
+        (test, 3),
+    }
+
+
+def test_defining_modules_docstrings_and_constant_references_pass(
+    portability: ModuleType,
+    contract: tuple[ModuleType, ModuleType],
+    tmp_path: Path,
+) -> None:
+    """Allow the owner module, prose, interpolated constants and longer names.
+
+    :param portability: Shared gate implementation under test.
+    :param contract: Modules defining the protected values.
+    :param tmp_path: Snapshot root holding the selected sources.
+    :returns: None; assertions verify that no contract finding is reported.
+    """
+    endpoints, catalog = contract
+    owner = Path(endpoints.__file__).resolve()
+    owner_path = owner.relative_to(owner.parents[4]).as_posix()
+    paths = _write_snapshot(
+        tmp_path,
+        {
+            owner_path: f'TABLE = "{endpoints.GITLAB_PRIVATE_TABLE}"\n',
+            "tests/python/test_consumer.py": (
+                f'"""Read [{endpoints.GITLAB_PUBLIC_TABLE}] and nothing else."""\n'
+                "from lib.python.core.endpoints import GITLAB_PUBLIC_TABLE\n"
+                'HEADER = f"[{GITLAB_PUBLIC_TABLE}]"\n'
+                f'OPTION = "{catalog.GITLAB_PROFILE_OPTION}"\n'
+            ),
+            "docs/notes.md": f"[{endpoints.GITLAB_PRIVATE_TABLE}]\n",
+        },
+    )
+
+    result = portability.PortabilityGate(tmp_path).run(paths)
+
+    assert result.exit_code == 0
+    assert result.findings == ()
+    assert "docs/notes.md" not in result.checked_files

@@ -12,8 +12,9 @@ the live system at run time.
 accepts exactly these and `catalog.AUTHORITIES` is derived from it.
 
 GitLab is one authority, `gitlab`, declared by up to two instance tables:
-`[gitlab_private]` and `[gitlab_public]`. `[gitlab_routing]` names the default
-instance and the Kubernetes and Harbor tables paired with each instance. Table
+`[gitlab_private]` and `[gitlab_public]`. The optional `[gitlab_routing]` names
+the default instance (else `GITLAB_DEFAULT_INSTANCE`) and the Kubernetes and
+Harbor tables paired with each instance. Table
 names use `_`, never `.`: TOML reads `[gitlab.com]` as a table `com` nested in
 `[gitlab]`. The legacy `[gitlab]` table and its `[gitlab.NAME]` profiles are
 read for one release. The
@@ -39,13 +40,22 @@ from types import MappingProxyType
 from typing import Final, Optional, Union
 
 BARE_TOML_KEY: Final = re.compile(r"[A-Za-z0-9_-]+\Z")
+# Authority names: each is the top-level table of that authority in TARGET_CONTRACT.
+GITHUB_AUTHORITY: Final = "github"
+HARBOR_AUTHORITY: Final = "harbor"
+KUBERNETES_AUTHORITY: Final = "kubernetes"
 # The one GitLab authority and its two instance tables. `--gitlab` choices are
 # the keys of GITLAB_SELECTORS; each value is the table that choice reads.
 GITLAB_AUTHORITY: Final = "gitlab"
 GITLAB_PRIVATE_TABLE: Final = "gitlab_private"
 GITLAB_PUBLIC_TABLE: Final = "gitlab_public"
+GITLAB_PRIVATE_SELECTOR: Final = "private"
+GITLAB_PUBLIC_SELECTOR: Final = "public"
 GITLAB_SELECTORS: Final = MappingProxyType(
-    {"private": GITLAB_PRIVATE_TABLE, "public": GITLAB_PUBLIC_TABLE}
+    {
+        GITLAB_PRIVATE_SELECTOR: GITLAB_PRIVATE_TABLE,
+        GITLAB_PUBLIC_SELECTOR: GITLAB_PUBLIC_TABLE,
+    }
 )
 # The instance read when neither `--gitlab` nor `[gitlab_routing].default` names one.
 GITLAB_DEFAULT_INSTANCE: Final = GITLAB_PRIVATE_TABLE
@@ -56,7 +66,29 @@ GITLAB_LEGACY_PUBLIC_KEY: Final = "com"
 # one row per declared instance names its paired Kubernetes and Harbor tables.
 GITLAB_ROUTING_TABLE: Final = "gitlab_routing"
 GITLAB_ROUTING_DEFAULT_KEY: Final = "default"
-GITLAB_ROUTED_AUTHORITIES: Final = ("kubernetes", "harbor")
+GITLAB_ROUTED_AUTHORITIES: Final = (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY)
+# The result `routing` object: the GitLab table read, each routed table or null,
+# and how the instance was selected (ROUTING_SELECTED_BY_* or the caller's option).
+ROUTING_RESULT_KEY: Final = "routing"
+ROUTING_SELECTED_BY_KEY: Final = "selected_by"
+ROUTING_SELECTED_BY_DEFAULT: Final = "default"
+ROUTING_SELECTED_BY_LEGACY: Final = "legacy"
+ROUTING_ARGV_PREFIX: Final = "argv:"
+# Reason tokens of GitLab selection and routing. The two templates take a table
+# name, or the routing table and a routed authority.
+GITLAB_SELECTOR_CONFLICT: Final = "gitlab_selector_conflict"
+GITLAB_SELECTOR_UNKNOWN: Final = "gitlab_selector_unknown"
+GITLAB_SELECTION_REQUIRES_GITLAB: Final = "gitlab_profile_requires_gitlab_authority"
+GITLAB_PROFILE_NAME_INVALID: Final = "gitlab_profile_name_invalid"
+GITLAB_PROFILE_UNKNOWN: Final = "gitlab_profile_unknown"
+GITLAB_PRIVATE_DECLARED_TWICE: Final = "gitlab_private_declared_twice"
+GITLAB_ROUTING_DEFAULT_UNKNOWN: Final = "gitlab_routing_default_unknown"
+GITLAB_ROUTING_ROW_UNKNOWN: Final = "gitlab_routing_row_unknown"
+GITLAB_ROUTING_ROW_MISSING: Final = "gitlab_routing_row_missing"
+GITLAB_INSTANCE_REQUIRED: Final = "{table}_target_required"
+GITLAB_ROUTING_PAIRING_UNKNOWN: Final = "{routing}_{authority}_unknown"
+# One stderr diagnostic per load of the legacy shape (TD-11 removes it).
+GITLAB_DEPRECATION_EVENT: Final = "gitlab_target_deprecated"
 
 
 class Role(StrEnum):
@@ -359,7 +391,7 @@ class TargetContract:
 TARGET_CONTRACT = TargetContract(
     (
         Table(
-            "github",
+            GITHUB_AUTHORITY,
             Field.of(Role.ENDPOINT, "host", "repository")
             + Field.of(Role.ACCESS, "token_file")
             # The selected target declares which checks branch protection
@@ -377,14 +409,14 @@ TARGET_CONTRACT = TargetContract(
             instances=tuple(GITLAB_SELECTORS.values()),
         ),
         Table(
-            "harbor",
+            HARBOR_AUTHORITY,
             Field.of(Role.ENDPOINT, "url", "project")
             + Field.of(
                 Role.ACCESS, "credential_file", "username_file", "password_file"
             ),
         ),
         Table(
-            "kubernetes",
+            KUBERNETES_AUTHORITY,
             Field.of(Role.ENDPOINT, "context", "server")
             + Field.of(Role.ACCESS, "kubeconfig", "kubeconfigs"),
             (

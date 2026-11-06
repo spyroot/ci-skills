@@ -28,6 +28,7 @@ from lib.python.core.catalog import (
 from lib.python.core.cli import parser
 from lib.python.core.cli_api import APIError
 from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.harbor.registry_mirror import (
     HarborCallback,
@@ -497,7 +498,7 @@ class WorkflowAction(SkillAction):
         target = getattr(self, "target", None)
         routing = target.routing if target is not None else None
         if routing is not None:
-            output["routing"] = routing.as_dict()
+            output[ROUTING_RESULT_KEY] = routing.as_dict()
             output["schema_version"] = ROUTED_RESULT_SCHEMA_VERSION
         if executed or self.context.results:
             output["cleanup"] = {

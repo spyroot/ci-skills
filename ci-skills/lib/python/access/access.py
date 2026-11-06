@@ -16,6 +16,7 @@ from lib.python.access.gitlab import gitlab_access
 from lib.python.access.kubernetes import kubernetes_access
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
+from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -114,7 +115,7 @@ def check_access(
         "surfaces": {item.name: item.as_dict() for item in surfaces},
     }
     if target.routing is not None:
-        receipt["routing"] = target.routing.as_dict()
+        receipt[ROUTING_RESULT_KEY] = target.routing.as_dict()
     receipt.update(_bound_metadata(target))
     return receipt
 
@@ -174,5 +175,5 @@ def dry_run_access(
         "surfaces": surfaces,
     }
     if target.routing is not None:
-        receipt["routing"] = target.routing.as_dict()
+        receipt[ROUTING_RESULT_KEY] = target.routing.as_dict()
     return receipt

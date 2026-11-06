@@ -8,6 +8,7 @@ spyroot@gmail.com
 from enum import StrEnum
 from typing import Final
 
+from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.git.mirroring import MirrorPolicy
 
 KIND: Final = "gitlab_mirror"
@@ -233,7 +234,7 @@ class Field(StrEnum):
     TARGET_SOURCE = "target_source"
     REASON = "reason"
     SCHEMA_VERSION = "schema_version"
-    ROUTING = "routing"
+    ROUTING = ROUTING_RESULT_KEY
 
 
 class Outcome(StrEnum):

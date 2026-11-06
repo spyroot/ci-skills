@@ -96,7 +96,7 @@ $EDITOR ~/.ci-skills/target.toml
 
 Fill in the sections needed by the selected operation. GitLab-only commands need one instance table,
 `[gitlab_private]` or `[gitlab_public]`; `--gitlab private|public` selects the instance and its omission reads
-`[gitlab_routing].default`, else `[gitlab_private]`. Commands that also use Kubernetes or Harbor, such as the runner
+`[gitlab_routing].default`, else `[gitlab_private]`. Commands that require Kubernetes or Harbor, such as the runner
 manager, need the instance's `[gitlab_routing]` row. See
 [GitLab private and public targets](ci-skills/references/access.md#gitlab-private-and-public-targets).
 `access_check.py` checks configured providers; unrelated provider tables and tools are not required.

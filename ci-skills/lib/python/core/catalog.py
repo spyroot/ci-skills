@@ -1319,6 +1319,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "GitLab runner manager",
             "OpenShift SCC access",
             "GitLab runner",
+            "GitLab Agent connectivity",
         ),
         "required_tools": ("glab", "kubectl", "oc on OpenShift"),
         "returns": "A run ID and confirmed plan, or verified workload and exact "
@@ -1638,6 +1639,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "GitLab runner manager": {
             "summary": "Runner token, exact-node deployment, verification and cleanup.",
             "pointer": "references/gitlab-runner-manager.md",
+        },
+        "GitLab Agent connectivity": {
+            "summary": "When a cluster can attach to a GitLab project, KAS address and the planned attach flow.",
+            "pointer": "references/gitlab-agent.md",
         },
         "Native OCP YAML example": {
             "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",

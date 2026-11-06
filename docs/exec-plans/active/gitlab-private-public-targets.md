@@ -16,6 +16,10 @@ request, three questions:
 - which Kubernetes cluster pairs with each GitLab;
 - which Harbor registry pairs with each GitLab.
 
+The split exists because a person's own GitLab and GitLab SaaS offer different capabilities, so a caller chooses, per
+command, which instance it runs against. Each instance is paired with its own Kubernetes and Harbor, or with none,
+through `[gitlab_routing]`, and the `routing` object in every result shows which instance ran.
+
 GitLab action, `access_check`, `gitlab_mirror`, `gitlab_runner_manager` and `image_build_readiness chain` results,
 offline plans included, report that answer in one `routing` object (DEC-15), and the human view prints it on one line.
 A result produced before the target file loads, such as a selection failure, has no `routing`. To see it work, run
@@ -131,15 +135,22 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   contract schemas' enums. Keeping it leaves all of them unchanged. Two separate authorities would roughly triple the
   files touched and add enum values to `schemas/command-contract.schema.json` and `schemas/skill-manifest.schema.json`,
   a MINOR change under `docs/phases/CI07-SCHEMA.md`, in every consumer of those enums.
-  Governing Ref: issue #133; `docs/phases/CI07-SCHEMA.md` MAJOR/MINOR rules.
+  Governing Ref: issue #133; `docs/phases/CI07-SCHEMA.md` MAJOR/MINOR rules; team answers "remeber gitlab saas allow
+  you do more" and "that way we need that split".
 - Decision DEC-02: A single `[gitlab_routing]` table declares the default GitLab and the Kubernetes and Harbor tables
   that pair with each GitLab.
   Status: ACCEPTED
   Rationale: One place answers the default and both pairings before any call. GitLab, Kubernetes and Harbor tables
-  keep only endpoint, access and value fields.
+  keep only endpoint, access and value fields. A row is the person's own declaration; no key, host or code rule
+  infers one. Example: the template and the user target declare `gitlab_public = {}`, so `gitlab_runner_manager.py
+  deploy --gitlab public` returns BLOCKED `target is missing required authority tables: harbor, kubernetes` before any
+  provider call, and its `--dry-run` shows the same result. A task the selected instance itself refuses, such as a
+  permission or feature limit on GitLab SaaS, comes back as a structured BLOCKED built from that instance's answer.
   Governing Ref: issue #133 Expected section; recorded answers "One routing table" and "so we need elegant solution so
   on call side , prior any call back even called it should answer what is default ? for gitlab private what harbor ?
-  what k8s ? so propose show me toml" (queue record `handoff.operatorAnswers`).
+  what k8s ? so propose show me toml" (queue record `handoff.operatorAnswers`); team answers "remeber gitlab saas
+  allow you do more", "that way we need that split" and "2 some task in public gitlab you can not do , i.e user for
+  example indicate his public github and private harbor < make no sense".
 - Decision DEC-03: The CLI selector is `--gitlab private|public`. Its choices and its table mapping come from the
   contract constants. Omitting it selects `[gitlab_routing].default`; when the table or its `default` is absent, it
   selects `GITLAB_DEFAULT_INSTANCE`, which is `gitlab_private`. An explicit `default` naming a declared instance is
@@ -175,9 +186,16 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - Decision DEC-07: Every new name is defined once, as a constant in `ci-skills/lib/python/core/endpoints.py`. The
   catalog, parser, help text, result fields, tests and docs derive from those constants or are checked against them.
   Status: ACCEPTED
-  Rationale: Repository rule: define constant strings once. Reason tokens are constants in `core/target.py`.
+  Rationale: Repository rule: define constant strings once. The authority names, the selector values, the routing
+  result keys and values, and the selection and routing reason tokens are `Final` constants in `core/endpoints.py`;
+  `core/target.py` imports them. Tests import the same constants and build every target from them through one
+  builder in `tests/python/conftest.py`; this replaces the earlier review note that literal table names in tests are
+  allowed. `tools/skillkit/portability_gate.py` rejects a copy of these values as a string literal in any selected
+  Python source outside the defining module (rule `contract_literal`).
   Governing Ref: pinned Standards `docs/agents/contracts/software-design.md` (revision `5bd31f1`), hardcoded-value
-  rule; recorded answer "this name need define in entier code once as const".
+  rule; recorded answer "this name need define in entier code once as const"; team answers "it need define in 1 place
+  in code no test should hardcode this value no code should do this it const and final and it must define read code
+  follow same standard do no bypass my interface I go mental" and "do not brake abstraction".
 - Decision DEC-08: `project`, `group` and `runner_id` stay optional in each GitLab instance table, exactly as in the
   flat table today. When `project` is absent the caller passes `--project`; `project = ""` stays rejected. Examples
   and the template omit `project`, so the caller always names the project.
@@ -197,9 +215,12 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   `gitlab_public` when `[gitlab_public]` is absent. On the issue #133 shape, `--gitlab private` reads `[gitlab]` and
   `--gitlab public` reads `[gitlab.com]`; `routing.gitlab` names the table read (`gitlab`, `gitlab.com`). The match is
   by the table key `com`, the constant `GITLAB_LEGACY_PUBLIC_KEY` in `core/endpoints.py`; no URL is inspected.
-  Without `[gitlab_routing]`, legacy routes report `kubernetes` and `harbor` as `null` and a command that requires them
-  reads `[kubernetes]` and `[harbor]` directly, as before this change. With `[gitlab_routing]`, the row of the
-  instance pairs them.
+  Without `[gitlab_routing]`, legacy routes report `kubernetes` and `harbor` as `null`. A command that requires them
+  reads `[kubernetes]` and `[harbor]` directly only when the caller gives no `--gitlab` (no selector, or
+  `--gitlab-profile`), which is how these invocations behaved before this change; with `--gitlab private|public` it
+  blocks with the missing-tables reason, so `--gitlab public` never pairs GitLab SaaS with the person's cluster by
+  default (DEC-02). With `[gitlab_routing]`, the row of the instance pairs them. The deprecation event's `table`
+  names the legacy table.
   Status: ACCEPTED
   Rationale: The answer names both legacy tables. The reviewed plan's line "No silent mapping of `[gitlab.com]` to
   public" is replaced by this answer: the mapping is one named constant, applies only when `gitlab_public` is
@@ -253,12 +274,20 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   - How CI14 reads routing: `gitlab_agent.py` passes `GitLabSelection.from_args` to the shared resolver and reads
     `Target.routing.kubernetes`. It adds no cluster selector of its own, so CI14 does not get a second routing
     authority.
+  - Reachability: whether the routed cluster can open a connection to the selected GitLab's KAS address is an
+    infrastructure fact. The planned command checks it live, read only, before any registration, and returns BLOCKED
+    naming the missing egress. A cluster with no outbound path can attach only to a self-managed GitLab that can
+    reach it (receptive agent, Ultimate), never to GitLab.com. Facts and sources:
+    `ci-skills/references/gitlab-agent.md`. Not implemented in #141.
   Conflict, recorded and not resolved: `docs/phases/CI14-GITLAB-CONNECTIONS.md:76` says "No new target key is
   authorized by this phase." DEC-14 adds no target key. A later change that adds a GitLab Agent key to
   `[gitlab_routing]`, for example `gitlab_routing.<instance>.agent`, falls under that line and needs approval.
   Governing Ref: [CI14-M2](ci14-gitlab-connections.md#ci14-m2-resolve-d2-and-deliver-the-agent-workflow);
   `docs/phases/CI14-GITLAB-CONNECTIONS.md:66-67,76`; docs.gitlab.com `user/clusters/agent/install`,
-  `user/clusters/agent/ci_cd_workflow`, `api/cluster_agents`.
+  `user/clusters/agent/ci_cd_workflow`, `api/cluster_agents`; team answer "same I think in saas you can not attac
+  private hosted k8s. (I might wrong ) or it need different semantic or need something from k8s < ie from infra I
+  don't know , read context7 read reference , our skill suppose to give this without reading online entire point of
+  reference <".
 - Decision DEC-15: `routing` is carried by GitLab action results (`gitlab-action`, `gitlab-runner-tag`, `-read`,
   `-delete` schemas), `access_check`, `gitlab_mirror`, `gitlab_runner_manager` (`toolbox-workflow` schema) and
   `image_build_readiness chain`. `gitlab_job`, `gitlab_job list`, `gitlab_pipeline` get and `gitlab_pipeline watch`
@@ -284,8 +313,8 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   Governing Ref: team answer to review finding F33, relayed with the section C answers; DEC-02; DEC-18.
 - Decision DEC-18: A command that requires a routed authority reads the table the selected `[gitlab_routing]` row
   names. A row that omits it, or a target without `[gitlab_routing]`, blocks with the existing `target is missing
-  required authority tables: <names>`. Optional authorities, and legacy routes on a target without `[gitlab_routing]`,
-  read the authority's own table.
+  required authority tables: <names>`. Optional authorities, and legacy routes on a target without `[gitlab_routing]`
+  when the caller gives no `--gitlab` (DEC-10), read the authority's own table.
   Status: ACCEPTED
   Rationale: Issue #133 requires fail-closed selection, and an omitted pairing is the only case where the row carries
   information while one table per authority exists. No new reason token.
@@ -383,7 +412,17 @@ attached to a cluster: the project and the cluster are the person's, named in th
       PASS | BLOCKED <reason and missing prerequisite> | PARTIAL <what exists, what is missing>
 
 The command name `gitlab_agent.py` and its flags are PROPOSED (CI14 D3); the modes follow the existing mirror pattern
-(`--live-plan`, `--apply`, `--confirm-plan`) and `--describe`.
+(`--live-plan`, `--apply`, `--confirm-plan`) and `--describe`. The full sequence diagram, the value-source table, the
+table of when an attach is possible and the project YAML live in `ci-skills/references/gitlab-agent.md`, which ships
+with the skill so an AI agent reads them offline.
+
+A `[gitlab_routing]` row is the person's declaration, and some pairings make no sense. GitLab SaaS hosted runners
+cannot pull from a Harbor behind the person's DMZ, so the template and the user target keep `gitlab_public = {}`.
+A command that needs Kubernetes or Harbor with `--gitlab public` then returns BLOCKED with the missing-tables reason
+before any provider call. A GitLab.com project can still use the person's lab cluster through a GitLab Agent or a
+self-managed runner in that cluster when the cluster has egress to GitLab.com; the person fills the row for that case.
+Team answer: "2 some task in public gitlab you can not do , i.e user for example indicate his public github and
+private harbor < make no sense".
 
 The GitLab Agent for Kubernetes is the other way a GitLab project reaches a cluster, besides a runner. It is planned
 in [CI14-M2](ci14-gitlab-connections.md#ci14-m2-resolve-d2-and-deliver-the-agent-workflow) and not delivered. A
@@ -516,9 +555,16 @@ it.
     GITLAB_ROUTING_TABLE: Final = "gitlab_routing"
     GITLAB_ROUTING_DEFAULT_KEY: Final = "default"
     GITLAB_SELECTORS: Final = MappingProxyType({"private": GITLAB_PRIVATE_TABLE, "public": GITLAB_PUBLIC_TABLE})
-    GITLAB_ROUTED_AUTHORITIES: Final = ("kubernetes", "harbor")
+    GITLAB_ROUTED_AUTHORITIES: Final = (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY)
     GITLAB_DEFAULT_INSTANCE: Final = GITLAB_PRIVATE_TABLE
     GITLAB_LEGACY_PUBLIC_KEY: Final = "com"
+    GITHUB_AUTHORITY, HARBOR_AUTHORITY, KUBERNETES_AUTHORITY          # authority table names
+    GITLAB_PRIVATE_SELECTOR: Final = "private"; GITLAB_PUBLIC_SELECTOR: Final = "public"
+    ROUTING_RESULT_KEY: Final = "routing"; ROUTING_SELECTED_BY_KEY: Final = "selected_by"
+    ROUTING_SELECTED_BY_DEFAULT, ROUTING_SELECTED_BY_LEGACY, ROUTING_ARGV_PREFIX
+    GITLAB_INSTANCE_REQUIRED: Final = "{table}_target_required"
+    GITLAB_ROUTING_PAIRING_UNKNOWN: Final = "{routing}_{authority}_unknown"
+    GITLAB_SELECTOR_CONFLICT, ..., GITLAB_ROUTING_ROW_MISSING, GITLAB_DEPRECATION_EVENT   # reason tokens
 
 MODIFIED `TARGET_CONTRACT` in the same file. `Table(GITLAB_AUTHORITY, ...)` keeps its fields (`url`, `project`,
 `group`, `token_file`, `runner_id`) and gains `instances=tuple(GITLAB_SELECTORS.values())`. Its
@@ -544,7 +590,6 @@ INTRODUCED in `ci-skills/lib/python/core/target.py`:
     class GitLabRouting:
         default: str
         routes: Mapping[str, GitLabRoute]
-        declared: bool              # whether the target declares [gitlab_routing]
         @classmethod
         def parse(cls, data: Mapping[str, object], instances: Mapping[str, str]) -> Self: ...
         def select(self, selection: GitLabSelection) -> GitLabRoute: ...
@@ -608,7 +653,11 @@ MODIFIED `ci-skills/lib/python/core/schema.py`: `specification_validator(name)` 
 that `validate_specification` uses, so tests resolve sibling `$ref`s locally.
 
 MODIFIED `tools/skillkit/endpoint_gate.py` (the `undocumented` rule folds instance paths through `canonical_path`),
-`tools/skillkit/portability_gate.py` (headers from `TargetContract.tables`; `[gitlab_routing]` values are not hosts)
+`tools/skillkit/portability_gate.py` (headers from `TargetContract.tables`; `[gitlab_routing]` values are not hosts;
+rule `contract_literal`: a GitLab instance or routing table name, a selection or routing reason token, the
+deprecation event or `--gitlab` as a string literal in any selected Python source outside `core/endpoints.py` or, for
+the option, `core/catalog.py`; docstrings are exempt; `schemas/ci_skills_portability.schema.json` gains the rule and
+the selector `contract`)
 and `tools/check_live_acceptance.py` (`RECEIPT_SCHEMA_VERSIONS` from the catalog constants).
 
 INTRODUCED `tools/skillkit/mirror_qualification.py` and its thin adapter `tools/qualify_mirror.py`, with
@@ -645,8 +694,11 @@ its existing metaschema check.
 
 MODIFIED docs:
 
-- `target.toml.template`: the new shape, with no `project` default.
+- `target.toml.template`: the new shape, with no `project` default and `gitlab_public = {}`.
 - `ci-skills/references/access.md`: the section "GitLab private and public targets", including the `_` rule.
+- INTRODUCED `ci-skills/references/gitlab-agent.md`: GitLab Agent and KAS connectivity facts with sources, the
+  planned attach flow, and when a routing row makes sense; indexed as "GitLab Agent connectivity" in
+  `core/catalog.py` and listed under `gitlab_runner_manager.py`.
 - `README.md`, `ci-skills/SKILL.md`, `ci-skills/references/gitlab-pipeline.md`.
 - `docs/2026-10-31/live-smoke-inventory.md`, `docs/exec-plans/active/ci15-runner-workflows.md`.
 - `docs/phases/CI11-TOOLS.md`, `docs/phases/CI09-REFERENCE.md`: one pointer line each.
@@ -695,7 +747,7 @@ Acceptance is the installed behavior against a target of this shape:
     [gitlab_routing]
     default = "gitlab_private"
     gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
-    gitlab_public  = { kubernetes = "kubernetes", harbor = "harbor" }
+    gitlab_public  = {}
 
     [gitlab_private]
     url = "https://gitlab.example.test"
@@ -727,25 +779,28 @@ Expected results:
   `routing.gitlab` `gitlab.com` and `selected_by` `argv:--gitlab=public`.
 - `[gitlab]` fields beside `[gitlab_private]` return `BLOCKED` with `gitlab_private_declared_twice`.
 
-A combined command reads the cluster and registry the route pairs. From the directory holding the target and a token
-file `runner.token`:
+A combined command reads the cluster and registry the route pairs. From the directory holding the target, the token
+files it names and a runner token file `runner.token`:
 
     CI_SKILLS_TARGET=$PWD/target.toml python ci-skills/bin/gitlab_runner_manager.py deploy --dry-run --json \
-        --gitlab public --project team/app --node worker-a --token-file runner.token --runner-id 73 \
-        --image harbor.example.test/example/runner@sha256:<64 hex digits>
+        --gitlab private --project team/app --node worker-a --token-file runner.token --runner-id 73 \
+        --description d --tag t --image harbor.example.test/example/runner@sha256:<64 hex digits>
 
 Expected: `"status": "DRY_RUN"`, `"schema_version": "1.1"` and
 
-    "routing": {"gitlab": "gitlab_public", "kubernetes": "kubernetes", "harbor": "harbor",
-                "selected_by": "argv:--gitlab=public"}
+    "routing": {"gitlab": "gitlab_private", "harbor": "harbor", "kubernetes": "kubernetes",
+                "selected_by": "argv:--gitlab=private"}
 
-With `gitlab_public = {}` the same command returns `BLOCKED` with `target is missing required authority tables:
-harbor, kubernetes`. The cluster and registry endpoints appear in the access dry run:
+With `--gitlab public` and the row `gitlab_public = {}`, the same command returns `BLOCKED` with `target is missing
+required authority tables: harbor, kubernetes` and no `routing`, before any provider call. `access_check.py` reads
+Kubernetes as an optional authority, from its own table:
 
     CI_SKILLS_TARGET=$PWD/target.toml python ci-skills/bin/access_check.py --dry-run --json --gitlab public
 
-Expected: `"routing"` as above and `"surfaces"` targets `{"gitlab": "https://gitlab.second.example.test",
-"kubernetes": "admin-context -> https://api.cluster.example.test:6443"}`.
+Expected: `"routing": {"gitlab": "gitlab_public", "harbor": null, "kubernetes": null, "selected_by":
+"argv:--gitlab=public"}` and `"surfaces"` targets `{"gitlab": "https://gitlab.second.example.test", "kubernetes":
+"admin-context -> https://api.cluster.example.test:6443"}`. Observed on the working tree on 2026-11-06 with these
+inputs.
 
 ## Idempotence and Recovery
 
@@ -776,7 +831,7 @@ In `ci-skills/lib/python/core/target.py`, the following must exist at the end:
                     gitlab_profile: Optional[str] = None) -> Target
     class GitLabSelection: from_args(args) -> Self; requested; selected_by; validate()
     class GitLabRoute: legacy; table_for(authority) -> Optional[str]; as_dict(); selection_source(source)
-    class GitLabRouting: default; routes; declared; parse(data, instances) -> Self; select(selection) -> GitLabRoute;
+    class GitLabRouting: default; routes; parse(data, instances) -> Self; select(selection) -> GitLabRoute;
         route_for(table) -> Optional[GitLabRoute]
 
 In `ci-skills/lib/python/core/endpoints.py`, the constants listed in Concrete Steps, `TargetContract.authority_of`,

@@ -51,7 +51,7 @@ resolve only their declared authority: GitLab for a job, or Kubernetes for
 storage, events, Cilium, and Ceph. Diagnostic reports use `access` to report the
 effective source and identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
 target needs only one instance table, `[gitlab_private]` or `[gitlab_public]`;
-`--gitlab private|public` selects it, and a command that also uses Kubernetes or
+`--gitlab private|public` selects it, and a command that requires Kubernetes or
 Harbor reads the instance's `[gitlab_routing]` row (see `references/access.md`).
 The selected target file never inherits missing tables from a lower tier. For a
 selected GitLab operation, its command also reads back GitLab identity and target
