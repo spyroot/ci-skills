@@ -30,8 +30,8 @@ The default chart's service account has cluster-admin. Source: docs.gitlab.com `
   with a relative URL root. Source: `administration/clusters/kas`.
 
 On a self-managed GitLab the administrator sets up KAS; the Linux package installs it by default. From 19.5, new Linux
-package and Helm chart installations advertise `grpcs://`. ci-skills reads the address from the selected GitLab at
-run time; it never derives it from the target key or host.
+package and Helm chart installations advertise `grpcs://`. The planned command will read the address from the selected
+GitLab at run time and will not derive it from the target key or host.
 
 ## What the cluster side needs
 

@@ -1243,8 +1243,24 @@ def test_required_routed_authority_reads_the_route_pairing(
                 KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
             },
             SELECT_PROFILE,
+            MISSING_ROUTED,
             None,
-            _routing(LEGACY_PUBLIC, None, None, ARGV_PROFILE),
+        ),
+        (
+            {
+                **issue_target(),
+                legacy_profile(UNKNOWN_INSTANCE): PUBLIC.fields(),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            GitLabSelection(profile=UNKNOWN_INSTANCE),
+            None,
+            _routing(
+                legacy_profile(UNKNOWN_INSTANCE),
+                None,
+                None,
+                f'{ROUTING_ARGV_PREFIX}{GITLAB_PROFILE_OPTION}="{UNKNOWN_INSTANCE}"',
+            ),
         ),
         (
             {
@@ -1321,7 +1337,8 @@ def test_required_routed_authority_reads_the_route_pairing(
     ),
     ids=(
         "legacy-unrouted-no-selector-reads-tables",
-        "legacy-unrouted-profile-reads-tables",
+        "legacy-unrouted-public-profile-blocks",
+        "legacy-unrouted-other-profile-reads-tables",
         "legacy-unrouted-private-selector-blocks",
         "legacy-unrouted-public-selector-blocks",
         "legacy-profile-reads-its-routing-row",
@@ -1341,7 +1358,8 @@ def test_combined_command_reads_the_routed_tables_or_blocks(
     """Load GitLab, Kubernetes and Harbor as a runner deploy requires them.
 
     A legacy target without a routing table reads Kubernetes and Harbor directly
-    only when no ``--gitlab`` selector was given. A legacy profile reads the
+    only when no ``--gitlab`` selector was given and the legacy table read does
+    not answer the public instance. A legacy profile reads the
     row of the instance it answers; a profile that answers no instance pairs
     nothing.
 
@@ -2136,6 +2154,54 @@ def test_template_public_instance_cannot_deploy_a_runner_into_private_tables(
         assert [error["reason"] for error in data["errors"]] == [reason]
         assert ROUTING_RESULT_KEY not in data
     assert live["errors"] == dry["errors"]
+    assert read_journal(call_journal) == []
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (SELECT_PROFILE, SELECT_PUBLIC),
+    ids=("legacy-public-profile", "public-selector"),
+)
+def test_issue_shape_public_gitlab_cannot_deploy_a_runner_into_private_tables(
+    target_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    selection: GitLabSelection,
+) -> None:
+    """Block a runner deploy for the issue #133 public table on an unrouted target.
+
+    ``[gitlab.com]`` answers the public instance, so the deprecated profile and
+    ``--gitlab public`` block alike instead of reading the person's Kubernetes
+    and Harbor tables.
+
+    :param target_path: Path receiving the issue #133 shaped target.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :param selection: Deprecated profile or instance selector of the public table.
+    :returns: None; assertions verify the dry run blocks before any provider call.
+    """
+    tables = {
+        **issue_target(),
+        HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+        KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+    }
+    write_target(target_path, tables)
+
+    code, data = _runner_deploy(
+        target_path,
+        tables[HARBOR_AUTHORITY],
+        fake_bin,
+        providers,
+        "--dry-run",
+        *_selection_argv(selection),
+    )
+
+    assert code == 2
+    assert data["status"] == "BLOCKED"
+    assert [error["reason"] for error in data["errors"]] == [MISSING_ROUTED]
+    assert ROUTING_RESULT_KEY not in data
     assert read_journal(call_journal) == []
 
 

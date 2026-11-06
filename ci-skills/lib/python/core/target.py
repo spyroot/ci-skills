@@ -2,9 +2,9 @@
 
 GitLab is read from one instance table, ``[gitlab_private]`` or
 ``[gitlab_public]``, chosen by ``--gitlab private|public``, else by the optional
-``[gitlab_routing].default``, else ``GITLAB_DEFAULT_INSTANCE``. A command that
-requires Kubernetes or Harbor with GitLab reads the tables the selected
-``[gitlab_routing]`` row names. The legacy ``[gitlab]`` table and its
+``[gitlab_routing].default``, else ``GITLAB_DEFAULT_INSTANCE``. When GitLab is
+selected, a command that requires Kubernetes or Harbor reads the tables the
+selected ``[gitlab_routing]`` row names; an optional authority reads its own table. The legacy ``[gitlab]`` table and its
 ``[gitlab.NAME]`` profiles are read for one release and write one
 ``gitlab_target_deprecated`` event.
 
@@ -70,12 +70,14 @@ if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
     from lib.python.core.provenance import SkillIdentity
 
-# Provenance of a GitLab route that no caller selector chose.
-SELECTED_BY_DEFAULT: Final = ROUTING_SELECTED_BY_DEFAULT
-SELECTED_BY_LEGACY: Final = ROUTING_SELECTED_BY_LEGACY
-ARGV_PREFIX: Final = ROUTING_ARGV_PREFIX
 GITLAB_DEPRECATION_STATUS: Final = "DEPRECATED"
 GITLAB_DEPRECATION_COMPONENT: Final = "target"
+# Detail keys of the deprecation event: the legacy table read and its replacement.
+GITLAB_DEPRECATION_TABLE_KEY: Final = "table"
+GITLAB_DEPRECATION_REPLACEMENT_KEY: Final = "replacement"
+# Parsed-namespace attributes of the two selector options.
+GITLAB_TARGET_DEST: Final = GITLAB_TARGET_OPTION.removeprefix("--").replace("-", "_")
+GITLAB_PROFILE_DEST: Final = GITLAB_PROFILE_OPTION.removeprefix("--").replace("-", "_")
 MISSING_AUTHORITY_TABLES: Final = "target is missing required authority tables: "
 # A dotted header such as [gitlab.com] is a nested table, not a host name.
 NESTED_TABLE_DIAGNOSTIC: Final = (
@@ -213,7 +215,10 @@ class GitLabSelection:
         :param args: Parsed namespace; absent options select nothing.
         :returns: Selection carrying the caller's options.
         """
-        return cls(getattr(args, "gitlab", None), getattr(args, "gitlab_profile", None))
+        return cls(
+            getattr(args, GITLAB_TARGET_DEST, None),
+            getattr(args, GITLAB_PROFILE_DEST, None),
+        )
 
     @property
     def requested(self) -> bool:
@@ -231,9 +236,9 @@ class GitLabSelection:
             or ``None`` when the caller named nothing.
         """
         if self.selector is not None:
-            return f"{ARGV_PREFIX}{GITLAB_TARGET_OPTION}={self.selector}"
+            return f"{ROUTING_ARGV_PREFIX}{GITLAB_TARGET_OPTION}={self.selector}"
         if self.profile is not None:
-            return f"{ARGV_PREFIX}{GITLAB_PROFILE_OPTION}={json.dumps(self.profile)}"
+            return f"{ROUTING_ARGV_PREFIX}{GITLAB_PROFILE_OPTION}={json.dumps(self.profile)}"
         return None
 
     def validate(self) -> None:
@@ -319,7 +324,7 @@ class GitLabRoute:
         :param source: File or binding selection provenance.
         :returns: ``source`` with the caller's option appended when one was given.
         """
-        if self.selected_by.startswith(ARGV_PREFIX):
+        if self.selected_by.startswith(ROUTING_ARGV_PREFIX):
             return f"{source};{self.selected_by}"
         return source
 
@@ -362,7 +367,7 @@ class GitLabRouting:
         """  # noqa: DOC502 - Shared table parser validates each row.
         if GITLAB_ROUTING_TABLE not in data:
             routes = {
-                name: GitLabRoute(table, None, None, SELECTED_BY_DEFAULT)
+                name: GitLabRoute(table, None, None, ROUTING_SELECTED_BY_DEFAULT)
                 for name, table in instances.items()
             }
             return cls(GITLAB_DEFAULT_INSTANCE, MappingProxyType(routes))
@@ -398,7 +403,7 @@ class GitLabRouting:
                     raise TargetError(cls.pairing_unknown(authority))
                 paired[authority] = value
             routes[instance] = GitLabRoute(
-                gitlab=source, selected_by=SELECTED_BY_DEFAULT, **paired
+                gitlab=source, selected_by=ROUTING_SELECTED_BY_DEFAULT, **paired
             )
         return cls(str(default), MappingProxyType(routes))
 
@@ -418,7 +423,7 @@ class GitLabRouting:
             raise TargetError(self.instance_required(instance))
         route = self.routes[instance]
         selected_by = selection.selected_by or (
-            SELECTED_BY_LEGACY if route.legacy else SELECTED_BY_DEFAULT
+            ROUTING_SELECTED_BY_LEGACY if route.legacy else ROUTING_SELECTED_BY_DEFAULT
         )
         return replace(route, selected_by=selected_by)
 
@@ -1154,7 +1159,7 @@ def _select_gitlab(
         name,
         paired.kubernetes if paired else None,
         paired.harbor if paired else None,
-        selection.selected_by or SELECTED_BY_LEGACY,
+        selection.selected_by or ROUTING_SELECTED_BY_LEGACY,
     )
     return _table_settings(data, name), route
 
@@ -1260,9 +1265,11 @@ def _load_gitlab(
                     or getattr(settings, "dry_run", False)
                 ),
                 details={
-                    "table": route.gitlab if route.legacy else GITLAB_AUTHORITY,
+                    GITLAB_DEPRECATION_TABLE_KEY: (
+                        route.gitlab if route.legacy else GITLAB_AUTHORITY
+                    ),
                     ROUTING_SELECTED_BY_KEY: route.selected_by,
-                    "replacement": GITLAB_REPLACEMENT,
+                    GITLAB_DEPRECATION_REPLACEMENT_KEY: GITLAB_REPLACEMENT,
                 },
             )
         except OSError:
@@ -1434,11 +1441,11 @@ def _parse_github(
     :returns: Concrete github configuration with its declared optional fields.
     :raises TargetError: A required field, selector, path, or table entry is invalid.
     """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
-    github = _table(value, "github", TARGET_CONTRACT.names("github"))
-    github_host = _string(github, "host", "github").lower()
+    github = _table(value, GITHUB_AUTHORITY, TARGET_CONTRACT.names(GITHUB_AUTHORITY))
+    github_host = _string(github, "host", GITHUB_AUTHORITY).lower()
     if "." not in github_host or "/" in github_host or ":" in github_host:
         raise TargetError("github.host must be a full hostname")
-    repository = _string(github, "repository", "github")
+    repository = _string(github, "repository", GITHUB_AUTHORITY)
     if len(repository.split("/")) != 2 or any(
         not part for part in repository.split("/")
     ):
@@ -1464,8 +1471,8 @@ def _parse_harbor(
     :returns: Concrete harbor configuration with its declared optional fields.
     :raises TargetError: A required field, selector, path, or table entry is invalid.
     """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
-    harbor = _table(value, "harbor", TARGET_CONTRACT.names("harbor"))
-    url, host = _https_url(_string(harbor, "url", "harbor"), "harbor.url")
+    harbor = _table(value, HARBOR_AUTHORITY, TARGET_CONTRACT.names(HARBOR_AUTHORITY))
+    url, host = _https_url(_string(harbor, "url", HARBOR_AUTHORITY), "harbor.url")
     files = {
         key: _optional_file(harbor, key, skill_root, target_directory=target_directory)
         for key in ("credential_file", "username_file", "password_file")
@@ -1476,7 +1483,9 @@ def _parse_harbor(
         combined and any(files[key] for key in ("username_file", "password_file"))
     ):
         raise TargetError("harbor_credential_selection_invalid")
-    return HarborTarget(url, host, _string(harbor, "project", "harbor"), **files)
+    return HarborTarget(
+        url, host, _string(harbor, "project", HARBOR_AUTHORITY), **files
+    )
 
 
 def _parse_kubernetes(value: object, skill_root: Path) -> KubernetesTarget:
@@ -1487,16 +1496,18 @@ def _parse_kubernetes(value: object, skill_root: Path) -> KubernetesTarget:
     :returns: Concrete kubernetes configuration with its declared optional fields.
     :raises TargetError: A required field, selector, path, or table entry is invalid.
     """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
-    kubernetes = _table(value, "kubernetes", TARGET_CONTRACT.names("kubernetes"))
+    kubernetes = _table(
+        value, KUBERNETES_AUTHORITY, TARGET_CONTRACT.names(KUBERNETES_AUTHORITY)
+    )
     server, _ = _https_url(
-        _string(kubernetes, "server", "kubernetes"), "kubernetes.server"
+        _string(kubernetes, "server", KUBERNETES_AUTHORITY), "kubernetes.server"
     )
     kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
     kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
     if kubeconfig and kubeconfigs:
         raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
     return KubernetesTarget(
-        context=_string(kubernetes, "context", "kubernetes"),
+        context=_string(kubernetes, "context", KUBERNETES_AUTHORITY),
         server=server,
         kubeconfig=kubeconfig,
         kubeconfigs=kubeconfigs,
@@ -1534,6 +1545,31 @@ def _select_surfaces(
     return selected
 
 
+def _legacy_compat(
+    data: Mapping[str, object],
+    selection: GitLabSelection,
+    gitlab_target: Optional[GitLabTarget],
+) -> bool:
+    """Decide whether a legacy route reads Kubernetes and Harbor tables directly.
+
+    That holds only on a target without ``[gitlab_routing]``, for a caller that
+    gave no ``--gitlab``, and for a legacy table that does not answer
+    ``gitlab_public``: the public instance is never paired with the person's
+    tables by default, whichever option selected it.
+
+    :param data: Complete parsed target file.
+    :param selection: Caller's selection.
+    :param gitlab_target: Selected GitLab target, or ``None`` when unselected.
+    :returns: True when the legacy direct read applies.
+    """  # noqa: DOC502 - The instance map validates the legacy table.
+    if GITLAB_ROUTING_TABLE in data or selection.selector is not None:
+        return False
+    if gitlab_target is None:
+        return True
+    public = _declared_instances(data).get(GITLAB_PUBLIC_TABLE)
+    return gitlab_target.route.gitlab != public
+
+
 def _routed_tables(
     route: Optional[GitLabRoute], required: tuple[str, ...], legacy_compat: bool
 ) -> Mapping[str, str]:
@@ -1545,8 +1581,8 @@ def _routed_tables(
 
     :param route: Selected GitLab route, or ``None`` when GitLab is unselected.
     :param required: Authorities the command requires.
-    :param legacy_compat: The target has no ``[gitlab_routing]`` and the caller
-        gave no ``--gitlab``: a legacy route reads tables as before this change.
+    :param legacy_compat: Result of ``_legacy_compat``: a legacy route reads
+        tables as before this change.
     :returns: Table name per routed authority.
     :raises TargetError: The selected route pairs no table with one or more
         required routed authorities; the diagnostic names all of them.
@@ -1619,7 +1655,7 @@ def load_target(
     tables = _routed_tables(
         gitlab_target.route if gitlab_target is not None else None,
         required_surfaces,
-        GITLAB_ROUTING_TABLE not in data and selection.selector is None,
+        _legacy_compat(data, selection, gitlab_target),
     )
     harbor_target = (
         _parse_harbor(

@@ -1166,41 +1166,14 @@ def _owner(module: ModuleType) -> str:
 def contract_literals() -> Mapping[str, str]:
     """Map each owned target-contract literal to the module that defines it.
 
-    The values are read from the defining modules, so this gate holds no copy:
-    the GitLab instance and routing table names, the selection and routing
-    reason tokens, the deprecation event, and the ``--gitlab`` option, all
-    defined in ``core/endpoints.py``.
+    The values are ``endpoints.GITLAB_CONTRACT_LITERALS``: the GitLab instance
+    and routing table names, the ``--gitlab`` option, the selection and routing
+    reason tokens and the deprecation event. This gate holds no copy.
 
     :returns: Literal mapped to the repository path allowed to contain it.
     """
-    instance_required = tuple(
-        endpoints.GITLAB_INSTANCE_REQUIRED.format(table=table)
-        for table in endpoints.GITLAB_SELECTORS.values()
-    )
-    pairing_unknown = tuple(
-        endpoints.GITLAB_ROUTING_PAIRING_UNKNOWN.format(
-            routing=endpoints.GITLAB_ROUTING_TABLE, authority=authority
-        )
-        for authority in endpoints.GITLAB_ROUTED_AUTHORITIES
-    )
-    owned = (
-        *endpoints.GITLAB_SELECTORS.values(),
-        endpoints.GITLAB_ROUTING_TABLE,
-        endpoints.GITLAB_SELECTOR_CONFLICT,
-        endpoints.GITLAB_SELECTOR_UNKNOWN,
-        endpoints.GITLAB_SELECTION_REQUIRES_GITLAB,
-        endpoints.GITLAB_PROFILE_NAME_INVALID,
-        endpoints.GITLAB_PROFILE_UNKNOWN,
-        endpoints.GITLAB_PRIVATE_DECLARED_TWICE,
-        endpoints.GITLAB_ROUTING_DEFAULT_UNKNOWN,
-        endpoints.GITLAB_ROUTING_ROW_UNKNOWN,
-        endpoints.GITLAB_ROUTING_ROW_MISSING,
-        endpoints.GITLAB_DEPRECATION_EVENT,
-        *instance_required,
-        *pairing_unknown,
-    )
     return MappingProxyType(
-        dict.fromkeys((*owned, endpoints.GITLAB_TARGET_OPTION), _owner(endpoints))
+        dict.fromkeys(endpoints.GITLAB_CONTRACT_LITERALS, _owner(endpoints))
     )
 
 

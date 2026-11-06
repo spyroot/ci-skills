@@ -91,6 +91,33 @@ GITLAB_INSTANCE_REQUIRED: Final = "{table}_target_required"
 GITLAB_ROUTING_PAIRING_UNKNOWN: Final = "{routing}_{authority}_unknown"
 # One stderr diagnostic per load of the legacy shape (TD-11 removes it).
 GITLAB_DEPRECATION_EVENT: Final = "gitlab_target_deprecated"
+# Values defined only in this module. tools/skillkit/portability_gate.py rejects a
+# copy of any of them as a string literal in another Python source.
+GITLAB_CONTRACT_LITERALS: Final = (
+    *GITLAB_SELECTORS.values(),
+    GITLAB_ROUTING_TABLE,
+    GITLAB_TARGET_OPTION,
+    GITLAB_SELECTOR_CONFLICT,
+    GITLAB_SELECTOR_UNKNOWN,
+    GITLAB_SELECTION_REQUIRES_GITLAB,
+    GITLAB_PROFILE_NAME_INVALID,
+    GITLAB_PROFILE_UNKNOWN,
+    GITLAB_PRIVATE_DECLARED_TWICE,
+    GITLAB_ROUTING_DEFAULT_UNKNOWN,
+    GITLAB_ROUTING_ROW_UNKNOWN,
+    GITLAB_ROUTING_ROW_MISSING,
+    GITLAB_DEPRECATION_EVENT,
+    *(
+        GITLAB_INSTANCE_REQUIRED.format(table=table)
+        for table in GITLAB_SELECTORS.values()
+    ),
+    *(
+        GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+            routing=GITLAB_ROUTING_TABLE, authority=authority
+        )
+        for authority in GITLAB_ROUTED_AUTHORITIES
+    ),
+)
 
 
 class Role(StrEnum):

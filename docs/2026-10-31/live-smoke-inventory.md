@@ -124,8 +124,12 @@ after the last PR #138 commit (`12ddee8`), which suggests an unrecorded #138 run
 was checked at `2026-11-06T01:33:33Z`; it was present. A delete from the receipt-renewal session was refused by
 that session's permission check and sent no request. By `2026-11-06T01:35:52Z` both `repos/spyroot/test-mirror-push`
 and `repositories/1442655376` returned 404, and a second read at `01:36:27Z` returned `RESOURCE_NOT_FOUND` for both.
-Who deleted it is not recorded. The team asked for it to be restored so every agent can use it; no repository with
-that name may be created before the restore. Evidence is kept outside the repository with the run
+Who deleted it is not recorded. The team asked for it to be restored so every agent can use it.
+
+Open conflict for the next renewal: a restored `spyroot/test-mirror-push` makes the next bounded qualification stop
+with `destination_present`. This inventory says "The disposable mirror destination is expected absent only after its
+recorded cleanup"; the user says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". It stays open until the user
+decides. Evidence is kept outside the repository with the run
 log of issue #133.
 
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.

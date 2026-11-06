@@ -132,6 +132,13 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - Observation: `ci-api` prints fixed wire-format objects (`PlanAPICheck`, `PlanAPI`, `ApiIdentitySelector`).
   Evidence: `core/api_read.py`. `ci-api` takes host and token file from the selected instance and keeps the route on
   `ApiProviderSelection.route`; its printed output is unchanged.
+- Observation, open conflict for the next mirror renewal: after this renewal the target's `[github]` repository
+  `spyroot/test-mirror-push` is restored, but `tools/qualify_mirror.py` stops with `destination_present` when it
+  exists. The inventory says "The disposable mirror destination is expected absent only after its recorded cleanup";
+  the user says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". Open until the user decides; the tool is
+  unchanged.
+  Evidence: `docs/2026-10-31/live-smoke-inventory.md` Reusable pairs; `tools/skillkit/mirror_qualification.py`
+  preflight.
 - Observation: the mirror NO_OP candidate receipt must carry a `smoke_cleanup` record of kind
   `gitlab_mirror_smoke_cleanup`. Until GPP-10 no tracked tool produced that record; the producer was the scratch
   pair `qualify-executed.py` and `mirror-owned-cleanup.py` under `.internal/scratch/codex/ci14-ci15-closure/`.
@@ -201,8 +208,11 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   result keys and values, and the selection and routing reason tokens are `Final` constants in `core/endpoints.py`;
   `core/target.py` imports them. Tests import the same constants and build every target from them through one
   builder in `tests/python/conftest.py`; this replaces the earlier review note that literal table names in tests are
-  allowed. `tools/skillkit/portability_gate.py` rejects a copy of these values as a string literal in any selected
-  Python source outside the defining module (rule `contract_literal`).
+  allowed. `tools/skillkit/portability_gate.py` rejects a copy of `GITLAB_CONTRACT_LITERALS` (the instance and
+  routing table names, `--gitlab`, the selection and routing reason tokens and the deprecation event) as a string
+  literal in any selected Python source outside `core/endpoints.py` (rule `contract_literal`). Authority names,
+  `private`/`public` and the routing result keys are common words in other contexts, so the gate does not scan for
+  them; the modules this change touched read them from the constants.
   Governing Ref: pinned Standards `docs/agents/contracts/software-design.md` (revision `5bd31f1`), hardcoded-value
   rule; recorded answer "this name need define in entier code once as const"; team answers "it need define in 1 place
   in code no test should hardcode this value no code should do this it const and final and it must define read code
@@ -227,10 +237,13 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   `--gitlab public` reads `[gitlab.com]`; `routing.gitlab` names the table read (`gitlab`, `gitlab.com`). The match is
   by the table key `com`, the constant `GITLAB_LEGACY_PUBLIC_KEY` in `core/endpoints.py`; no URL is inspected.
   Without `[gitlab_routing]`, legacy routes report `kubernetes` and `harbor` as `null`. A command that requires them
-  reads `[kubernetes]` and `[harbor]` directly only when the caller gives no `--gitlab` (no selector, or
-  `--gitlab-profile`), which is how these invocations behaved before this change; with `--gitlab private|public` it
-  blocks with the missing-tables reason, so `--gitlab public` never pairs GitLab SaaS with the person's cluster by
-  default (DEC-02). With `[gitlab_routing]`, the row of the instance pairs them. The deprecation event's `table`
+  reads `[kubernetes]` and `[harbor]` directly only when the caller gives no `--gitlab` and the legacy table read does
+  not answer `gitlab_public` (`core/target.py` `_legacy_compat`); with `--gitlab private|public`, or
+  `--gitlab-profile com` on the issue #133 shape, it blocks with the missing-tables reason, so the public instance is
+  never paired with the person's cluster by default (DEC-02). Team decision: "block combined Kubernetes/Harbor
+  commands, the same as `--gitlab public`", grounded in "user for example indicate his public github and private
+  harbor < make no sense"; a legacy profile that answers no instance keeps the direct read. With
+  `[gitlab_routing]`, the row of the instance pairs them. The deprecation event's `table`
   names the legacy table.
   Status: ACCEPTED
   Rationale: The answer names both legacy tables. The reviewed plan's line "No silent mapping of `[gitlab.com]` to

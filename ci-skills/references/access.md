@@ -111,8 +111,9 @@ Rules, each checked before any provider request:
   `image_build_readiness.py chain`, reads the table the selected row names. A row that omits it, or a target without
   `[gitlab_routing]`, blocks with `target is missing required authority tables: <names>` before any provider call;
   `--dry-run` returns the same result. In the example above, `--gitlab public` cannot deploy a runner, because the
-  public row pairs no table. Commands that only read optional authorities, such as `access_check.py`, are not
-  affected. The legacy shape without `[gitlab_routing]` and without `--gitlab` is the one exception; see below.
+  public row pairs no table. Only required authorities are routed: `access_check.py` reads Kubernetes from its own
+  table unless an option such as `--ceph-namespace` makes Kubernetes required. The legacy shape without
+  `[gitlab_routing]` and without `--gitlab` is the one exception; see below.
 - A row is the person's own declaration of which cluster and registry belong to that GitLab; no key or host implies
   one. [GitLab Agent connectivity](gitlab-agent.md) shows when a GitLab can use a cluster, for example a GitLab.com
   project with a GitLab Agent in a lab cluster that has egress to GitLab.com.
@@ -165,10 +166,12 @@ Each load of a target that holds `[gitlab]`, and each use of `--gitlab-profile`,
 below; a dry run does not write it to `--log-file`. `[gitlab_routing]` may sit beside the legacy tables; its row for
 an instance pairs the tables of whichever table answers that instance. Without `[gitlab_routing]`, a legacy route
 reports `kubernetes` and `harbor` as `null`. A command that requires them then reads `[kubernetes]` and `[harbor]`
-directly only when the caller gives no `--gitlab`, which is how the legacy shape behaved before `--gitlab` existed;
-with `--gitlab private` or `--gitlab public` it blocks with the missing-tables reason, as on the new shape. The event's
+directly only when the caller gives no `--gitlab` and the legacy table read does not answer `gitlab_public`; with
+`--gitlab private`, `--gitlab public`, or `--gitlab-profile com` on the issue #133 shape, it blocks with the
+missing-tables reason, as on the new shape. The event's
 `table` names the legacy table, `gitlab` or `gitlab.NAME`. To migrate, rename `[gitlab]` to `[gitlab_private]` and
-`[gitlab.com]` to `[gitlab_public]`. Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
+`[gitlab.com]` to `[gitlab_public]`, and add a `[gitlab_routing]` row that pairs `kubernetes` and `harbor` with the
+instance whose commands use them; without that row those commands block. Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
 
 ## Effective credential sources
 

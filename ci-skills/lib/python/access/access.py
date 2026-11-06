@@ -16,7 +16,12 @@ from lib.python.access.gitlab import gitlab_access
 from lib.python.access.kubernetes import kubernetes_access
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
-from lib.python.core.endpoints import ROUTING_RESULT_KEY
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+    ROUTING_RESULT_KEY,
+)
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -34,14 +39,14 @@ def _selected_targets(target: Target) -> MutableMapping[str, JSONValue]:
     :raises TargetError: A selected provider section is absent.
     """  # noqa: DOC502 - Required provider selectors validate optional sections.
     selected: MutableMapping[str, JSONValue] = {}
-    if "github" in target.active_surfaces:
+    if GITHUB_AUTHORITY in target.active_surfaces:
         github = target.require_github()
-        selected["github"] = f"{github.host}/{github.repository}"
-    if "gitlab" in target.active_surfaces:
-        selected["gitlab"] = target.require_gitlab().url
-    if "kubernetes" in target.active_surfaces:
+        selected[GITHUB_AUTHORITY] = f"{github.host}/{github.repository}"
+    if GITLAB_AUTHORITY in target.active_surfaces:
+        selected[GITLAB_AUTHORITY] = target.require_gitlab().url
+    if KUBERNETES_AUTHORITY in target.active_surfaces:
         kubernetes = target.require_kubernetes()
-        selected["kubernetes"] = {
+        selected[KUBERNETES_AUTHORITY] = {
             "context": kubernetes.context,
             "server": kubernetes.server,
         }
@@ -92,16 +97,18 @@ def check_access(
         or a required bound credential source is absent.
     """
     checks = {
-        "github": github_publication_access if publication else github_access,
-        "gitlab": gitlab_access,
-        "kubernetes": lambda _selected: kubernetes_access(_selected, cilium=cilium),
+        GITHUB_AUTHORITY: github_publication_access if publication else github_access,
+        GITLAB_AUTHORITY: gitlab_access,
+        KUBERNETES_AUTHORITY: lambda _selected: kubernetes_access(
+            _selected, cilium=cilium
+        ),
     }
     _selected = target.active_surfaces
 
     if not _selected or any(name not in checks for name in _selected):
         raise ValueError("required_target_surfaces_invalid")
 
-    if publication and "github" not in _selected:
+    if publication and GITHUB_AUTHORITY not in _selected:
         raise ValueError("publication_requires_github")
     with ThreadPoolExecutor(max_workers=len(_selected)) as pool:
         futures = [pool.submit(checks[name], target) for name in _selected]
@@ -132,17 +139,21 @@ def dry_run_access(
     :raises ValueError: Publication lacks GitHub or an active provider is unconfigured.
     """
     selected = target.active_surfaces
-    if publication and "github" not in selected:
+    if publication and GITHUB_AUTHORITY not in selected:
         raise ValueError("publication_requires_github")
     probes = {
-        "github": [
+        GITHUB_AUTHORITY: [
             "gh auth status",
             "gh api user",
             "gh api repository",
             *(["repository admin"] if publication else []),
         ],
-        "gitlab": ["glab auth status", "GET /user is_admin", "GET /runners/all"],
-        "kubernetes": [
+        GITLAB_AUTHORITY: [
+            "glab auth status",
+            "GET /user is_admin",
+            "GET /runners/all",
+        ],
+        KUBERNETES_AUTHORITY: [
             "context server",
             "TLS API version",
             "auth whoami",
