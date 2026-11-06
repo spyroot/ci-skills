@@ -41,6 +41,7 @@ from lib.python.core.catalog_types import (
     ReadDefinition,
 )
 from lib.python.core.endpoints import (
+    GITLAB_DEFAULT_INSTANCE,
     GITLAB_ROUTING_DEFAULT_KEY,
     GITLAB_ROUTING_TABLE,
     GITLAB_SELECTORS,
@@ -66,6 +67,7 @@ GITLAB_TARGET_HELP: Final = (
     f"GitLab instance: {' or '.join(GITLAB_SELECTORS)} reads "
     + " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())
     + f"; omission reads [{GITLAB_ROUTING_TABLE}].{GITLAB_ROUTING_DEFAULT_KEY}"
+    + f", else [{GITLAB_DEFAULT_INSTANCE}]"
 )
 GITLAB_PROFILE_OPTION: Final = "--gitlab-profile"
 GITLAB_PROFILE_HELP: Final = (

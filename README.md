@@ -94,9 +94,11 @@ cp "$CI_SKILLS_CHECKOUT/target.toml.template" ~/.ci-skills/target.toml
 $EDITOR ~/.ci-skills/target.toml
 ```
 
-Fill in the sections needed by the selected operation. GitLab-only commands need `[gitlab_routing]` and one instance
-table, `[gitlab_private]` or `[gitlab_public]`; `--gitlab private|public` selects the instance and its omission reads
-`[gitlab_routing].default`. See [GitLab private and public targets](ci-skills/references/access.md#gitlab-private-and-public-targets).
+Fill in the sections needed by the selected operation. GitLab-only commands need one instance table,
+`[gitlab_private]` or `[gitlab_public]`; `--gitlab private|public` selects the instance and its omission reads
+`[gitlab_routing].default`, else `[gitlab_private]`. Commands that also use Kubernetes or Harbor, such as the runner
+manager, need the instance's `[gitlab_routing]` row. See
+[GitLab private and public targets](ci-skills/references/access.md#gitlab-private-and-public-targets).
 `access_check.py` checks configured providers; unrelated provider tables and tools are not required.
 `--publication` additionally requires GitHub configuration. Kubernetes commands need the selected context and exact
 API server.

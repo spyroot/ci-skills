@@ -47,8 +47,13 @@ GITLAB_PUBLIC_TABLE: Final = "gitlab_public"
 GITLAB_SELECTORS: Final = MappingProxyType(
     {"private": GITLAB_PRIVATE_TABLE, "public": GITLAB_PUBLIC_TABLE}
 )
-# `[gitlab_routing]`: `default` names the instance read without `--gitlab`; one
-# row per declared instance names its paired Kubernetes and Harbor tables.
+# The instance read when neither `--gitlab` nor `[gitlab_routing].default` names one.
+GITLAB_DEFAULT_INSTANCE: Final = GITLAB_PRIVATE_TABLE
+# Legacy shape, read for one release: `[gitlab]` fields answer `gitlab_private` and
+# the child table under this key answers `gitlab_public`. Matched by key, never by URL.
+GITLAB_LEGACY_PUBLIC_KEY: Final = "com"
+# `[gitlab_routing]`: optional `default` names the instance read without `--gitlab`;
+# one row per declared instance names its paired Kubernetes and Harbor tables.
 GITLAB_ROUTING_TABLE: Final = "gitlab_routing"
 GITLAB_ROUTING_DEFAULT_KEY: Final = "default"
 GITLAB_ROUTED_AUTHORITIES: Final = ("kubernetes", "harbor")

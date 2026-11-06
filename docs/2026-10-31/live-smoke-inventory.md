@@ -10,9 +10,10 @@ native IDs and the verification date before another phase reuses the asset.
 
 ## Reusable pairs
 
-The name in the first column must match on GitHub and GitLab. `dcloud` means the operator-selected `[gitlab_private]`
-target, the `[gitlab_routing]` default. The public-service row uses `[gitlab_public]`, selected with
-`--gitlab public`. Provider URLs and credentials remain runtime inputs.
+The name in the first column must match on GitHub and GitLab. `dcloud` is the GitLab whose `url` the selected
+target holds in `[gitlab_private]`, read with `--gitlab private` or no option. The GitLab.com row is read through
+`[gitlab_public]` with `--gitlab public`; its `url` in the selected target names GitLab.com. The table keys carry no
+other meaning. Provider URLs and credentials remain runtime inputs.
 
 | Pair / purpose | GitHub allocation | GitLab allocation | State |
 | --- | --- | --- | --- |

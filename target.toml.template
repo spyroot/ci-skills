@@ -26,8 +26,8 @@
 #      a wiring mistake. CI declares its own target or project binding.
 #
 # This template shows every authority for access_check.py. A Kubernetes
-# command needs only [kubernetes]; a GitLab job needs only [gitlab_routing] and
-# one GitLab instance table. Remove unused sections when making a
+# command needs only [kubernetes]; a GitLab job needs only one GitLab instance
+# table. Remove unused sections when making a
 # single-authority target. Nothing here grants access; each command checks the
 # authority it uses.
 
@@ -48,19 +48,22 @@ repository = "owner/repository"
 # required_checks = ["validate"]
 
 # GitLab. Up to two instance tables, [gitlab_private] and [gitlab_public].
-# Every GitLab command takes --gitlab private or --gitlab public; without the
-# option it reads the instance named by [gitlab_routing].default. Table names
-# use "_", never ".": TOML reads [gitlab.com] as a table "com" nested in
-# [gitlab], not as a host. The legacy [gitlab] and [gitlab.NAME] tables are
-# read for one release and print a gitlab_target_deprecated warning; a target
-# must not mix them with the tables below.
+# "private" and "public" are keys: --gitlab private reads [gitlab_private],
+# --gitlab public reads [gitlab_public], and the host is each table's url.
+# Without the option a command reads [gitlab_routing].default, else
+# [gitlab_private]. Table names use "_", never ".": TOML reads [gitlab.com] as
+# a table "com" nested in [gitlab], not as a host. The legacy [gitlab] and
+# [gitlab.NAME] tables are read for one release and print a
+# gitlab_target_deprecated warning.
 [gitlab_routing]
-# The instance read when a command gets no --gitlab option.
+# Optional. Needed by commands that also use Kubernetes or Harbor, such as the
+# runner manager. The instance read when a command gets no --gitlab option;
+# omit it to read gitlab_private.
 default = "gitlab_private"
-# One row per declared instance: the Kubernetes and Harbor tables that belong
-# to that GitLab. Omit a key when the instance has no paired table; a
-# command that needs that table then blocks for this instance. Every
-# result reports the selection as its "routing" object.
+# With this table, one row per declared instance: the Kubernetes and Harbor
+# tables that belong to that GitLab. Omit a key when the instance has no
+# paired table; a command that needs that table then blocks for this
+# instance. Every result reports the selection as its "routing" object.
 gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
 gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }
 
@@ -87,7 +90,7 @@ url = "https://gitlab.example.com"
 # A second GitLab, read with --gitlab public. It supplies its own fields; no
 # field is inherited from [gitlab_private]. Remove this table and its
 # [gitlab_routing] row when there is only one GitLab.
-url = "https://gitlab.public.example.com"
+url = "https://gitlab.second.example.com"
 # Declare a token file per instance: an ambient GITLAB_TOKEN is used for
 # whichever instance is selected when that instance has no token_file.
 token_file = "gitlab-public.token"

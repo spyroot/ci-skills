@@ -251,6 +251,69 @@ def test_selector_constants_are_declared_once_in_the_contract() -> None:
             11,
             ("gitlab", None, None, "argv:--gitlab=private"),
         ),
+        (
+            ISSUE_TARGET,
+            {"gitlab": "public"},
+            PUBLIC_HOST,
+            "consumer/public",
+            PUBLIC_TOKEN_PATH,
+            22,
+            ("gitlab.com", None, None, "argv:--gitlab=public"),
+        ),
+        (
+            ROUTED_TARGET.replace('default = "gitlab_private"\n', "", 1),
+            {},
+            PRIVATE_HOST,
+            "consumer/private",
+            PRIVATE_TOKEN_PATH,
+            11,
+            ("gitlab_private", "kubernetes", "harbor", "default"),
+        ),
+        (
+            PRIVATE_TABLE + KUBERNETES_TABLE,
+            {},
+            PRIVATE_HOST,
+            "consumer/private",
+            PRIVATE_TOKEN_PATH,
+            11,
+            ("gitlab_private", None, None, "default"),
+        ),
+        (
+            LEGACY_TABLE + PUBLIC_TABLE,
+            {},
+            PRIVATE_HOST,
+            "consumer/private",
+            PRIVATE_TOKEN_PATH,
+            11,
+            ("gitlab", None, None, "legacy"),
+        ),
+        (
+            LEGACY_TABLE + PUBLIC_TABLE,
+            {"gitlab": "public"},
+            PUBLIC_HOST,
+            "consumer/public",
+            PUBLIC_TOKEN_PATH,
+            22,
+            ("gitlab_public", None, None, "argv:--gitlab=public"),
+        ),
+        (
+            LEGACY_TARGET + SINGLE_ROUTING,
+            {},
+            PRIVATE_HOST,
+            "consumer/private",
+            PRIVATE_TOKEN_PATH,
+            11,
+            ("gitlab", None, None, "legacy"),
+        ),
+        (
+            ROUTED_TARGET + '[gitlab.com]\nurl = "https://public.example.test"\n',
+            {},
+            PRIVATE_HOST,
+            "consumer/private",
+            PRIVATE_TOKEN_PATH,
+            11,
+            ("gitlab_private", "kubernetes", "harbor", "default"),
+        ),
     ),
     ids=(
         "single-private",
@@ -262,6 +325,13 @@ def test_selector_constants_are_declared_once_in_the_contract() -> None:
         "legacy-issue-133-shape",
         "legacy-profile",
         "legacy-flat-is-private",
+        "legacy-com-is-public",
+        "routing-default-is-optional",
+        "routing-table-is-optional",
+        "legacy-private-beside-public-instance",
+        "public-instance-beside-legacy-private",
+        "legacy-private-with-routing-row",
+        "legacy-com-beside-instances-is-unread",
     ),
 )
 def test_selection_reads_one_instance_and_reports_its_route(
@@ -364,8 +434,7 @@ def test_selection_source_names_only_caller_selectors(
         (SINGLE_TARGET, {"gitlab": "public"}, "gitlab_public_target_required"),
         (PUBLIC_ONLY_TARGET, {"gitlab": "private"}, "gitlab_private_target_required"),
         (LEGACY_TARGET, {"gitlab": "public"}, "gitlab_public_target_required"),
-        (PRIVATE_TABLE + KUBERNETES_TABLE, {}, "gitlab_routing_required"),
-        (PUBLIC_TABLE + KUBERNETES_TABLE, {}, "gitlab_routing_required"),
+        (PUBLIC_TABLE + KUBERNETES_TABLE, {}, "gitlab_private_target_required"),
         (
             ROUTED_TARGET.replace('"gitlab_private"\n', '"gitlab_other"\n', 1),
             {},
@@ -373,11 +442,6 @@ def test_selection_source_names_only_caller_selectors(
         ),
         (
             SINGLE_TARGET.replace('"gitlab_private"\n', '"gitlab_public"\n', 1),
-            {},
-            "gitlab_routing_default_unknown",
-        ),
-        (
-            ROUTED_TARGET.replace('default = "gitlab_private"\n', "", 1),
             {},
             "gitlab_routing_default_unknown",
         ),
@@ -435,9 +499,7 @@ def test_selection_source_names_only_caller_selectors(
             {},
             "gitlab_routing.gitlab_private must be a TOML table",
         ),
-        (LEGACY_TABLE + ROUTED_TARGET, {}, "gitlab_target_shapes_mixed"),
-        (LEGACY_TARGET + PUBLIC_TABLE, {}, "gitlab_target_shapes_mixed"),
-        (LEGACY_TARGET + SINGLE_ROUTING, {}, "gitlab_target_shapes_mixed"),
+        (LEGACY_TABLE + ROUTED_TARGET, {}, "gitlab_private_declared_twice"),
         (
             ISSUE_TARGET,
             {"gitlab": "public", "gitlab_profile": "com"},
@@ -478,22 +540,13 @@ def test_selection_source_names_only_caller_selectors(
             "target is missing required authority tables: gitlab",
         ),
         (
-            ROUTED_TARGET + '[gitlab.com]\nurl = "https://public.example.test"\n',
-            {},
-            (
-                "[gitlab.com] is table com nested in [gitlab]: TOML reads a dot in a "
-                "table name as nesting; name a GitLab [gitlab_private] or "
-                "[gitlab_public] and add [gitlab_routing]"
-            ),
-        ),
-        (
             ROUTED_TARGET
             + '[gitlab_public.com]\nurl = "https://public.example.test"\n',
             {"gitlab": "public"},
             (
                 "[gitlab_public.com] is table com nested in [gitlab_public]: TOML "
-                "reads a dot in a table name as nesting; name a GitLab "
-                "[gitlab_private] or [gitlab_public] and add [gitlab_routing]"
+                "reads a dot in a table name as nesting; an instance table holds no "
+                "nested table; name each GitLab [gitlab_private] or [gitlab_public]"
             ),
         ),
     ),
@@ -501,11 +554,9 @@ def test_selection_source_names_only_caller_selectors(
         "public-not-declared",
         "private-not-declared",
         "legacy-has-no-public",
-        "private-without-routing",
-        "public-without-routing",
+        "public-only-without-default-instance",
         "default-names-unknown-table",
         "default-names-undeclared-instance",
-        "default-absent",
         "declared-instance-without-row",
         "row-for-undeclared-instance",
         "row-for-unknown-instance",
@@ -514,9 +565,7 @@ def test_selection_source_names_only_caller_selectors(
         "row-names-absent-harbor",
         "row-has-unknown-field",
         "row-is-not-table",
-        "legacy-and-private",
-        "legacy-and-public",
-        "legacy-and-routing",
+        "legacy-and-private-declare-private-twice",
         "both-selectors-legacy",
         "both-selectors-routed",
         "profile-on-routed-target",
@@ -526,7 +575,6 @@ def test_selection_source_names_only_caller_selectors(
         "routing-is-not-a-table",
         "library-selector-outside-contract",
         "routing-without-instance-table",
-        "dotted-header-beside-instances",
         "dotted-header-under-instance",
     ),
 )
@@ -1035,9 +1083,9 @@ def test_open_bug_dry_run_reports_origin_and_routing(
     ("body", "argv", "reason"),
     (
         (SINGLE_TARGET, ("--gitlab", "public"), "gitlab_public_target_required"),
-        (LEGACY_TARGET + PUBLIC_TABLE, (), "gitlab_target_shapes_mixed"),
+        (LEGACY_TABLE + SINGLE_TARGET, (), "gitlab_private_declared_twice"),
     ),
-    ids=("public-not-declared", "mixed-shapes"),
+    ids=("public-not-declared", "private-declared-twice"),
 )
 def test_open_bug_blocks_on_an_unusable_selection(
     target_path: Path, body: str, argv: tuple[str, ...], reason: str
@@ -1354,3 +1402,47 @@ def test_dry_run_deprecation_event_does_not_write_the_log_file(
     assert result.returncode == 0, result.stderr
     assert result.stderr.count(DEPRECATION_EVENT) == 1
     assert not log_file.exists()
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    (
+        (
+            PRIVATE_TABLE + KUBERNETES_TABLE + HARBOR_TABLE,
+            "target is missing required authority tables: harbor, kubernetes",
+        ),
+        (LEGACY_TARGET + HARBOR_TABLE, None),
+        (
+            LEGACY_TARGET
+            + HARBOR_TABLE
+            + '[gitlab_routing]\ngitlab_private = { kubernetes = "kubernetes" }\n',
+            "target is missing required authority tables: harbor",
+        ),
+    ),
+    ids=("instance-without-routing", "legacy-without-routing", "legacy-with-routing"),
+)
+def test_combined_commands_need_a_route_row_except_the_unrouted_legacy_shape(
+    target_path: Path, body: str, reason: Optional[str]
+) -> None:
+    """Fail closed for an instance without a pairing; keep legacy targets working.
+
+    :param target_path: Path receiving the target.
+    :param body: Target TOML with GitLab, Kubernetes and Harbor tables.
+    :param reason: Exact diagnostic, or None when the target loads.
+    :returns: None; assertions verify the pairing rule for each shape.
+    """
+    target_path.write_text(body, encoding="utf-8")
+    load = functools.partial(
+        TARGET.load_target,
+        target_path,
+        required_surfaces=("gitlab", "kubernetes", "harbor"),
+    )
+
+    if reason is None:
+        target = load()
+        assert target.kubernetes.context == "unit-context"
+        assert target.harbor.project == "unit"
+        return
+    with pytest.raises(TARGET.TargetError) as error:
+        load()
+    assert str(error.value) == reason

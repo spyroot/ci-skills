@@ -31,7 +31,10 @@ from lib.python.core.catalog import (
 )
 from lib.python.core.endpoints import (
     GITLAB_AUTHORITY,
+    GITLAB_DEFAULT_INSTANCE,
+    GITLAB_LEGACY_PUBLIC_KEY,
     GITLAB_PRIVATE_TABLE,
+    GITLAB_PUBLIC_TABLE,
     GITLAB_ROUTED_AUTHORITIES,
     GITLAB_ROUTING_DEFAULT_KEY,
     GITLAB_ROUTING_TABLE,
@@ -60,8 +63,7 @@ GITLAB_SELECTOR_UNKNOWN: Final = "gitlab_selector_unknown"
 GITLAB_SELECTION_REQUIRES_GITLAB: Final = "gitlab_profile_requires_gitlab_authority"
 GITLAB_PROFILE_NAME_INVALID: Final = "gitlab_profile_name_invalid"
 GITLAB_PROFILE_UNKNOWN: Final = "gitlab_profile_unknown"
-GITLAB_TARGET_SHAPES_MIXED: Final = "gitlab_target_shapes_mixed"
-GITLAB_ROUTING_REQUIRED: Final = "gitlab_routing_required"
+GITLAB_PRIVATE_DECLARED_TWICE: Final = "gitlab_private_declared_twice"
 GITLAB_ROUTING_DEFAULT_UNKNOWN: Final = "gitlab_routing_default_unknown"
 GITLAB_ROUTING_ROW_UNKNOWN: Final = "gitlab_routing_row_unknown"
 GITLAB_ROUTING_ROW_MISSING: Final = "gitlab_routing_row_missing"
@@ -72,14 +74,12 @@ NESTED_TABLE_DIAGNOSTIC: Final = (
     "table name as nesting; {advice}"
 )
 GITLAB_INSTANCE_ADVICE: Final = (
-    "name a GitLab "
+    "an instance table holds no nested table; name each GitLab "
     + " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())
-    + f" and add [{GITLAB_ROUTING_TABLE}]"
 )
 GITLAB_REPLACEMENT: Final = (
     " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())
-    + f" with [{GITLAB_ROUTING_TABLE}]; select with "
-    + f"{GITLAB_TARGET_OPTION} {'|'.join(GITLAB_SELECTORS)}"
+    + f"; select with {GITLAB_TARGET_OPTION} {'|'.join(GITLAB_SELECTORS)}"
 )
 
 
@@ -317,41 +317,58 @@ class GitLabRoute:
 class GitLabRouting:
     """The parsed ``[gitlab_routing]`` table: default instance and one route each.
 
-    :param default: Instance table read when the caller names none.
-    :param routes: Route per declared instance table, ``selected_by`` ``default``.
+    :param default: Instance read when the caller names none.
+    :param routes: Route per declared instance, keyed by instance name; each
+        route names the table it reads and has ``selected_by`` ``default``.
+    :param declared: Whether the target declares ``[gitlab_routing]``.
 
     .. attribute :: default
         :type: str
 
-        Instance table read when the caller names none.
+        Instance read when the caller names none.
 
     .. attribute :: routes
         :type: Mapping[str, GitLabRoute]
 
-        Route per declared instance table, ``selected_by`` ``default``.
+        Route per declared instance, keyed by instance name.
+
+    .. attribute :: declared
+        :type: bool
+
+        Whether the target declares ``[gitlab_routing]``.
     """
 
     default: str
     routes: Mapping[str, GitLabRoute]
+    declared: bool
 
     @classmethod
-    def parse(cls, data: Mapping[str, object]) -> Self:
-        """Validate ``[gitlab_routing]`` against the instance tables a target declares.
+    def parse(cls, data: Mapping[str, object], instances: Mapping[str, str]) -> Self:
+        """Validate ``[gitlab_routing]`` against the instances a target declares.
+
+        Without the table, the default is ``GITLAB_DEFAULT_INSTANCE`` and no
+        instance pairs a Kubernetes or Harbor table. ``default`` is optional.
 
         :param data: Complete parsed target file.
+        :param instances: Instance name mapped to the table that answers it.
         :returns: Default instance and the route of each declared instance.
-        :raises TargetError: The table is absent, its default or a row names an
+        :raises TargetError: The table is malformed, its default or a row names an
             undeclared instance, a declared instance has no row, or a row names an
             undeclared Kubernetes or Harbor table.
         """  # noqa: DOC502 - Shared table parser validates each row.
-        instances = tuple(name for name in GITLAB_SELECTORS.values() if name in data)
         if GITLAB_ROUTING_TABLE not in data:
-            raise TargetError(GITLAB_ROUTING_REQUIRED)
+            routes = {
+                name: GitLabRoute(table, None, None, SELECTED_BY_DEFAULT)
+                for name, table in instances.items()
+            }
+            return cls(GITLAB_DEFAULT_INSTANCE, MappingProxyType(routes), False)
         table = data[GITLAB_ROUTING_TABLE]
         if not isinstance(table, dict):
             raise TargetError(f"{GITLAB_ROUTING_TABLE} must be a TOML table")
-        default = table.get(GITLAB_ROUTING_DEFAULT_KEY)
-        if not isinstance(default, str) or default not in instances:
+        default = table.get(GITLAB_ROUTING_DEFAULT_KEY, GITLAB_DEFAULT_INSTANCE)
+        if GITLAB_ROUTING_DEFAULT_KEY in table and (
+            not isinstance(default, str) or default not in instances
+        ):
             raise TargetError(GITLAB_ROUTING_DEFAULT_UNKNOWN)
         rows = {
             name: row
@@ -363,7 +380,7 @@ class GitLabRouting:
         if set(instances) - set(rows):
             raise TargetError(GITLAB_ROUTING_ROW_MISSING)
         routes: dict[str, GitLabRoute] = {}
-        for instance in instances:
+        for instance, source in instances.items():
             name = TARGET_CONTRACT.dotted_path((GITLAB_ROUTING_TABLE, instance))
             row = _table(rows[instance], name, TARGET_CONTRACT.names(name))
             paired: dict[str, Optional[str]] = {}
@@ -377,23 +394,39 @@ class GitLabRouting:
                     raise TargetError(cls.pairing_unknown(authority))
                 paired[authority] = value
             routes[instance] = GitLabRoute(
-                gitlab=instance, selected_by=SELECTED_BY_DEFAULT, **paired
+                gitlab=source, selected_by=SELECTED_BY_DEFAULT, **paired
             )
-        return cls(default, MappingProxyType(routes))
+        return cls(str(default), MappingProxyType(routes), True)
 
     def select(self, selection: GitLabSelection) -> GitLabRoute:
         """Choose the caller's instance, or the default when the caller names none.
 
         :param selection: Validated caller selection without a legacy profile.
         :returns: Route of the selected instance with its provenance.
-        :raises TargetError: The selected instance table is not declared.
+        :raises TargetError: The selected or default instance is not declared.
         """
-        if selection.selector is None or selection.selected_by is None:
-            return self.routes[self.default]
-        table = GITLAB_SELECTORS[selection.selector]
-        if table not in self.routes:
-            raise TargetError(self.instance_required(table))
-        return replace(self.routes[table], selected_by=selection.selected_by)
+        instance = (
+            self.default
+            if selection.selector is None
+            else GITLAB_SELECTORS[selection.selector]
+        )
+        if instance not in self.routes:
+            raise TargetError(self.instance_required(instance))
+        route = self.routes[instance]
+        selected_by = selection.selected_by or (
+            SELECTED_BY_LEGACY if route.legacy else SELECTED_BY_DEFAULT
+        )
+        return replace(route, selected_by=selected_by)
+
+    def route_for(self, table: str) -> Optional[GitLabRoute]:
+        """Find the route of the instance a given table answers.
+
+        :param table: Table path, such as ``gitlab.com``.
+        :returns: That instance's route, or ``None`` when no instance reads it.
+        """
+        return next(
+            (route for route in self.routes.values() if route.gitlab == table), None
+        )
 
     @staticmethod
     def instance_required(table: str) -> str:
@@ -1006,50 +1039,81 @@ def _optional_reference(
     return selected
 
 
-def _legacy_gitlab(
-    value: object, selection: GitLabSelection
-) -> tuple[Mapping[str, object], GitLabRoute]:
-    """Select the deprecated ``[gitlab]`` table or one ``[gitlab.NAME]`` profile.
+def _legacy_table(data: Mapping[str, object]) -> Optional[Mapping[str, object]]:
+    """Validate the deprecated ``[gitlab]`` table when the target declares it.
 
-    ``[gitlab]`` is the private instance, so ``--gitlab private`` reads it and
-    ``--gitlab public`` has no table to read.
-
-    :param value: Parsed legacy ``gitlab`` table with optional named profiles.
-    :param selection: Validated caller selection.
-    :returns: The selected settings and a route without paired tables.
-    :raises TargetError: The table is malformed, the profile is unknown, or the
-        public instance is requested.
-    """  # noqa: DOC502 - Shared table parser validates the selected profile.
-    fields = TARGET_CONTRACT.names(GITLAB_AUTHORITY)
+    :param data: Complete parsed target file.
+    :returns: The legacy table, or ``None`` when absent.
+    :raises TargetError: The table is not a table or holds a malformed child.
+    """
+    value = data.get(GITLAB_AUTHORITY)
+    if value is None:
+        return None
     if not isinstance(value, dict):
         raise TargetError("gitlab must be a table")
-    profiles = set(value) - fields
+    fields = TARGET_CONTRACT.names(GITLAB_AUTHORITY)
     invalid = {
         name
-        for name in profiles
+        for name in set(value) - fields
         if not name.strip() or not isinstance(value[name], dict)
     }
     if invalid:
         raise TargetError(
             "gitlab contains unsupported fields: " + ", ".join(sorted(invalid))
         )
-    if selection.selector is not None:
-        table = GITLAB_SELECTORS[selection.selector]
-        if table != GITLAB_PRIVATE_TABLE:
-            raise TargetError(GitLabRouting.instance_required(table))
-    selected_by = selection.selected_by or SELECTED_BY_LEGACY
-    if selection.profile is None:
-        gitlab = {key: item for key, item in value.items() if key in fields}
-        return gitlab, GitLabRoute(GITLAB_AUTHORITY, None, None, selected_by)
-    if not selection.profile.strip():
-        raise TargetError(GITLAB_PROFILE_NAME_INVALID)
-    if selection.profile not in profiles:
-        raise TargetError(GITLAB_PROFILE_UNKNOWN)
-    name = TARGET_CONTRACT.dotted_path((GITLAB_AUTHORITY, selection.profile))
-    return (
-        _table(value[selection.profile], name, fields),
-        GitLabRoute(name, None, None, selected_by),
-    )
+    return value
+
+
+def _declared_instances(data: Mapping[str, object]) -> Mapping[str, str]:
+    """Map each declared GitLab instance to the table that answers it.
+
+    ``[gitlab_private]`` and ``[gitlab_public]`` answer their instances. For one
+    release, legacy ``[gitlab]`` fields answer ``gitlab_private`` and the child
+    table under ``GITLAB_LEGACY_PUBLIC_KEY`` answers ``gitlab_public`` when
+    ``[gitlab_public]`` is absent. These are table keys; no host is inspected.
+
+    :param data: Complete parsed target file.
+    :returns: Instance name mapped to the table path it reads.
+    :raises TargetError: Legacy ``[gitlab]`` fields and ``[gitlab_private]`` both
+        declare ``gitlab_private``.
+    """
+    legacy = _legacy_table(data)
+    fields = TARGET_CONTRACT.names(GITLAB_AUTHORITY)
+    instances: dict[str, str] = {}
+    if legacy is not None and any(key in fields for key in legacy):
+        if GITLAB_PRIVATE_TABLE in data:
+            raise TargetError(GITLAB_PRIVATE_DECLARED_TWICE)
+        instances[GITLAB_PRIVATE_TABLE] = GITLAB_AUTHORITY
+    if GITLAB_PRIVATE_TABLE in data:
+        instances[GITLAB_PRIVATE_TABLE] = GITLAB_PRIVATE_TABLE
+    if GITLAB_PUBLIC_TABLE in data:
+        instances[GITLAB_PUBLIC_TABLE] = GITLAB_PUBLIC_TABLE
+    elif legacy is not None and isinstance(legacy.get(GITLAB_LEGACY_PUBLIC_KEY), dict):
+        instances[GITLAB_PUBLIC_TABLE] = TARGET_CONTRACT.dotted_path(
+            (GITLAB_AUTHORITY, GITLAB_LEGACY_PUBLIC_KEY)
+        )
+    return MappingProxyType(instances)
+
+
+def _table_settings(data: Mapping[str, object], path: str) -> Mapping[str, object]:
+    """Read the settings of one GitLab table path with its own diagnostics.
+
+    :param data: Complete parsed target file.
+    :param path: ``gitlab``, ``gitlab.NAME``, or an instance table name.
+    :returns: Settings of that table.
+    :raises TargetError: The table holds a nested or unsupported entry.
+    """  # noqa: DOC502 - Shared table parser raises TargetError.
+    fields = TARGET_CONTRACT.names(GITLAB_AUTHORITY)
+    legacy = data.get(GITLAB_AUTHORITY)
+    if path in GITLAB_SELECTORS.values():
+        _reject_nested(data[path], path)
+        return _table(data[path], path, TARGET_CONTRACT.names(path))
+    if not isinstance(legacy, dict):
+        raise TargetError("gitlab must be a table")
+    if path == GITLAB_AUTHORITY:
+        return {key: item for key, item in legacy.items() if key in fields}
+    _, child = TARGET_CONTRACT.path_parts(path)
+    return _table(legacy[child], path, fields)
 
 
 def _select_gitlab(
@@ -1060,44 +1124,46 @@ def _select_gitlab(
     :param data: Complete parsed target file.
     :param selection: Caller selection from ``--gitlab`` or ``--gitlab-profile``.
     :returns: The selected table's settings and its route.
-    :raises TargetError: Selectors conflict, legacy and instance tables are
-        mixed, routing is invalid, or the selected table is absent or malformed.
+    :raises TargetError: Selectors conflict, ``gitlab_private`` is declared
+        twice, routing is invalid, or the selected table is absent or malformed.
     """  # noqa: DOC502 - Routing and table parsers raise TargetError.
     selection.validate()
-    current = [
-        name
-        for name in (*GITLAB_SELECTORS.values(), GITLAB_ROUTING_TABLE)
-        if name in data
-    ]
-    if GITLAB_AUTHORITY in data:
-        if current:
-            _reject_nested(data[GITLAB_AUTHORITY], GITLAB_AUTHORITY, owns_fields=True)
-            raise TargetError(GITLAB_TARGET_SHAPES_MIXED)
-        return _legacy_gitlab(data[GITLAB_AUTHORITY], selection)
-    if selection.profile is not None:
+    instances = _declared_instances(data)
+    routing = GitLabRouting.parse(data, instances)
+    if selection.profile is None:
+        route = routing.select(selection)
+        return _table_settings(data, route.gitlab), route
+    legacy = _legacy_table(data)
+    if not selection.profile.strip():
+        raise TargetError(GITLAB_PROFILE_NAME_INVALID)
+    if (
+        legacy is None
+        or selection.profile in TARGET_CONTRACT.names(GITLAB_AUTHORITY)
+        or not isinstance(legacy.get(selection.profile), dict)
+    ):
         raise TargetError(GITLAB_PROFILE_UNKNOWN)
-    route = GitLabRouting.parse(data).select(selection)
-    _reject_nested(data[route.gitlab], route.gitlab, owns_fields=False)
-    table = _table(
-        data[route.gitlab], route.gitlab, TARGET_CONTRACT.names(route.gitlab)
+    name = TARGET_CONTRACT.dotted_path((GITLAB_AUTHORITY, selection.profile))
+    paired = routing.route_for(name)
+    route = GitLabRoute(
+        name,
+        paired.kubernetes if paired else None,
+        paired.harbor if paired else None,
+        selection.selected_by or SELECTED_BY_LEGACY,
     )
-    return table, route
+    return _table_settings(data, name), route
 
 
-def _reject_nested(value: object, name: str, *, owns_fields: bool) -> None:
-    """Explain a dotted header that TOML read as a table nested in ``name``.
+def _reject_nested(value: object, name: str) -> None:
+    """Explain a dotted header that TOML read as a table nested in an instance.
 
-    :param value: Parsed table that may hold nested tables.
-    :param name: Table name, such as ``gitlab`` or ``gitlab_public``.
-    :param owns_fields: Report only when the table holds nested tables and no
-        field of its own; a table with fields is a different shape problem.
+    :param value: Parsed instance table that may hold nested tables.
+    :param name: Instance table name, such as ``gitlab_public``.
     :raises TargetError: A nested table is present, named with its parent.
     """
     if not isinstance(value, dict):
         return
     nested = sorted(key for key, item in value.items() if isinstance(item, dict))
-    fields = [key for key, item in value.items() if not isinstance(item, dict)]
-    if nested and not (owns_fields and fields):
+    if nested:
         raise TargetError(
             NESTED_TABLE_DIAGNOSTIC.format(
                 path=TARGET_CONTRACT.dotted_path((name, nested[0])),
@@ -1158,8 +1224,9 @@ def _load_gitlab(
 ) -> GitLabTarget:
     """Select, parse, and report the GitLab table of a loaded target file.
 
-    A legacy route writes one ``gitlab_target_deprecated`` diagnostic with the
-    invocation's bound log settings.
+    A target that declares the legacy ``[gitlab]`` table, or a selection made
+    with ``--gitlab-profile``, writes one ``gitlab_target_deprecated``
+    diagnostic with the invocation's bound log settings.
 
     :param data: Complete parsed target file.
     :param selection: Caller selection from ``--gitlab`` or ``--gitlab-profile``.
@@ -1172,7 +1239,7 @@ def _load_gitlab(
     selected = _parse_gitlab(
         table, route, skill_root, target_directory=target_directory
     )
-    if route.legacy:
+    if GITLAB_AUTHORITY in data or selection.profile is not None:
         settings = bound_log_settings()
         try:
             log_event(
@@ -1226,7 +1293,8 @@ def load_gitlab_target(
     Other declared authority tables are permitted but are not validated here.
 
     :param path: Selected TOML target file, including an optional home prefix.
-    :param gitlab: ``GITLAB_SELECTORS`` key; omission reads the routing default.
+    :param gitlab: ``GITLAB_SELECTORS`` key; omission reads the routing default,
+        else ``GITLAB_DEFAULT_INSTANCE``.
     :param gitlab_profile: Deprecated legacy ``[gitlab.NAME]`` profile name.
     :returns: GitLab settings and the canonical source-file path.
     :raises TargetError: If the target is unreadable, invalid, inside the skill,
@@ -1461,22 +1529,23 @@ def _select_surfaces(
 
 
 def _routed_tables(
-    route: Optional[GitLabRoute], required: tuple[str, ...]
+    route: Optional[GitLabRoute], required: tuple[str, ...], routing_declared: bool
 ) -> Mapping[str, str]:
     """Name the table each routed authority is read from under ``[gitlab_routing]``.
 
     A command that requires a routed authority reads the table the selected
-    route pairs with it. A legacy or absent route, or an optional authority,
-    reads the authority's own table.
+    route pairs with it. An absent route, a legacy route in a target without
+    ``[gitlab_routing]``, or an optional authority reads the authority's own table.
 
     :param route: Selected GitLab route, or ``None`` when GitLab is unselected.
     :param required: Authorities the command requires.
+    :param routing_declared: Whether the target declares ``[gitlab_routing]``.
     :returns: Table name per routed authority.
     :raises TargetError: The selected route pairs no table with one or more
         required routed authorities; the diagnostic names all of them.
     """
     tables = {authority: authority for authority in GITLAB_ROUTED_AUTHORITIES}
-    if route is None or route.legacy:
+    if route is None or (route.legacy and not routing_declared):
         return tables
     missing = []
     for authority in GITLAB_ROUTED_AUTHORITIES:
@@ -1508,7 +1577,8 @@ def load_target(
     :param path: Selected TOML target file, including an optional home prefix.
     :param required_surfaces: Distinct declared authorities the command needs.
     :param optional_surfaces: Supported authorities selected only when configured.
-    :param gitlab: ``GITLAB_SELECTORS`` key; omission reads the routing default.
+    :param gitlab: ``GITLAB_SELECTORS`` key; omission reads the routing default,
+        else ``GITLAB_DEFAULT_INSTANCE``.
     :param gitlab_profile: Deprecated legacy ``[gitlab.NAME]`` profile name.
     :returns: Validated settings for the requested authorities.
     :raises TargetError: If the requested authorities or target data are invalid,
@@ -1538,7 +1608,9 @@ def load_target(
         else None
     )
     tables = _routed_tables(
-        gitlab_target.route if gitlab_target is not None else None, required_surfaces
+        gitlab_target.route if gitlab_target is not None else None,
+        required_surfaces,
+        GITLAB_ROUTING_TABLE in data,
     )
     harbor_target = (
         _parse_harbor(

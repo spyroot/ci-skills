@@ -1,4 +1,4 @@
-# Select a private or public GitLab with explicit Kubernetes and Harbor routing
+# Select the `gitlab_private` or `gitlab_public` GitLab instance with explicit Kubernetes and Harbor routing
 
 This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and
 `Outcomes & Retrospective` must be kept up to date as work proceeds. It is maintained in accordance with
@@ -6,10 +6,11 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 ## Purpose / Big Picture
 
-After this change, one target file can declare a private GitLab and a public GitLab side by side, without the TOML
-nesting trap reported in [issue #133](https://github.com/spyroot/ci-skills/issues/133). The caller chooses one with a
-single flag, `--gitlab private` or `--gitlab public`, on every GitLab command. The target file itself answers, before
-any provider request, three questions:
+After this change, one target file can declare two GitLab instances side by side, under the table keys
+`gitlab_private` and `gitlab_public`, without the TOML nesting trap reported in
+[issue #133](https://github.com/spyroot/ci-skills/issues/133). The caller chooses one with a single flag,
+`--gitlab private` or `--gitlab public`, on every GitLab command. The target file itself answers, before any provider
+request, three questions:
 
 - which GitLab is used when the flag is omitted;
 - which Kubernetes cluster pairs with each GitLab;
@@ -22,8 +23,8 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 
 ## Progress
 
-- [x] (DEC-01–DEC-13) Design accepted, except DEC-03, DEC-05, DEC-08, DEC-10 and DEC-17, which are in CONFLICT with
-  recorded answers. DEC-14 and DEC-16 are PROPOSED.
+- [x] (DEC-01–DEC-19) Design accepted. DEC-03, DEC-05, DEC-08, DEC-10 and DEC-17 were in CONFLICT with recorded
+  answers; each now follows the answer it quotes (GPP-10). DEC-14 and DEC-16 stay PROPOSED.
 - [x] (GPP-01) This ExecPlan and its index row are committed.
 - [x] (GPP-02) Table-driven regression tests are committed and fail on the base revision. Tests:
   `tests/python/test_target_profiles.py` (selection, routing, field errors, CLI rows), `conftest.py` `target_file` in
@@ -48,23 +49,27 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - [x] (GPP-06) The template, references, README and `tools.json` are updated (`a9eddd5`, `e5b40eb`).
 - [x] (GPP-07a) Both installed copies are upgraded, with AFTER evidence against the selected target. Both installs
   read back `e5b40eb` (`INSTALLATION.json`, verified). `gitlab_issue.py open-bug --project hott/test --json` from
-  each install: the renamed target without `[gitlab_routing]` gives `BLOCKED gitlab_routing_required`; the issue #133
+  each install: the renamed target without `[gitlab_routing]` gives `BLOCKED gitlab_routing_required` (behavior at
+  `e5b40eb`; GPP-10 made the table optional); the issue #133
   shape (`[gitlab]` + `[gitlab.com]`) gives `DRY_RUN` on `[gitlab]` with one `gitlab_target_deprecated` event, and
   `--gitlab-profile com` reads `[gitlab.com]`. After `[gitlab_routing]` was added to the user target (backup beside
   it), no option reads `[gitlab_private]` with `routing.selected_by` `default`, and `--gitlab public` reads
   `[gitlab_public]` with `argv:--gitlab=public`, no deprecation event. Evidence files:
   `.internal/log/bug-133/after-*.json` in the primary checkout.
-- [ ] (GPP-07b) Both installed copies are upgraded again at the final PR head and the GPP-M4 commands rerun. The
-  `e5b40eb` installs are stale: `f474eb6` and later commits change result output and table selection. Held until the
-  decisions listed under GPP-08 are made.
-- [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head. Held. Open decisions:
-  DEC-14 is PROPOSED; DEC-03, DEC-05, DEC-08, DEC-10 and DEC-17 are in CONFLICT; the current kube context
-  (`home-lab-k8s`) is not the cluster `authority.sh` names for the smoke GitLab (`api-ww-cai-cisco-live-dcloud-local`);
-  the mirror qualification script that writes the allocation record pins another candidate SHA and worktree and has
-  been used twice, the `.internal/INDEX.yaml` `promoteAfterUses` limit, while `scratchPolicy.mutationAllowed` is
-  `false`. PR #138 also changes `ci-skills/lib`; reviewers recommend merging it first, rebasing this branch, and
-  capturing one receipt set on the final head.
+- [ ] (GPP-07b) Both installed copies are upgraded again at the final functional head and the GPP-M4 commands rerun.
+  The `e5b40eb` installs are stale: `f474eb6` and later commits change result output and table selection.
+- [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head. The earlier holds are
+  cleared: the target pins `kubernetes.kubeconfigs` and `kubernetes.context` for the cluster `authority.sh` names, so
+  no command reads the current kube context; the mirror qualification runs from the tracked
+  `tools/qualify_mirror.py` (GPP-10) instead of the scratch pair. PR #141 merges first; draft PR #138 rebases
+  afterwards.
 - [x] (GPP-09) Legacy removal is tracked as TD-11 (`docs/exec-plans/tech-debt-tracker.md`).
+- [x] (GPP-10) The recorded answers replace the CONFLICT statuses (DEC-03, DEC-05, DEC-08, DEC-10, DEC-17) and the
+  keys rule is DEC-19. `[gitlab_routing]` and its `default` are optional, `GITLAB_DEFAULT_INSTANCE` is
+  `gitlab_private`, legacy `[gitlab.com]` answers `gitlab_public` by the key `GITLAB_LEGACY_PUBLIC_KEY`, and
+  `[gitlab]` may sit beside `[gitlab_public]` and `[gitlab_routing]`. The mirror qualification producer is the
+  tracked `tools/qualify_mirror.py` over `tools/skillkit/mirror_qualification.py`, with
+  `tests/python/test_mirror_qualification.py`.
 
 ## Surprises & Discoveries
 
@@ -113,8 +118,10 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   Evidence: `core/api_read.py`. `ci-api` takes host and token file from the selected instance and keeps the route on
   `ApiProviderSelection.route`; its printed output is unchanged.
 - Observation: the mirror NO_OP candidate receipt must carry a `smoke_cleanup` record of kind
-  `gitlab_mirror_smoke_cleanup`. No tracked tool produces that record.
-  Evidence: `tools/check_live_acceptance.py` `_mirror_smoke_cleanup_verified`.
+  `gitlab_mirror_smoke_cleanup`. Until GPP-10 no tracked tool produced that record; the producer was the scratch
+  pair `qualify-executed.py` and `mirror-owned-cleanup.py` under `.internal/scratch/codex/ci14-ci15-closure/`.
+  Evidence: `tools/check_live_acceptance.py` `_mirror_smoke_cleanup_verified`. `tools/qualify_mirror.py` now runs
+  the same native calls and its test checks the record with that function.
 
 ## Decision Log
 
@@ -134,29 +141,35 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   on call side , prior any call back even called it should answer what is default ? for gitlab private what harbor ?
   what k8s ? so propose show me toml" (queue record `handoff.operatorAnswers`).
 - Decision DEC-03: The CLI selector is `--gitlab private|public`. Its choices and its table mapping come from the
-  contract constants. Omitting it selects `[gitlab_routing].default`.
-  Status: CONFLICT - awaiting decision
-  Rationale: One option name keeps one meaning across commands, as `docs/phases/CI02-CLI.md` requires.
-  Conflict: the recorded answer is "Private by default". The code requires `[gitlab_routing].default` and accepts
-  `default = "gitlab_public"` without a warning, so omission reads whichever instance the target names.
+  contract constants. Omitting it selects `[gitlab_routing].default`; when the table or its `default` is absent, it
+  selects `GITLAB_DEFAULT_INSTANCE`, which is `gitlab_private`. An explicit `default` naming a declared instance is
+  still allowed.
+  Status: ACCEPTED
+  Rationale: One option name keeps one meaning across commands, as `docs/phases/CI02-CLI.md` requires. The fallback
+  is one constant in `core/endpoints.py`.
   Governing Ref: `docs/phases/CI02-CLI.md` interface rules; recorded answer "Private by default".
 - Decision DEC-04: Results carry a top-level `routing` object. It is not named `profile`.
   Status: ACCEPTED
   Rationale: `profile` already means the diagnostic run mode in `core/cli.py` and `core/access/shared.py`.
   Governing Ref: `core/cli.py` gate profile field.
-- Decision DEC-05: The legacy shape (`[gitlab]`, `[gitlab.NAME]`, `--gitlab-profile`) is accepted for one release.
-  Every use writes a deprecation warning. A target that mixes the legacy and new shapes is rejected.
-  Status: CONFLICT - awaiting decision
-  Rationale: Existing user-level targets keep working while their owners migrate. Mixing shapes would make the
-  default ambiguous. TD-11 tracks the removal.
-  Conflict: the recorded answer is "Accept both one release". The code accepts each shape alone but rejects a target
-  holding both with `gitlab_target_shapes_mixed`.
-  Governing Ref: `docs/PLANS.md` parallel-implementation guidance; recorded answer "Accept both one release".
+- Decision DEC-05: The legacy shape (`[gitlab]`, `[gitlab.NAME]`, `--gitlab-profile`) is accepted for one release,
+  alone or beside the new tables. Every load of a target holding `[gitlab]`, and every `--gitlab-profile`, writes one
+  deprecation event. Only these combinations are rejected:
+  - `[gitlab]` fields with `[gitlab_private]`: `gitlab_private_declared_twice`, because both answer `gitlab_private`;
+  - `--gitlab` with `--gitlab-profile`: `gitlab_selector_conflict`.
+  `[gitlab]` + `[gitlab_public]` is allowed: `[gitlab]` answers `gitlab_private`, `[gitlab_public]` answers
+  `gitlab_public`. `[gitlab_routing]` may sit beside the legacy tables.
+  Status: ACCEPTED
+  Rationale: Existing user-level targets keep working while their owners migrate, one table at a time. TD-11 tracks
+  the removal.
+  Governing Ref: recorded answer "Accept both one release"; the reviewed legacy-shape table ("`[gitlab]` +
+  `[gitlab_public]` | allowed"); `docs/PLANS.md` parallel-implementation guidance.
 - Decision DEC-06: Authority table names use `_`, never `.`. A dot appears only where nesting is real, as in
   `[kubernetes.node_diagnostics]`.
   Status: ACCEPTED
-  Rationale: This prevents the nesting trap of issue #133. A dotted header beside the instance tables, such as
-  `[gitlab.com]` or `[gitlab_public.com]`, blocks with a diagnostic that names the nested table.
+  Rationale: This prevents the nesting trap of issue #133. A table nested in the selected instance table, such as
+  `[gitlab_public.com]`, blocks with a diagnostic that names the nested table. `[gitlab.com]` is the legacy table of
+  DEC-10.
   Governing Ref: Surprises entry on TOML nesting; recorded answer "use [gitlab_private] use [gitlab_public] design cli
   so caller can choose".
 - Decision DEC-07: Every new name is defined once, as a constant in `ci-skills/lib/python/core/endpoints.py`. The
@@ -168,27 +181,30 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - Decision DEC-08: `project`, `group` and `runner_id` stay optional in each GitLab instance table, exactly as in the
   flat table today. When `project` is absent the caller passes `--project`; `project = ""` stays rejected. Examples
   and the template omit `project`, so the caller always names the project.
-  Status: CONFLICT - awaiting decision
-  Rationale: This preserves current behavior and avoids a hidden default project. It deliberately differs from the
-  shell-script guidance to use a known repository default: a user-level target serves many projects.
-  Conflict: the recorded answer is "project default should \"\" because call need provide otherwise what project is
-  this ? and I think that the current behaviour it can be empty". The code rejects `project = ""`.
-  Governing Ref: issue #133 acceptance; current `core/target.py` `_optional_reference` behavior.
+  Status: ACCEPTED
+  Rationale: The answer asks for the current behavior, which is unchanged: `project` may be left out, and the caller
+  then names the project. A user-level target serves many projects, so no default project is set.
+  Governing Ref: recorded answer "project default should \"\" because call need provide otherwise what project is
+  this ? and I think that the current behaviour it can be empty"; current `core/target.py` `_optional_reference`
+  behavior.
 - Decision DEC-09: Adding `routing` to the result schemas is a MINOR change. `schema_version` moves from `1.0` to `1.1`,
   and schemas that pin `1.0` accept both versions.
   Status: ACCEPTED
   Rationale: An added optional field keeps old consumers working, per `docs/phases/CI07-SCHEMA.md`. Historical
   receipts remain valid.
   Governing Ref: `docs/phases/CI07-SCHEMA.md` versioning rules.
-- Decision DEC-10: In the legacy shape, `[gitlab]` is the private instance. `--gitlab private` reads it with
-  `selected_by` `argv:--gitlab=private`; `--gitlab public` returns `gitlab_public_target_required`. Legacy routes report
-  `kubernetes` and `harbor` as `null`, because the legacy shape has no `[gitlab_routing]`.
-  Status: CONFLICT - awaiting decision
-  Rationale: The recorded answer says `gitlab` means the private GitLab. A legacy target has no pairing to report.
-  Conflict: the same answer is "remeber gitlab mean private gitlab.com public". On the issue #133 shape
-  (`[gitlab]` + `[gitlab.com]`), `--gitlab public` returns `gitlab_public_target_required` instead of reading
-  `[gitlab.com]`.
-  Governing Ref: recorded answer "remeber gitlab mean private gitlab.com public"; DEC-05.
+- Decision DEC-10: In the legacy shape, `[gitlab]` fields answer `gitlab_private` and `[gitlab.com]` answers
+  `gitlab_public` when `[gitlab_public]` is absent. On the issue #133 shape, `--gitlab private` reads `[gitlab]` and
+  `--gitlab public` reads `[gitlab.com]`; `routing.gitlab` names the table read (`gitlab`, `gitlab.com`). The match is
+  by the table key `com`, the constant `GITLAB_LEGACY_PUBLIC_KEY` in `core/endpoints.py`; no URL is inspected.
+  Without `[gitlab_routing]`, legacy routes report `kubernetes` and `harbor` as `null` and a command that requires them
+  reads `[kubernetes]` and `[harbor]` directly, as before this change. With `[gitlab_routing]`, the row of the
+  instance pairs them.
+  Status: ACCEPTED
+  Rationale: The answer names both legacy tables. The reviewed plan's line "No silent mapping of `[gitlab.com]` to
+  public" is replaced by this answer: the mapping is one named constant, applies only when `gitlab_public` is
+  selected, and the load writes the deprecation event.
+  Governing Ref: recorded answer "remeber gitlab mean private gitlab.com public"; DEC-05; DEC-19.
 - Decision DEC-11: The call chain carries one `GitLabSelection` value (`selector` from `--gitlab`, `profile` from
   `--gitlab-profile`) under the keyword `gitlab_selection`. `load_target` and `load_gitlab_target` keep the two string
   keywords of the Interfaces section. `GitLabTarget.route` replaces `GitLabTarget.profile`; `Target.routing` returns it.
@@ -259,26 +275,38 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   the behavior and declares `token_file` in the template.
   Governing Ref: pinned Standards `docs/agents/contracts/policy-authority-contract.md` (credential scope needs a
   named authority); Surprises entry on `GITLAB_TOKEN`.
-- Decision DEC-17: `[gitlab_routing]` is required whenever an instance table exists, including a GitLab-only target.
-  Status: CONFLICT - awaiting decision
-  Rationale: One place answers the default before any call (DEC-02).
-  Conflict: no recorded answer covers a GitLab-only target; "One routing table" settles the shape, not whether the
-  table is mandatory.
-  Governing Ref: DEC-02; queue record `handoff.operatorAnswers`.
+- Decision DEC-17: `[gitlab_routing]` is optional. A GitLab-only target needs only an instance table. A command that
+  requires Kubernetes or Harbor needs the selected instance's row and blocks without it (DEC-18), except the legacy
+  shape without `[gitlab_routing]` (DEC-10).
+  Status: ACCEPTED
+  Rationale: The table answers the pairing; without it, the default is `GITLAB_DEFAULT_INSTANCE` (DEC-03), so a
+  GitLab-only command has nothing else to read from it. Combined commands stay fail-closed.
+  Governing Ref: team answer to review finding F33, relayed with the section C answers; DEC-02; DEC-18.
 - Decision DEC-18: A command that requires a routed authority reads the table the selected `[gitlab_routing]` row
-  names. A row that omits it blocks with the existing `target is missing required authority tables: <names>`. Optional
-  authorities and legacy routes read the authority's own table.
+  names. A row that omits it, or a target without `[gitlab_routing]`, blocks with the existing `target is missing
+  required authority tables: <names>`. Optional authorities, and legacy routes on a target without `[gitlab_routing]`,
+  read the authority's own table.
   Status: ACCEPTED
   Rationale: Issue #133 requires fail-closed selection, and an omitted pairing is the only case where the row carries
   information while one table per authority exists. No new reason token.
   Governing Ref: issue #133 Expected section; review of `a9eddd5` (findings F01, F4).
+- Decision DEC-19: `gitlab_private`, `gitlab_public` and the legacy key `com` are table keys. They mean only what the
+  code assigns: which table `--gitlab` reads (`GITLAB_SELECTORS`), the fallback when nothing names an instance
+  (`GITLAB_DEFAULT_INSTANCE`), the legacy table that answers `gitlab_public` (`GITLAB_LEGACY_PUBLIC_KEY`), and the
+  `[gitlab_routing]` row of each instance. The GitLab host is the selected table's `url`. No code derives visibility,
+  trust or a host from a key, or a key from a URL.
+  Status: ACCEPTED
+  Rationale: One meaning per name, defined in code; a reader of a target or a result learns the host from `url` and
+  `origin`, not from the key.
+  Governing Ref: team answer "remember it just a key it has meaning if we define meaning in coe"; DEC-07.
 
 ## Outcomes & Retrospective
 
-- Delivered on PR #141: instance tables, `[gitlab_routing]`, `--gitlab`, route-enforced Kubernetes and Harbor
-  selection, the `routing` object in five command families (DEC-15), the deprecation path, and the documents.
-- Not delivered: candidate receipts (GPP-08) and the second install upgrade (GPP-07b); five decisions are in
-  CONFLICT and two are PROPOSED.
+- Delivered on PR #141: instance tables, the optional `[gitlab_routing]`, `--gitlab`, route-enforced Kubernetes and
+  Harbor selection, the `routing` object in five command families (DEC-15), the legacy path with its deprecation
+  event, the tracked mirror qualification tool, and the documents.
+- Not delivered yet: candidate receipts (GPP-08) and the second install upgrade (GPP-07b). DEC-14 and DEC-16 are
+  PROPOSED.
 - Lesson: the first implementation reported the pairing without using it; a test that asserts behavior for an
   omitted pairing would have caught it before review.
 
@@ -292,6 +320,18 @@ authority, meaning one external system the command may contact: `github`, `gitla
 parser is `ci-skills/lib/python/core/target.py`, function `load_target`. The allowed tables and fields are declared
 once in `ci-skills/lib/python/core/endpoints.py` as `TARGET_CONTRACT`. `ci-skills/lib/python/core/catalog.py` derives
 the authority list `AUTHORITIES` from that contract and declares which authorities each command requires.
+
+`gitlab_private`, `gitlab_public` and the legacy key `com` are keys (DEC-19). The code assigns them exactly this:
+
+- `gitlab_private`: the table `--gitlab private` reads; the instance read when neither `--gitlab` nor
+  `[gitlab_routing].default` names one (`GITLAB_DEFAULT_INSTANCE`); its `[gitlab_routing]` row.
+- `gitlab_public`: the table `--gitlab public` reads; its `[gitlab_routing]` row.
+- `[gitlab]` fields: answer `gitlab_private` for one release.
+- `com` under `[gitlab]`: answers `gitlab_public` for one release when `[gitlab_public]` is absent
+  (`GITLAB_LEGACY_PUBLIC_KEY`).
+
+The host comes from the selected table's `url`. Neither key says whether that GitLab is self-managed, on gitlab.com,
+reachable from the internet, or trusted.
 
 On the base revision, the GitLab authority is a flat `[gitlab]` table plus optional named profiles `[gitlab.NAME]`,
 selected with `--gitlab-profile NAME`. Profiles were added in PR #129. The selection reaches the provider through:
@@ -442,12 +482,18 @@ done. Commands, from the installed copy, with the kube context `authority.sh` na
         --receipt-out tests/acceptance/candidate/access.json
 
 The flags are those recorded in the current `tests/acceptance/candidate/access.json`. The mirror `APPLIED` and
-`NO_OP` receipts come from `gitlab_mirror.py sync --project hott/test-mirror-push --destination
-spyroot/test-mirror-push --create-if-absent`: `--live-plan`, then `--apply --confirm-plan <digest> --receipt-out
-<file>`, twice. The `NO_OP` receipt needs a `gitlab_mirror_smoke_cleanup` record. Its only producer is the scratch
-pair `.internal/scratch/codex/ci14-ci15-closure/pr127-corrected/mirror/qualify-executed.py` (writes
-`mirror-live-allocation.json`) and `mirror-owned-cleanup.py` (deletes the run-created mirror and GitHub repository and
-writes the record); running them again needs the decision listed under GPP-08. Then run
+`NO_OP` receipts and the `gitlab_mirror_smoke_cleanup` record come from one bounded qualification, the one the smoke
+inventory permits when candidate evidence requires renewal:
+
+    python tools/qualify_mirror.py --skill ~/.claude/skills/ci-skills --work-dir .internal/log/bug-133/mirror \
+        --project hott/test-mirror-push --destination spyroot/test-mirror-push --source-id 261 \
+        --seed-ref branches:main:<sha> --seed-ref tags:smoke-seed:<sha> --run-id <id>
+
+The tool runs the installed `gitlab_mirror.py sync`: `--live-plan`, a wrong-digest rejection, `--apply
+--confirm-plan <digest> --receipt-out <file>` for `APPLIED`, the same for `NO_OP`, then deletes only the run-created
+mirror and GitHub repository by native ID, proves both absent, repeats cleanup once, and writes
+`mirror-noop-with-cleanup-receipt.json`. It stops before any write if the destination or a mirror already exists or
+the source ID differs. Then run
 `python tools/check_live_acceptance.py --root . --no-aggregate --receipts tests/acceptance/candidate --json`.
 Acceptance: the checker reports `PASS`, and `ci-skills/required` and the `live-acceptance` deployment are green on the
 PR head.
@@ -471,6 +517,8 @@ it.
     GITLAB_ROUTING_DEFAULT_KEY: Final = "default"
     GITLAB_SELECTORS: Final = MappingProxyType({"private": GITLAB_PRIVATE_TABLE, "public": GITLAB_PUBLIC_TABLE})
     GITLAB_ROUTED_AUTHORITIES: Final = ("kubernetes", "harbor")
+    GITLAB_DEFAULT_INSTANCE: Final = GITLAB_PRIVATE_TABLE
+    GITLAB_LEGACY_PUBLIC_KEY: Final = "com"
 
 MODIFIED `TARGET_CONTRACT` in the same file. `Table(GITLAB_AUTHORITY, ...)` keeps its fields (`url`, `project`,
 `group`, `token_file`, `runner_id`) and gains `instances=tuple(GITLAB_SELECTORS.values())`. Its
@@ -496,22 +544,27 @@ INTRODUCED in `ci-skills/lib/python/core/target.py`:
     class GitLabRouting:
         default: str
         routes: Mapping[str, GitLabRoute]
+        declared: bool              # whether the target declares [gitlab_routing]
         @classmethod
-        def parse(cls, data: Mapping[str, object]) -> Self: ...
+        def parse(cls, data: Mapping[str, object], instances: Mapping[str, str]) -> Self: ...
         def select(self, selection: GitLabSelection) -> GitLabRoute: ...
+        def route_for(self, table: str) -> Optional[GitLabRoute]: ...
+
+`instances` maps each declared instance to the table that answers it (`_declared_instances` in `core/target.py`):
+`[gitlab_private]` or `[gitlab]` fields to `gitlab_private`, `[gitlab_public]` or `[gitlab.com]` to `gitlab_public`.
 
 Invariants enforced by `GitLabRouting.parse`:
 
-- `[gitlab_routing]` must exist when `[gitlab_private]` or `[gitlab_public]` exists.
-- `default` names a declared GitLab instance table.
-- Each declared instance table has exactly one row.
-- A row names no undeclared instance table.
+- `[gitlab_routing]` is optional; without it the default is `GITLAB_DEFAULT_INSTANCE` and no route pairs a table.
+- `default` is optional; when present it names a declared instance.
+- With the table, each declared instance has exactly one row, and no row names an undeclared instance.
 - Row keys are only `kubernetes` and `harbor`, and each value names a declared table of that authority.
-- A target with both legacy `[gitlab]` and any new table is rejected with `gitlab_target_shapes_mixed`.
+
+`[gitlab]` fields beside `[gitlab_private]` are rejected before parsing with `gitlab_private_declared_twice`.
 
 New reason tokens:
 
-- `gitlab_routing_required`
+- `gitlab_private_declared_twice`
 - `gitlab_routing_default_unknown`
 - `gitlab_routing_row_missing`
 - `gitlab_routing_row_unknown`
@@ -519,14 +572,14 @@ New reason tokens:
 - `gitlab_routing_harbor_unknown`
 - `gitlab_private_target_required`
 - `gitlab_public_target_required`
-- `gitlab_target_shapes_mixed`
 - `gitlab_selector_conflict` (both `--gitlab` and `--gitlab-profile`)
 - `gitlab_selector_unknown` (a library caller passes a selector outside `GITLAB_SELECTORS`)
 
 Each is a constant in `core/target.py`; the two families come from `GitLabRouting.instance_required(table)` and
-`GitLabRouting.pairing_unknown(authority)`. A dotted header beside the instance tables blocks with
-`NESTED_TABLE_DIAGNOSTIC`, for example `[gitlab.com] is table com nested in [gitlab]: TOML reads a dot in a table name
-as nesting; name a GitLab [gitlab_private] or [gitlab_public] and add [gitlab_routing]`.
+`GitLabRouting.pairing_unknown(authority)`. A table nested in the selected instance table blocks with
+`NESTED_TABLE_DIAGNOSTIC`, for example `[gitlab_public.com] is table com nested in [gitlab_public]: TOML reads a dot
+in a table name as nesting; an instance table holds no nested table; name each GitLab [gitlab_private] or
+[gitlab_public]`.
 
 `load_target` gains `gitlab: Optional[str]`, holding a `GITLAB_SELECTORS` key, beside the legacy `gitlab_profile`.
 `Target` gains `routing: Optional[GitLabRoute]`. Field errors name the table read, for example
@@ -558,12 +611,17 @@ MODIFIED `tools/skillkit/endpoint_gate.py` (the `undocumented` rule folds instan
 `tools/skillkit/portability_gate.py` (headers from `TargetContract.tables`; `[gitlab_routing]` values are not hosts)
 and `tools/check_live_acceptance.py` (`RECEIPT_SCHEMA_VERSIONS` from the catalog constants).
 
+INTRODUCED `tools/skillkit/mirror_qualification.py` and its thin adapter `tools/qualify_mirror.py`, with
+`tests/python/test_mirror_qualification.py`. `MirrorQualification.run()` drives the installed `gitlab_mirror.py`
+through a `CommandRunner` and checks and deletes run-owned objects through a `MirrorProvider`; the tests replace both.
+Fixture identity (`--project`, `--destination`, `--source-id`, `--seed-ref`) is input, never a constant.
+
 MODIFIED `ci-skills/lib/python/core/catalog.py`:
 
 - `GITLAB_TARGET_OPTION: Final = "--gitlab"` with `choices=tuple(GITLAB_SELECTORS)`;
 - `GITLAB_PROFILE_OPTION` stays as the deprecated alias;
 - `supports_gitlab_profile` becomes `supports_gitlab_selection` and gates both options;
-- the help text states the default comes from `[gitlab_routing]`.
+- the help text states the default comes from `[gitlab_routing]`, else `gitlab_private`.
 
 MODIFIED result envelopes in `core/gitlab/gitlab_actions.py`, `ci-skills/lib/python/access/access.py`,
 `core/gitlab/mirror/cli.py`, `core/toolbox_actions.py` (runner manager) and
@@ -644,7 +702,7 @@ Acceptance is the installed behavior against a target of this shape:
     token_file = "gitlab-private.token"
 
     [gitlab_public]
-    url = "https://gitlab.public.example.test"
+    url = "https://gitlab.second.example.test"
     token_file = "gitlab-public.token"
 
     [kubernetes]
@@ -662,8 +720,12 @@ Expected results:
   and `routing.selected_by` `default`.
 - Adding `--gitlab public` returns `origin` from `[gitlab_public]` and `routing.gitlab` `gitlab_public`.
 - `--gitlab public` with no `[gitlab_public]` returns `BLOCKED` with `gitlab_public_target_required`.
+- The same target without `[gitlab_routing]` returns `DRY_RUN` from `[gitlab_private]`; a runner deploy on it blocks
+  with `target is missing required authority tables: harbor, kubernetes`.
 - A legacy `[gitlab]` plus `[gitlab.com]` target, the shape of issue #133, returns `DRY_RUN` with `routing.gitlab`
-  `gitlab`, `selected_by` `legacy`, and one deprecation warning on standard error.
+  `gitlab`, `selected_by` `legacy`, and one deprecation warning on standard error. With `--gitlab public` it returns
+  `routing.gitlab` `gitlab.com` and `selected_by` `argv:--gitlab=public`.
+- `[gitlab]` fields beside `[gitlab_private]` return `BLOCKED` with `gitlab_private_declared_twice`.
 
 A combined command reads the cluster and registry the route pairs. From the directory holding the target and a token
 file `runner.token`:
@@ -682,7 +744,7 @@ harbor, kubernetes`. The cluster and registry endpoints appear in the access dry
 
     CI_SKILLS_TARGET=$PWD/target.toml python ci-skills/bin/access_check.py --dry-run --json --gitlab public
 
-Expected: `"routing"` as above and `"surfaces"` targets `{"gitlab": "https://gitlab.public.example.test",
+Expected: `"routing"` as above and `"surfaces"` targets `{"gitlab": "https://gitlab.second.example.test",
 "kubernetes": "admin-context -> https://api.cluster.example.test:6443"}`.
 
 ## Idempotence and Recovery
@@ -701,7 +763,7 @@ BEFORE, the issue #133 target and command on an install at `fb8b5ac`:
 
 BEFORE, the same on an install at `925b898`:
 
-    {"status": "DRY_RUN", "phase": "OFFLINE_PLAN", "origin": "<private GitLab origin>",
+    {"status": "DRY_RUN", "phase": "OFFLINE_PLAN", "origin": "<[gitlab] url>",
      "target_source": "env:CI_SKILLS_TARGET;argv:--project"}
 
 ## Interfaces and Dependencies
@@ -714,7 +776,8 @@ In `ci-skills/lib/python/core/target.py`, the following must exist at the end:
                     gitlab_profile: Optional[str] = None) -> Target
     class GitLabSelection: from_args(args) -> Self; requested; selected_by; validate()
     class GitLabRoute: legacy; table_for(authority) -> Optional[str]; as_dict(); selection_source(source)
-    class GitLabRouting: parse(data) -> Self; select(selection) -> GitLabRoute
+    class GitLabRouting: default; routes; declared; parse(data, instances) -> Self; select(selection) -> GitLabRoute;
+        route_for(table) -> Optional[GitLabRoute]
 
 In `ci-skills/lib/python/core/endpoints.py`, the constants listed in Concrete Steps, `TargetContract.authority_of`,
 `TargetContract.tables` and `TargetContract.routing_table() -> Optional[str]`. In `core/logging.py`,
@@ -722,4 +785,6 @@ In `ci-skills/lib/python/core/endpoints.py`, the constants listed in Concrete St
 
 Revision notes: initial version, derived from issue #133 and decisions DEC-01 to DEC-09. Then DEC-10 to DEC-13 during
 implementation; milestones, the `bless` row and DEC-14 after the plan review; DEC-15 to DEC-18, the CONFLICT statuses
-and runnable GPP-M4/GPP-M5 commands after the review of `a9eddd5`.
+and runnable GPP-M4/GPP-M5 commands after the review of `a9eddd5`. Then GPP-10: the recorded answers replace the
+CONFLICT statuses of DEC-03, DEC-05, DEC-08, DEC-10 and DEC-17; DEC-19 states that `gitlab_private`, `gitlab_public` and
+`com` are keys; the mirror producer is tracked in `tools/qualify_mirror.py`.
