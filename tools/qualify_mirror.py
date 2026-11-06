@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Run the one bounded mirror qualification for candidate receipt renewal.
 
-The fixture identity comes from `docs/2026-10-31/live-smoke-inventory.md`
-(`test-mirror-push`); the candidate is the installed copy named by `--skill`.
-The behavior lives in `tools/skillkit/mirror_qualification.py`.
+The caller passes the fixture identity that
+`docs/2026-10-31/live-smoke-inventory.md` lists for `test-mirror-push` with
+`--project`, `--destination`, `--source-id` and `--seed-ref`; `--skill` names the
+installed copy under test. The behavior lives in
+`tools/skillkit/mirror_qualification.py`.
 
-    tools/qualify_mirror.py --skill ~/.claude/skills/ci-skills \\
-        --work-dir .internal/log/bug-133/mirror --project hott/test-mirror-push \\
+    tools/qualify_mirror.py --skill <installed skill directory> \\
+        --work-dir <private directory> --project hott/test-mirror-push \\
         --destination spyroot/test-mirror-push --source-id 261 \\
         --seed-ref branches:main:<sha> --seed-ref tags:smoke-seed:<sha> --run-id <id>
 
@@ -16,17 +18,18 @@ The first command is a dry run, the default: it runs the live plans and the
 wrong-digest rejection, creates and deletes nothing, and writes no ledger;
 ``--plan-only`` selects the same mode explicitly. The second creates the mirror
 and destination, applies the repeat, and deletes both. ``--reconcile`` finishes
-the pending cleanup recorded by the ledger in ``--work-dir``. ``--help`` needs
+the cleanup that the ledger in ``--work-dir`` records as pending. ``--help`` needs
 neither ``--skill`` nor the installed copy; it shows ``--<GITLAB_TARGET_OPTION>``
 where the installed catalog names the GitLab instance option.
 
 Run it from the directory whose target file the qualification must use: the
 installed command and the in-process provider both resolve the target from the
-caller's working directory. SIGINT or SIGTERM stops the mode without starting a
-deletion; with a ledger held, it is written again and the reason names
-``--reconcile``.
+working directory of ``tools/qualify_mirror.py``. SIGINT or SIGTERM stops the
+mode without starting a deletion; with a ledger held, ``MirrorQualification``
+writes the ledger again and the reason names ``--reconcile``.
 
-Exit 0 prints the plan or the final ledger; exit 2 prints the stopping reason.
+``main`` prints the plan or the final ledger and returns 0, or prints the
+stopping reason and returns 2; the script exits with that value.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -86,7 +89,7 @@ LEDGER_FIELD: Final = "ledger"
 
 
 def skill_parser() -> argparse.ArgumentParser:
-    """Declare ``--skill``, read before the installed option names are known.
+    """Declare ``--skill``; ``main`` parses it before it imports the installed catalog.
 
     :returns: Parser holding only ``--skill``, without help.
     """
@@ -166,10 +169,11 @@ def build_parser(gitlab_option: str) -> argparse.ArgumentParser:
 def repository_status() -> ModuleType:
     """Load ``REPOSITORY_STATUS_FILE`` as ``REPOSITORY_STATUS_NAME``.
 
-    The module is not added to ``sys.modules``; ``status.py`` imports nothing.
+    ``repository_status`` does not add the module to ``sys.modules``;
+    ``status.py`` imports nothing.
 
     :returns: The repository's status module.
-    :raises ImportError: The file cannot be loaded.
+    :raises ImportError: ``importlib.util`` returns no spec or loader for the file.
     """
     spec = util.spec_from_file_location(REPOSITORY_STATUS_NAME, REPOSITORY_STATUS_FILE)
     if spec is None or spec.loader is None:
@@ -207,11 +211,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """Bind the installed copy, parse inputs, run the selected mode and print it.
 
     ``-h`` or ``--help`` prints the help and exits 0 before ``--skill`` is read
-    or the installed copy is imported. Otherwise the installed skill directory goes
-    on ``sys.path`` before any ``lib`` import, so the GitLab option, the status
-    tokens and the provider come from the installed copy.
+    or the installed copy is imported. Otherwise ``installed_bindings`` puts the
+    installed skill directory first on ``sys.path`` before any ``lib`` import, so
+    ``main`` reads the GitLab option, the status tokens and the provider from the
+    installed copy.
 
-    :param argv: Arguments, or None for the process arguments.
+    :param argv: Arguments. When the value is ``None``, ``main`` reads
+        ``sys.argv[1:]``.
     :returns: 0 after PASS or PLANNED, 2 when a step stops the run.
     """
     arguments = list(sys.argv[1:] if argv is None else argv)

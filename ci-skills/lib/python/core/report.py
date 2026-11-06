@@ -585,7 +585,9 @@ def human(data: JSONObject) -> str:
 def _routing_line(routing: JSONObject) -> str:
     """Render the selected GitLab and its paired tables on one line.
 
-    :param routing: Result ``routing`` object; a ``null`` table prints ``none``.
+    :param routing: Result ``routing`` object. ``_routing_line`` prints ``none``
+        for a ``kubernetes`` or ``harbor`` value that is ``null``, and ``unknown``
+        when ``selected_by`` is missing.
     :returns: ``Routing: gitlab=... kubernetes=... harbor=... (selected_by)``.
     """
     tables = " ".join(

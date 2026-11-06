@@ -85,8 +85,10 @@ class ActionPlan(SkillAction):
     :param revision: Optional exact source revision bound to the action.
     :param project_ids: Optional project IDs selected for runner assignment.
     :param runner_snapshot: Optional before-state bound to runner deletion.
-    :param routing: Selected GitLab table and its pairing, or ``None`` when the
-        target was constructed without a route.
+    :param routing: Route of the GitLab table the target read. ``ActionPlan`` binds it into
+        ``plan_digest``, and ``_result`` copies it into ``routing``. The value is
+        ``None`` only when code built the target without a route; the plan and
+        the result then carry no ``routing``.
 
     .. attribute :: kind
         :type: str
@@ -156,8 +158,10 @@ class ActionPlan(SkillAction):
     .. attribute :: routing
         :type: Optional[GitLabRoute]
 
-        Selected GitLab table and its pairing, or ``None`` when the target was
-        constructed without a route.
+        Route of the GitLab table the target read. ``ActionPlan`` binds it into
+        ``plan_digest``, and ``_result`` copies it into ``routing``. The value is
+        ``None`` only when code built the target without a route; the plan and
+        the result then carry no ``routing``.
     """
 
     kind: str

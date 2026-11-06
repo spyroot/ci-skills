@@ -186,7 +186,7 @@ class MachineArgumentParser(TrackedArgumentParser):
 
 
 def add_gitlab_selection_arguments(result: argparse.ArgumentParser) -> None:
-    """Expose the GitLab instance selector and its deprecated profile alias.
+    """Add ``--gitlab private|public`` and the deprecated ``--gitlab-profile NAME``.
 
     :param result: Parser for a command that supports GitLab configuration.
     :returns: None after adding the catalogue-declared selectors.

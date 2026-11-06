@@ -1,12 +1,8 @@
 """Validate explicit, nonsecret host and cluster targets for diagnostic commands.
 
-GitLab is read from one instance table, ``[gitlab_private]`` or
-``[gitlab_public]``, chosen by ``--gitlab private|public``, else by the optional
-``[gitlab_routing].default``, else ``GITLAB_DEFAULT_INSTANCE``. When GitLab is
-selected, a command that requires Kubernetes or Harbor reads the tables the
-selected ``[gitlab_routing]`` row names; an optional authority reads its own table. The legacy ``[gitlab]`` table and its
-``[gitlab.NAME]`` profiles are read for one release and write one
-``gitlab_target_deprecated`` event.
+``load_target`` reads one GitLab instance table and, for a command that also
+requires Kubernetes or Harbor, the tables that the selected ``[gitlab_routing]``
+row names. ``core/endpoints.py`` declares the table names.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -189,20 +185,28 @@ class HarborTarget:
 
 @dataclass(frozen=True, slots=True)
 class GitLabSelection:
-    """Caller choice of GitLab instance, from ``--gitlab`` or ``--gitlab-profile``.
+    """Hold the ``--gitlab`` and ``--gitlab-profile`` values of one command invocation.
 
-    :param selector: ``GITLAB_SELECTORS`` key from ``--gitlab``, or ``None``.
-    :param profile: Legacy ``[gitlab.NAME]`` name from ``--gitlab-profile``, or ``None``.
+    :param selector: ``private`` or ``public``; the caller sets it with
+        ``--gitlab``. When the value is ``None``, ``GitLabRouting.select`` reads
+        ``[gitlab_routing].default``, else ``gitlab_private``.
+    :param profile: ``NAME`` of a legacy ``[gitlab.NAME]`` table; the caller sets
+        it with the deprecated ``--gitlab-profile``. When the value is ``None``,
+        ``_select_gitlab`` reads an instance table.
 
     .. attribute :: selector
         :type: Optional[str]
 
-        ``GITLAB_SELECTORS`` key from ``--gitlab``, or ``None``.
+        ``private`` or ``public``; the caller sets it with ``--gitlab``. When the
+        value is ``None``, ``GitLabRouting.select`` reads
+        ``[gitlab_routing].default``, else ``gitlab_private``.
 
     .. attribute :: profile
         :type: Optional[str]
 
-        Legacy ``[gitlab.NAME]`` name from ``--gitlab-profile``, or ``None``.
+        ``NAME`` of a legacy ``[gitlab.NAME]`` table; the caller sets it with the
+        deprecated ``--gitlab-profile``. When the value is ``None``,
+        ``_select_gitlab`` reads an instance table.
     """
 
     selector: Optional[str] = None
@@ -212,8 +216,11 @@ class GitLabSelection:
     def from_args(cls, args: argparse.Namespace) -> Self:
         """Read both selector options from a parsed command namespace.
 
-        :param args: Parsed namespace; absent options select nothing.
-        :returns: Selection carrying the caller's options.
+        :param args: Parsed command namespace. ``from_args`` sets a field to
+            ``None`` when the namespace has no ``GITLAB_TARGET_DEST`` (``gitlab``)
+            or ``GITLAB_PROFILE_DEST`` (``gitlab_profile``) attribute.
+        :returns: A ``GitLabSelection`` with the ``--gitlab`` and
+            ``--gitlab-profile`` values.
         """
         return cls(
             getattr(args, GITLAB_TARGET_DEST, None),
@@ -224,16 +231,16 @@ class GitLabSelection:
     def requested(self) -> bool:
         """Report whether the caller named a GitLab instance or profile.
 
-        :returns: True when either option was supplied.
+        :returns: True when the caller passed ``--gitlab`` or ``--gitlab-profile``.
         """
         return self.selector is not None or self.profile is not None
 
     @property
     def selected_by(self) -> Optional[str]:
-        """Render the caller's option as selection provenance.
+        """Render the option the caller passed as the ``selected_by`` value.
 
-        :returns: ``argv:--gitlab=NAME`` or ``argv:--gitlab-profile="NAME"``,
-            or ``None`` when the caller named nothing.
+        :returns: ``argv:--gitlab=NAME`` or ``argv:--gitlab-profile="NAME"``.
+            ``selected_by`` returns ``None`` when the caller passed neither option.
         """
         if self.selector is not None:
             return f"{ROUTING_ARGV_PREFIX}{GITLAB_TARGET_OPTION}={self.selector}"
@@ -244,7 +251,9 @@ class GitLabSelection:
     def validate(self) -> None:
         """Reject two selectors at once and a selector outside the contract.
 
-        :raises TargetError: Both options were given, or the selector is unknown.
+        :raises TargetError: The caller passed both ``--gitlab`` and
+            ``--gitlab-profile`` (``gitlab_selector_conflict``), or ``selector`` is
+            not ``private`` or ``public`` (``gitlab_selector_unknown``).
         """
         if self.selector is not None and self.profile is not None:
             raise TargetError(GITLAB_SELECTOR_CONFLICT)
@@ -254,12 +263,20 @@ class GitLabSelection:
 
 @dataclass(frozen=True, slots=True)
 class GitLabRoute:
-    """The GitLab table read and the Kubernetes and Harbor tables paired with it.
+    """Name the GitLab table a command reads and the tables its routing row names.
+
+    The routing row is the ``[gitlab_routing]`` row of that instance; it names the
+    Kubernetes and Harbor tables.
 
     :param gitlab: Table read: an instance table, or legacy ``gitlab``/``gitlab.NAME``.
-    :param kubernetes: Paired Kubernetes table, or ``None`` when not routed.
-    :param harbor: Paired Harbor table, or ``None`` when not routed.
-    :param selected_by: ``default``, ``legacy``, or the caller's ``argv:`` option.
+    :param kubernetes: Kubernetes table that the ``[gitlab_routing]`` row names.
+        When the value is ``None``, ``_routed_tables`` raises ``TargetError`` for
+        a command that requires Kubernetes, unless ``_legacy_compat`` applies.
+    :param harbor: Harbor table that the ``[gitlab_routing]`` row names. When the
+        value is ``None``, ``_routed_tables`` raises ``TargetError`` for a command
+        that requires Harbor, unless ``_legacy_compat`` applies.
+    :param selected_by: ``default``, ``legacy``, ``argv:--gitlab=private``,
+        ``argv:--gitlab=public`` or ``argv:--gitlab-profile="NAME"``.
 
     .. attribute :: gitlab
         :type: str
@@ -269,17 +286,22 @@ class GitLabRoute:
     .. attribute :: kubernetes
         :type: Optional[str]
 
-        Paired Kubernetes table, or ``None`` when not routed.
+        Kubernetes table that the ``[gitlab_routing]`` row names. When the value
+        is ``None``, ``_routed_tables`` raises ``TargetError`` for a command that
+        requires Kubernetes, unless ``_legacy_compat`` applies.
 
     .. attribute :: harbor
         :type: Optional[str]
 
-        Paired Harbor table, or ``None`` when not routed.
+        Harbor table that the ``[gitlab_routing]`` row names. When the value is
+        ``None``, ``_routed_tables`` raises ``TargetError`` for a command that
+        requires Harbor, unless ``_legacy_compat`` applies.
 
     .. attribute :: selected_by
         :type: str
 
-        ``default``, ``legacy``, or the caller's ``argv:`` option.
+        ``default``, ``legacy``, ``argv:--gitlab=private``,
+        ``argv:--gitlab=public`` or ``argv:--gitlab-profile="NAME"``.
     """
 
     gitlab: str
@@ -309,7 +331,9 @@ class GitLabRoute:
     def as_dict(self) -> JSONObject:
         """Render the result ``routing`` object.
 
-        :returns: Table names, ``null`` for unrouted tables, and provenance.
+        :returns: A dict with ``gitlab``, ``kubernetes``, ``harbor`` and
+            ``selected_by``. ``kubernetes`` and ``harbor`` hold ``None``, which JSON
+            renders as ``null``, when the row names no table.
         """
         return {
             GITLAB_AUTHORITY: self.gitlab,
@@ -319,10 +343,12 @@ class GitLabRoute:
         }
 
     def selection_source(self, source: str) -> str:
-        """Bind an explicit caller selector to report and confirmation provenance.
+        """Append the option the caller passed to a target source string.
 
-        :param source: File or binding selection provenance.
-        :returns: ``source`` with the caller's option appended when one was given.
+        :param source: Target source string, such as ``cli:/path/target.toml`` or
+            ``binding:/path``.
+        :returns: ``source`` followed by ``;`` and ``selected_by`` when
+            ``selected_by`` starts with ``argv:``, otherwise ``source`` unchanged.
         """
         if self.selected_by.startswith(ROUTING_ARGV_PREFIX):
             return f"{source};{self.selected_by}"
@@ -333,19 +359,23 @@ class GitLabRoute:
 class GitLabRouting:
     """The parsed ``[gitlab_routing]`` table: default instance and one route each.
 
-    :param default: Instance read when the caller names none.
+    :param default: Instance table name that ``select`` reads when the caller
+        passes no ``--gitlab``: ``[gitlab_routing].default``, else
+        ``GITLAB_DEFAULT_INSTANCE``.
     :param routes: Route per declared instance, keyed by instance name; each
         route names the table it reads and has ``selected_by`` ``default``.
 
     .. attribute :: default
         :type: str
 
-        Instance read when the caller names none.
+        Instance table name that ``select`` reads when the caller passes no
+        ``--gitlab``: ``[gitlab_routing].default``, else ``GITLAB_DEFAULT_INSTANCE``.
 
     .. attribute :: routes
         :type: Mapping[str, GitLabRoute]
 
-        Route per declared instance, keyed by instance name.
+        Route per declared instance, keyed by instance name; each route names the
+        table it reads and has ``selected_by`` ``default``.
     """
 
     default: str
@@ -355,15 +385,18 @@ class GitLabRouting:
     def parse(cls, data: Mapping[str, object], instances: Mapping[str, str]) -> Self:
         """Validate ``[gitlab_routing]`` against the instances a target declares.
 
-        Without the table, the default is ``GITLAB_DEFAULT_INSTANCE`` and no
-        instance pairs a Kubernetes or Harbor table. ``default`` is optional.
+        Without ``[gitlab_routing]``, ``parse`` sets the default to
+        ``GITLAB_DEFAULT_INSTANCE`` and sets ``kubernetes`` and ``harbor`` to
+        ``None`` on every route. Without ``default``, ``parse`` uses
+        ``GITLAB_DEFAULT_INSTANCE``.
 
         :param data: Complete parsed target file.
         :param instances: Instance name mapped to the table that answers it.
         :returns: Default instance and the route of each declared instance.
         :raises TargetError: The table is malformed, its default or a row names an
-            undeclared instance, a declared instance has no row, or a row names an
-            undeclared Kubernetes or Harbor table.
+            undeclared instance, a declared instance has no row, or a row value
+            names a table that the file does not declare or that belongs to
+            another authority.
         """  # noqa: DOC502 - Shared table parser validates each row.
         if GITLAB_ROUTING_TABLE not in data:
             routes = {
@@ -408,10 +441,16 @@ class GitLabRouting:
         return cls(str(default), MappingProxyType(routes))
 
     def select(self, selection: GitLabSelection) -> GitLabRoute:
-        """Choose the caller's instance, or the default when the caller names none.
+        """Return the route of the instance that ``--gitlab`` names, or of ``default``.
 
-        :param selection: Validated caller selection without a legacy profile.
-        :returns: Route of the selected instance with its provenance.
+        ``select`` reads ``default`` when the caller passes no ``--gitlab``.
+
+        :param selection: ``--gitlab`` and ``--gitlab-profile`` values after
+            ``GitLabSelection.validate``; ``_select_gitlab`` calls ``select`` only
+            when the caller passed no ``--gitlab-profile``.
+        :returns: Route of that instance, with ``selected_by`` set to
+            ``argv:--gitlab=private``, ``argv:--gitlab=public``, ``default`` or
+            ``legacy``.
         :raises TargetError: The selected or default instance is not declared.
         """
         instance = (
@@ -468,7 +507,10 @@ class GitLabTarget:
     :param project: Project path, or ``None`` when no project is selected.
     :param group: Group path, or ``None`` when no group is selected.
     :param runner_id: Positive runner ID, or ``None`` when no runner is selected.
-    :param route: Table read and its pairing, or ``None`` for a constructed target.
+    :param route: Route of the selected GitLab table. ``_parse_gitlab`` always
+        sets it; the value is ``None`` only when code builds ``GitLabTarget``
+        without ``route``, and ``selection_source`` then returns its input
+        unchanged.
 
     .. attribute :: url
         :type: str
@@ -503,7 +545,9 @@ class GitLabTarget:
     .. attribute :: route
         :type: Optional[GitLabRoute]
 
-        Table read and its pairing, or ``None`` for a constructed target.
+        Route of the selected GitLab table. ``_parse_gitlab`` always sets it; the
+        value is ``None`` only when code builds ``GitLabTarget`` without
+        ``route``, and ``selection_source`` then returns its input unchanged.
     """
 
     url: str
@@ -515,10 +559,13 @@ class GitLabTarget:
     route: Optional[GitLabRoute] = None
 
     def selection_source(self, source: str) -> str:
-        """Bind an explicit caller selector to report and confirmation provenance.
+        """Append the option the caller passed to a target source string.
 
-        :param source: File or binding selection provenance, kept unchanged by default.
-        :returns: The source with the caller's selector when one was given.
+        :param source: Target source string, such as ``cli:/path/target.toml`` or
+            ``binding:/path``.
+        :returns: ``source`` followed by ``;`` and ``route.selected_by`` when the
+            caller passed ``--gitlab`` or ``--gitlab-profile``, otherwise
+            ``source`` unchanged.
         """
         return self.route.selection_source(source) if self.route else source
 
@@ -548,7 +595,8 @@ class GitLabOperationTarget:
     def routing(self) -> Optional[GitLabRoute]:
         """Return the selected GitLab route.
 
-        :returns: Route of the selected GitLab, or ``None`` for a constructed target.
+        :returns: Route of the selected GitLab table, or ``None`` when code built
+            the ``GitLabTarget`` without ``route``.
         """
         return self.gitlab.route
 
@@ -783,17 +831,25 @@ class Target:
 
     @property
     def routing(self) -> Optional[GitLabRoute]:
-        """Return the selected GitLab route, shared by every GitLab result.
+        """Return the route of the selected GitLab table.
 
-        :returns: Route of the selected GitLab, or ``None`` when GitLab is unselected.
+        GitLab action, ``access_check``, ``gitlab_mirror``,
+        ``gitlab_runner_manager`` and ``image_build_readiness chain`` results copy
+        it into ``routing``; ``gitlab_job`` and ``gitlab_pipeline`` results do not
+        (TD-12).
+
+        :returns: Route of the selected GitLab table, or ``None`` when the command
+            did not select the GitLab authority.
         """
         return self.gitlab.route if self.gitlab else None
 
     def selection_source(self, source: str) -> str:
-        """Include the selected GitLab instance in provider-selection provenance.
+        """Append the ``--gitlab`` or ``--gitlab-profile`` option to a target source.
 
-        :param source: Existing file or binding provenance.
-        :returns: Profile-bound provenance when GitLab is selected, otherwise the input.
+        :param source: Target source string, such as ``cli:/path/target.toml`` or
+            ``binding:/path``.
+        :returns: ``source`` with ``;argv:...`` appended when the caller passed
+            either option, otherwise ``source`` unchanged.
         """
         return self.gitlab.selection_source(source) if self.gitlab else source
 
@@ -998,7 +1054,8 @@ def _optional_file(
     :param key: File setting to resolve.
     :param skill_root: Installed skill directory excluded from file selections.
     :param target_directory: Directory containing the selected target file.
-    :param name: Table that qualifies the key in diagnostics, or ``None``.
+    :param name: Table name that ``_optional_file`` prefixes to ``key`` in a
+        diagnostic. When the value is ``None``, the diagnostic names the bare key.
     :returns: Canonical file path, or None when the setting is absent.
     :raises TargetError: If the path is empty, invalid, or inside the skill.
     """
@@ -1023,7 +1080,8 @@ def _optional_reference(
 
     :param table: Table containing the optional selector.
     :param key: ``project`` or ``group`` field name for diagnostics.
-    :param name: Table that qualifies the key in diagnostics.
+    :param name: Table name that ``_optional_reference`` prefixes to ``key`` in a
+        diagnostic; the default is ``GITLAB_AUTHORITY``, ``gitlab``.
     :returns: Positive numeric ID as text or a relative path, or ``None`` when
         absent.
     :raises TargetError: The selector is invalid, absolute, empty, or contains
@@ -1081,7 +1139,8 @@ def _declared_instances(data: Mapping[str, object]) -> Mapping[str, str]:
     ``[gitlab_private]`` and ``[gitlab_public]`` answer their instances. For one
     release, legacy ``[gitlab]`` fields answer ``gitlab_private`` and the child
     table under ``GITLAB_LEGACY_PUBLIC_KEY`` answers ``gitlab_public`` when
-    ``[gitlab_public]`` is absent. These are table keys; no host is inspected.
+    ``[gitlab_public]`` is absent. ``_declared_instances`` matches table keys and
+    reads no ``url``.
 
     :param data: Complete parsed target file.
     :returns: Instance name mapped to the table path it reads.
@@ -1133,10 +1192,14 @@ def _select_gitlab(
     """Select one GitLab table and its route from a complete target file.
 
     :param data: Complete parsed target file.
-    :param selection: Caller selection from ``--gitlab`` or ``--gitlab-profile``.
+    :param selection: ``--gitlab`` and ``--gitlab-profile`` values of the
+        invocation.
     :returns: The selected table's settings and its route.
-    :raises TargetError: Selectors conflict, ``gitlab_private`` is declared
-        twice, routing is invalid, or the selected table is absent or malformed.
+    :raises TargetError: The caller passed both options or an unknown selector,
+        legacy ``[gitlab]`` fields and ``[gitlab_private]`` both exist,
+        ``[gitlab_routing]`` is invalid, the ``--gitlab-profile`` name is blank or
+        names no ``[gitlab.NAME]`` table, or the selected table is absent or
+        malformed.
     """  # noqa: DOC502 - Routing and table parsers raise TargetError.
     selection.validate()
     instances = _declared_instances(data)
@@ -1169,7 +1232,8 @@ def _reject_nested(value: object, name: str) -> None:
 
     :param value: Parsed instance table that may hold nested tables.
     :param name: Instance table name, such as ``gitlab_public``.
-    :raises TargetError: A nested table is present, named with its parent.
+    :raises TargetError: The instance table holds a nested table; the diagnostic
+        names ``[parent.child]``.
     """
     if not isinstance(value, dict):
         return
@@ -1195,10 +1259,12 @@ def _parse_gitlab(
     """Parse the selected GitLab settings and resolve their token beside the target.
 
     :param gitlab: Settings of the selected table.
-    :param route: Selected table name, pairing, and provenance.
+    :param route: Route that names the table read, its ``kubernetes`` and
+        ``harbor`` tables and ``selected_by``.
     :param skill_root: Installed skill directory excluded from file selections.
     :param target_directory: Directory containing the selected target file.
-    :returns: Validated GitLab settings with a canonical token path if supplied.
+    :returns: Validated GitLab settings, with a relative ``token_file`` resolved
+        beside the target file when the table sets it.
     :raises TargetError: If a GitLab setting or token path is invalid; the
         diagnostic names the table read.
     """
@@ -1235,16 +1301,20 @@ def _load_gitlab(
 ) -> GitLabTarget:
     """Select, parse, and report the GitLab table of a loaded target file.
 
-    A target that declares the legacy ``[gitlab]`` table, or a selection made
-    with ``--gitlab-profile``, writes one ``gitlab_target_deprecated``
-    diagnostic with the invocation's bound log settings.
+    ``_load_gitlab`` writes one ``gitlab_target_deprecated`` event when the
+    target declares ``[gitlab]`` or the caller passes ``--gitlab-profile``. It
+    reads ``--log-format``, ``--log-level`` and ``--log-file`` from
+    ``bound_log_settings()``, skips ``--log-file`` in ``--dry-run`` and
+    ``--describe``, and ignores an ``OSError`` from the write.
 
     :param data: Complete parsed target file.
-    :param selection: Caller selection from ``--gitlab`` or ``--gitlab-profile``.
+    :param selection: ``--gitlab`` and ``--gitlab-profile`` values of the
+        invocation.
     :param skill_root: Installed skill directory excluded from file selections.
     :param target_directory: Directory containing the selected target file.
     :returns: Validated GitLab settings carrying their route.
-    :raises TargetError: Selection, routing, or a GitLab setting is invalid.
+    :raises TargetError: The ``--gitlab`` or ``--gitlab-profile`` value,
+        ``[gitlab_routing]`` or a GitLab field is invalid.
     """  # noqa: DOC502 - Selection and field parsers raise TargetError.
     table, route = _select_gitlab(data, selection)
     selected = _parse_gitlab(
@@ -1306,9 +1376,15 @@ def load_gitlab_target(
     Other declared authority tables are permitted but are not validated here.
 
     :param path: Selected TOML target file, including an optional home prefix.
-    :param gitlab: ``GITLAB_SELECTORS`` key; omission reads the routing default,
-        else ``GITLAB_DEFAULT_INSTANCE``.
-    :param gitlab_profile: Deprecated legacy ``[gitlab.NAME]`` profile name.
+    :param gitlab: ``private`` or ``public``; the caller sets it with
+        ``--gitlab``. When the value is ``None``, ``load_gitlab_target`` reads
+        ``[gitlab_routing].default`` and reads ``gitlab_private`` when the target
+        sets no default.
+    :param gitlab_profile: ``NAME`` of a legacy ``[gitlab.NAME]`` table, set with
+        the deprecated ``--gitlab-profile``. When the value is not ``None``,
+        ``_select_gitlab`` reads that table and ``_load_gitlab`` writes one
+        ``gitlab_target_deprecated`` event; ``GitLabSelection.validate`` raises
+        ``gitlab_selector_conflict`` when ``gitlab`` is also set.
     :returns: GitLab settings and the canonical source-file path.
     :raises TargetError: If the target is unreadable, invalid, inside the skill,
         or contains invalid GitLab settings or an internal credential path.
@@ -1552,15 +1628,19 @@ def _legacy_compat(
 ) -> bool:
     """Decide whether a legacy route reads Kubernetes and Harbor tables directly.
 
-    That holds only on a target without ``[gitlab_routing]``, for a caller that
-    gave no ``--gitlab``, and for a legacy table that neither answers
-    ``gitlab_public`` nor is the legacy public table under
-    ``GITLAB_LEGACY_PUBLIC_KEY``: the public instance is never paired with the
-    person's tables by default, whichever option or table selected it.
+    ``_legacy_compat`` returns False when the target declares
+    ``[gitlab_routing]`` or the caller passed ``--gitlab``. Otherwise it returns
+    True when the command did not select GitLab, or when the table read is
+    neither the table that answers ``gitlab_public`` nor the legacy public table
+    under ``GITLAB_LEGACY_PUBLIC_KEY``, ``[gitlab.com]``. A command therefore reads
+    ``[kubernetes]`` or ``[harbor]`` for the public instance only when a
+    ``[gitlab_routing]`` row names them.
 
     :param data: Complete parsed target file.
-    :param selection: Caller's selection.
-    :param gitlab_target: Selected GitLab target, or ``None`` when unselected.
+    :param selection: ``--gitlab`` and ``--gitlab-profile`` values.
+    :param gitlab_target: Selected GitLab target. When the value is ``None`` (the
+        command did not select GitLab), ``_legacy_compat`` returns True unless the
+        target declares ``[gitlab_routing]`` or the caller passed ``--gitlab``.
     :returns: True when the legacy direct read applies.
     """  # noqa: DOC502 - The instance map validates the legacy table.
     if GITLAB_ROUTING_TABLE in data or selection.selector is not None:
@@ -1577,18 +1657,19 @@ def _legacy_compat(
 def _routed_tables(
     route: Optional[GitLabRoute], required: tuple[str, ...], legacy_compat: bool
 ) -> Mapping[str, str]:
-    """Name the table each routed authority is read from under ``[gitlab_routing]``.
+    """Name the table that ``load_target`` reads for each routed authority.
 
-    A command that requires a routed authority reads the table the selected
-    route pairs with it. An absent route, an optional authority, or a legacy
-    route under ``legacy_compat`` reads the authority's own table.
+    For a required routed authority, ``_routed_tables`` returns the table that
+    the selected route names. It returns the authority's own table name for an
+    optional authority, when ``route`` is ``None``, and for a legacy route when
+    ``legacy_compat`` is True.
 
     :param route: Selected GitLab route, or ``None`` when GitLab is unselected.
     :param required: Authorities the command requires.
-    :param legacy_compat: Result of ``_legacy_compat``: a legacy route reads
-        tables as before this change.
+    :param legacy_compat: Result of ``_legacy_compat``. When True and the route is
+        legacy, ``_routed_tables`` returns ``kubernetes`` and ``harbor`` by name.
     :returns: Table name per routed authority.
-    :raises TargetError: The selected route pairs no table with one or more
+    :raises TargetError: The selected route names no table for one or more
         required routed authorities; the diagnostic names all of them.
     """
     tables = {authority: authority for authority in GITLAB_ROUTED_AUTHORITIES}
@@ -1621,12 +1702,32 @@ def load_target(
     Only requested authority tables are validated. Token paths may be relative,
     absolute, or home-relative; other file settings retain their own rules.
 
+    ``load_target`` reads one GitLab instance table, ``[gitlab_private]`` or
+    ``[gitlab_public]``. The caller names it with ``--gitlab private|public``;
+    without ``--gitlab``, ``load_target`` reads ``[gitlab_routing].default``,
+    else ``GITLAB_DEFAULT_INSTANCE``. When the command selects GitLab and
+    requires Kubernetes or Harbor, ``load_target`` reads the tables that the
+    selected ``[gitlab_routing]`` row names and raises ``TargetError`` when the
+    row omits one; ``_legacy_compat`` defines the one legacy exception. For an
+    optional authority, ``load_target`` reads the authority's own table. For one
+    release ``load_target`` also reads the legacy ``[gitlab]`` table and its
+    ``[gitlab.NAME]`` profiles, and ``_load_gitlab`` writes one
+    ``gitlab_target_deprecated`` event.
+
     :param path: Selected TOML target file, including an optional home prefix.
     :param required_surfaces: Distinct declared authorities the command needs.
     :param optional_surfaces: Supported authorities selected only when configured.
-    :param gitlab: ``GITLAB_SELECTORS`` key; omission reads the routing default,
-        else ``GITLAB_DEFAULT_INSTANCE``.
-    :param gitlab_profile: Deprecated legacy ``[gitlab.NAME]`` profile name.
+    :param gitlab: ``private`` or ``public``; the caller sets it with
+        ``--gitlab``. When the value is ``None``, ``load_target`` reads
+        ``[gitlab_routing].default`` and uses ``gitlab_private`` if the target
+        sets no default.
+    :param gitlab_profile: ``NAME`` of a legacy ``[gitlab.NAME]`` table, set with
+        the deprecated ``--gitlab-profile``. When the value is not ``None``,
+        ``_select_gitlab`` reads that table and ``_load_gitlab`` writes one
+        ``gitlab_target_deprecated`` event. ``load_target`` raises
+        ``gitlab_profile_requires_gitlab_authority`` when the command does not
+        select GitLab, and ``GitLabSelection.validate`` raises
+        ``gitlab_selector_conflict`` when ``gitlab`` is also set.
     :returns: Validated settings for the requested authorities.
     :raises TargetError: If the requested authorities or target data are invalid,
         unreadable, missing, or select a target or credential inside the skill.

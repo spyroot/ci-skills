@@ -53,7 +53,8 @@ class TrackedArgumentParser(argparse.ArgumentParser):
     ) -> Union[argparse.Namespace, NamespaceT]:
         """Retain the original arguments and preserve argparse's namespace contract.
 
-        The parsed namespace is bound as the invocation's diagnostic settings.
+        ``parse_args`` passes the parsed namespace to ``bind_log_settings``, so
+        ``bound_log_settings()`` returns it for the rest of the invocation.
 
         :param args: Arguments to parse, or None for process arguments.
         :param namespace: Existing namespace to populate, or None for a new namespace.

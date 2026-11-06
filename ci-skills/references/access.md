@@ -65,10 +65,9 @@ A target declares up to two GitLab instance tables, `[gitlab_private]` and `[git
 
 | Key | What the code assigns |
 | --- | --- |
-| `gitlab_private` | Read by `--gitlab private`, and when neither `--gitlab` nor `[gitlab_routing].default` names one. |
+| `gitlab_private` | Read by `--gitlab private`; also the default instance (see `default` below). |
 | `gitlab_public` | Read by `--gitlab public`. |
-| legacy `[gitlab]` fields | Answer `gitlab_private` for one release. |
-| legacy `[gitlab.com]` | Answers `gitlab_public` for one release when `[gitlab_public]` is absent; key `com`. |
+| legacy `[gitlab]`, `[gitlab.com]` | See [Legacy shape, read for one release](#legacy-shape-read-for-one-release). |
 
 The GitLab host is the selected table's `url`. No rule derives visibility, trust or a host from a key, or a key from a
 URL: `[gitlab_private]` may point at gitlab.com and `[gitlab_public]` at a self-managed host.
@@ -80,14 +79,17 @@ gitlab_public = {}
 
 [gitlab_private]
 url = "https://gitlab.example.test"
-# ci-skills reads this file for --gitlab private, or no option; a relative path resolves beside target.toml.
-# Without token_file, ci-skills uses the first of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN that is
-# set, and without those the glab credential store for this url's host.
+# ci-skills reads token_file for --gitlab private, or no option; a relative path resolves beside target.toml.
+# Without token_file, ci-skills uses the first set of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN, then
+# the glab credential store for url's host.
 token_file = "gitlab-private.token"
 
 [gitlab_public]
 url = "https://gitlab.second.example.test"
-# ci-skills reads this file only when the command runs with --gitlab public.
+# ci-skills reads token_file only for --gitlab public; a relative path resolves beside target.toml. Without
+# token_file, ci-skills uses the first set of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN, then the glab
+# credential store for url's host. An environment token is not tied to a host, so each instance declares its
+# own token_file.
 token_file = "gitlab-public.token"
 
 [kubernetes]
@@ -102,36 +104,35 @@ credential_file = "harbor.credentials"
 
 Rules, each checked before any provider request:
 
-- `[gitlab_routing]` is optional. Without it, a command with no `--gitlab` reads `gitlab_private`, and no instance
-  pairs a Kubernetes or Harbor table.
-- `default` is optional and falls back to `gitlab_private`. When present, it names a declared instance
-  (`gitlab_routing_default_unknown`).
+- `[gitlab_routing]` is optional. Without it, the target names no Kubernetes or Harbor table for either instance.
+- `default` is optional. Without `default`, or without `[gitlab_routing]`, a command with no `--gitlab` reads
+  `gitlab_private`. When present, `default` names a declared instance (`gitlab_routing_default_unknown`).
 - When `[gitlab_routing]` is present, each declared instance has exactly one row (`gitlab_routing_row_missing`),
   and no row names an undeclared instance (`gitlab_routing_row_unknown`).
 - A row holds only `kubernetes` and `harbor`; each names a declared table of that authority
-  (`gitlab_routing_kubernetes_unknown`, `gitlab_routing_harbor_unknown`). Omit a key when the instance has
-  no paired table.
-- A command that requires Kubernetes or Harbor, such as `gitlab_runner_manager.py deploy` or
-  `image_build_readiness.py chain`, reads the table the selected row names. A row that omits it, or a target without
-  `[gitlab_routing]`, blocks with `target is missing required authority tables: <names>` before any provider call;
-  `--dry-run` returns the same result. In the example above, `--gitlab public` cannot deploy a runner, because the
-  public row pairs no table. Only required authorities are routed: `access_check.py` reads Kubernetes from its own
-  table unless an option such as `--ceph-namespace` makes Kubernetes required. The legacy shape without
-  `[gitlab_routing]` and without `--gitlab` is the one exception; see below.
-- A row is the person's own declaration of which cluster and registry belong to that GitLab; no key or host implies
-  one. [GitLab Agent connectivity](gitlab-agent.md) shows when a GitLab can use a cluster, for example a GitLab.com
-  project with a GitLab Agent in a lab cluster that has egress to GitLab.com.
+  (`gitlab_routing_kubernetes_unknown`, `gitlab_routing_harbor_unknown`). `TARGET_CONTRACT` declares one table for
+  each routed authority, so `kubernetes` accepts only `"kubernetes"` and `harbor` accepts only `"harbor"`. Omit a key
+  when the instance has no table of that authority.
+- A command that selects GitLab and requires Kubernetes or Harbor, such as `gitlab_runner_manager.py deploy` or
+  `image_build_readiness.py chain`, reads the table the selected row names. A command that does not select GitLab,
+  such as `storage_report.py`, reads `[kubernetes]` by name. When the selected row omits a required
+  table, or the target has no `[gitlab_routing]`, the command returns BLOCKED `target is missing required authority
+  tables: <names>` before any provider call; `--dry-run` returns the same result. In the example above,
+  `--gitlab public` cannot deploy a runner, because the public row names no table. `access_check.py` reads
+  Kubernetes from its own table, unless an option such as `--ceph-namespace` makes Kubernetes required. The legacy
+  shape without `[gitlab_routing]` and without `--gitlab` is the one exception; see below.
+  [GitLab Agent connectivity](gitlab-agent.md) lists when a GitLab can use a cluster.
 - A selector outside `private` and `public` blocks with `gitlab_selector_unknown`.
-- A table nested in the selected instance table, such as `[gitlab_public.com]` read with `--gitlab public`, blocks
-  with a diagnostic that names the nested table.
+- TOML reads a dot in a table header as nesting, so `[gitlab.com]` is table `com` nested in `[gitlab]`, not a host.
+  A table nested in the selected instance table, such as `[gitlab_public.com]` read with `--gitlab public`, blocks
+  with a diagnostic that names it. Use `_` in table names, and a dot only for real nesting, such as
+  `[kubernetes.node_diagnostics]`.
 - `--gitlab public` with no table answering `gitlab_public` blocks with `gitlab_public_target_required`; the same
-  holds for `private`, including a command with no `--gitlab` on a target that declares only `[gitlab_public]`.
+  holds for `private`, including a command with no `--gitlab` on a target that declares only `[gitlab_public]` and
+  sets no `[gitlab_routing].default`.
 - The selected table supplies its own `url`; `project`, `group`, `runner_id`, and `token_file` keep their
   operation-specific rules. No field is inherited from the other instance. A field error names the table
   read, for example `gitlab_public.url must be a nonempty string`.
-
-Table names use `_`, never `.`. TOML reads `[gitlab.com]` as a table `com` nested in `[gitlab]`, not as a
-host. A dot appears only where nesting is real, as in `[kubernetes.node_diagnostics]`.
 
 GitLab action, `access_check`, `gitlab_mirror`, `gitlab_runner_manager` and `image_build_readiness chain`
 results carry a `routing` object at `schema_version` `1.1` (`schemas/results/gitlab-routing.schema.json`). A
@@ -139,22 +140,23 @@ result produced before the target loaded, such as a selection failure, has no `r
 prints it under the status line:
 
 ```text
-Routing: gitlab=gitlab_public kubernetes=kubernetes harbor=none (argv:--gitlab=public)
+Routing: gitlab=gitlab_public kubernetes=none harbor=none (argv:--gitlab=public)
 ```
 
 `routing.gitlab` names the table read, for example `gitlab_public`, or `gitlab` and `gitlab.com` in the legacy
-shape. `selected_by` is `default`, `legacy`, or the caller's option. An explicit option is also appended to
-`target_source`, so a plan confirmed for one instance does not apply to the other even when both share a
-host and project. `ci-api --provider gitlab` accepts `--gitlab`, takes the host and token file from the selected
-instance, and rejects a conflicting `--host`; its output format is unchanged. A selector on another provider, or on
-a command whose selected authorities exclude GitLab such as the build probe, is rejected.
+shape. `selected_by` is `default`, `legacy`, `argv:--gitlab=private`, `argv:--gitlab=public`, or
+`argv:--gitlab-profile="NAME"`. `GitLabRoute.selection_source` appends `;argv:--gitlab=NAME` or
+`;argv:--gitlab-profile="NAME"` to `target_source` when the caller passes either option, so a plan confirmed for one
+instance does not apply to the other even when both share a host and project. `ci-api --provider gitlab` accepts
+`--gitlab`, takes the host and token file from the selected instance, and rejects a conflicting `--host`; its output
+format is unchanged. `ci-api` rejects `--gitlab` or `--gitlab-profile` with `--provider github`
+(`gitlab_profile_requires_gitlab_provider`). A command that does not select GitLab, such as
+`image_build_readiness.py probe`, blocks with `gitlab_profile_requires_gitlab_authority` when it gets either option.
 
 ### Legacy shape, read for one release
 
-The flat `[gitlab]` table and its `[gitlab.NAME]` profiles, selected with `--gitlab-profile NAME`, are still read.
-`[gitlab]` fields answer `gitlab_private` and `[gitlab.com]` answers `gitlab_public`, so on the issue #133 shape
-(`[gitlab]` + `[gitlab.com]`) `--gitlab private` reads `[gitlab]` and `--gitlab public` reads `[gitlab.com]`.
-Combinations:
+Commands still read the flat `[gitlab]` table and its `[gitlab.NAME]` profiles, which `--gitlab-profile NAME`
+selects. Combinations:
 
 | Target | Result |
 | --- | --- |
@@ -165,17 +167,23 @@ Combinations:
 | `[gitlab]` fields + `[gitlab_private]` | `BLOCKED gitlab_private_declared_twice` |
 | `--gitlab` with `--gitlab-profile` | `BLOCKED gitlab_selector_conflict` |
 
-Each load of a target that holds `[gitlab]`, and each use of `--gitlab-profile`, writes one
-`gitlab_target_deprecated` diagnostic on standard error in the selected `--log-format`, at `--log-level warning` or
-below; a dry run does not write it to `--log-file`. `[gitlab_routing]` may sit beside the legacy tables; its row for
-an instance pairs the tables of whichever table answers that instance. Without `[gitlab_routing]`, a legacy route
-reports `kubernetes` and `harbor` as `null`. A command that requires them then reads `[kubernetes]` and `[harbor]`
-directly only when the caller gives no `--gitlab` and the legacy table read neither answers `gitlab_public` nor is
-`[gitlab.com]`; with `--gitlab private`, `--gitlab public`, or `--gitlab-profile com`, it blocks with the
-missing-tables reason, as on the new shape. The event's
-`table` names the legacy table, `gitlab` or `gitlab.NAME`. To migrate, rename `[gitlab]` to `[gitlab_private]` and
-`[gitlab.com]` to `[gitlab_public]`, and add a `[gitlab_routing]` row that pairs `kubernetes` and `harbor` with the
-instance whose commands use them; without that row those commands block. Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
+A command that selects GitLab writes one `gitlab_target_deprecated` event to standard error when it loads a target
+holding `[gitlab]` or gets `--gitlab-profile`. The command writes the event in its `--log-format`, at `--log-level
+warning` or below; in `--dry-run` and `--describe` it does not write the event to `--log-file`. The event's `table`
+names the legacy table, `gitlab` or `gitlab.NAME`.
+
+`[gitlab_routing]` may sit beside the legacy tables. The `gitlab_private` row applies to `[gitlab]` fields, and the
+`gitlab_public` row applies to `[gitlab.com]` when `[gitlab_public]` is absent. Without `[gitlab_routing]`, a legacy
+route reports `kubernetes` and `harbor` as `null`. A command that requires them then reads `[kubernetes]` and
+`[harbor]` directly only when the caller gives no `--gitlab` and the legacy table read neither answers
+`gitlab_public` nor is `[gitlab.com]`; with `--gitlab private`, `--gitlab public`, or `--gitlab-profile com`, it
+blocks with the missing-tables reason, as on the new shape.
+
+To migrate, rename `[gitlab]` to `[gitlab_private]` and `[gitlab.com]` to `[gitlab_public]`, and add a
+`[gitlab_routing]` row that names `kubernetes` and `harbor` for the instance whose commands use them; without that
+row those commands block. Replace `--gitlab-profile com` with `--gitlab public`. A `[gitlab.NAME]` profile other than
+`com` has no instance key: move it into one of the two instance tables, or into its own target file that
+`--target PATH` or `CI_SKILLS_TARGET` selects. The ci-skills repository tracks the removal as TD-11.
 
 ## Effective credential sources
 
@@ -185,12 +193,12 @@ instance whose commands use them; without that row those commands block. Removal
   `GH_ENTERPRISE_TOKEN` or
   `GITHUB_ENTERPRISE_TOKEN`. Otherwise, the selected host's `gh` credential
   store is used. An explicit token file clears other ambient GitHub tokens.
-- GitLab uses an explicit `gitlab.token_file`, the `token_file` of the selected instance table (for example
-  `gitlab_public.token_file`), then the effective
-  `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
-  Otherwise, the selected host's `glab` credential store is used. The environment variable is not bound to
-  one instance: with no `token_file`, it is sent to whichever instance `--gitlab` selects. Declare a
-  `token_file` in each instance table when both instances are used.
+- GitLab uses the `token_file` of the table the command reads (`gitlab_private.token_file`,
+  `gitlab_public.token_file`, or legacy `gitlab.token_file`), then the effective `GITLAB_TOKEN`,
+  `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable. Otherwise, the command uses the `glab` credential
+  store of the selected host. When the selected table has no `token_file`, the command sends the first set variable
+  to the instance it reads, whether `--gitlab`, `[gitlab_routing].default` or the `gitlab_private` fallback selected
+  that instance. Declare a `token_file` in each instance table when both instances are used.
 - Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
   combined path, its `kubernetes.kubeconfig` single file, or the kubeconfig
   selected by an explicit project binding. If none is declared, it uses
@@ -206,8 +214,9 @@ authority, and uses the same resolved source for its data reads. It records
 source references, not token values, private keys, or raw kubeconfig contents.
 Keep credentials outside this repository and the installed skill.
 
-Relative `github.token_file` and `gitlab.token_file` paths resolve beside the
-selected `target.toml`, independently of the command's working directory.
+Relative `github.token_file`, `gitlab_private.token_file`, `gitlab_public.token_file` and legacy
+`gitlab.token_file` paths resolve beside the selected `target.toml`, independently of the command's working
+directory.
 Absolute paths and paths starting with `~` remain supported.
 
 Example nonsecret target:
@@ -224,8 +233,9 @@ gitlab_private = { kubernetes = "kubernetes" }
 
 [gitlab_private]
 url = "https://gitlab.example.com"
-# ci-skills reads token_file when it is set; otherwise the first set GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or
-# OAUTH_TOKEN, then the glab credential store for this url's host.
+# ci-skills reads token_file when it is set; a relative path resolves beside target.toml. Without token_file,
+# ci-skills uses the first set of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN, then the glab credential store
+# for url's host.
 # token_file = "/home/user/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]

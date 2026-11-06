@@ -184,8 +184,11 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
     ) -> tuple[tuple[str, str], ...]:
         """Resolve native workload names from exact operation labels and provider identity.
 
-        :param namespace: Exact selected namespace whose workloads are inspected.
-        :param operation: Observed namespace operation, absent for an explicit borrowed namespace.
+        :param namespace: Namespace in which ``_owned_runners`` lists Deployments.
+        :param operation: Operation label value of the namespace. When the value is
+            ``None`` (a borrowed namespace named with an explicit override),
+            ``_owned_runners`` selects Deployments by the manager label only and
+            accepts any nonempty operation label.
         :returns: Owned operation/name pairs matching repository, host, and explicit override.
         :raises KubernetesError: Native Deployment objects or ownership observations are malformed.
         """  # noqa: DOC502 - Shared native access and ownership validation propagate errors.

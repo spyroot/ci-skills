@@ -81,8 +81,9 @@ class SourceField(StrEnum):
 class GitLabPushMirrorService(PushMirrorSource):
     """Use one existing verified GitLab session for the selected source project.
 
-    :ivar created_mirror_id: Native POST identity retained even when independent
-        configuration read-back fails; never proof of verified configuration.
+    :ivar created_mirror_id: Mirror ID that the GitLab create call returned.
+        ``GitLabPushMirrorService`` keeps it when the configuration read-back
+        fails; the ID does not prove that the configuration passed read-back.
     """
 
     def __init__(self, service: GitLabService, reader: GitRemoteReader) -> None:

@@ -64,7 +64,10 @@ def resolve_gitlab_target(
     :param explicit_target: Internal target-file override, or ``None``.
     :param explicit_binding: Project-binding override, or ``None``.
     :param dry_run: Whether binding resolution may omit live credential-file checks.
-    :param gitlab_selection: Caller's GitLab choice, or ``None`` for the routing default.
+    :param gitlab_selection: ``--gitlab`` and ``--gitlab-profile`` values. When the
+        value is ``None``, ``resolve_gitlab_target`` passes no selector, and
+        ``load_target`` reads ``[gitlab_routing].default``, else
+        ``gitlab_private``.
     :returns: GitLab operation target and reportable selection source.
     :raises TargetError: If configuration, GitLab settings, or source identity
         cannot be resolved.
@@ -107,7 +110,10 @@ def setup_gitlab_operation(
     :param group: Optional group path or numeric ID override.
     :param revision: Optional claimed source revision of the installed skill.
     :param api_client: Existing API client, or the access check's default client.
-    :param gitlab_selection: Caller's GitLab choice, or ``None`` for the routing default.
+    :param gitlab_selection: ``--gitlab`` and ``--gitlab-profile`` values. When the
+        value is ``None``, ``setup_gitlab_operation`` passes no selector, and
+        ``load_target`` reads ``[gitlab_routing].default``, else
+        ``gitlab_private``.
     :returns: The same bound session used for access and its receipt, including
         a BLOCKED receipt when provider read-back does not prove access.
     :raises Exception: The original setup failure, carrying its target,

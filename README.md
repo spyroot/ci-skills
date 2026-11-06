@@ -94,10 +94,19 @@ cp "$CI_SKILLS_CHECKOUT/target.toml.template" ~/.ci-skills/target.toml
 $EDITOR ~/.ci-skills/target.toml
 ```
 
-Fill in the sections needed by the selected operation. GitLab-only commands need one instance table,
-`[gitlab_private]` or `[gitlab_public]`; `--gitlab private|public` selects the instance and its omission reads
-`[gitlab_routing].default`, else `[gitlab_private]`. Commands that require Kubernetes or Harbor, such as the runner
-manager, need the instance's `[gitlab_routing]` row. See
+Fill in the sections needed by the selected operation. When you remove `[kubernetes]` or `[harbor]`, remove the
+`[gitlab_routing]` values that name them. When you remove `[gitlab_public]`, remove its `[gitlab_routing]` row. You
+can also remove `[gitlab_routing]` entirely; GitLab-only commands do not need it. The template sets `token_file` in
+`[gitlab_private]` and `[gitlab_public]`: create each file beside the target file, for example
+`~/.ci-skills/gitlab-private.token`, or comment out `token_file` to use `GITLAB_TOKEN` or the `glab` credential store.
+GitLab-only commands need one instance table, `[gitlab_private]` or `[gitlab_public]`. The command reads the
+instance that `--gitlab private|public` names. Without `--gitlab`, the command reads the instance that
+`[gitlab_routing].default` names, and reads `[gitlab_private]` when the target sets no default. A command that uses
+GitLab together with Kubernetes or Harbor, such as `gitlab_runner_manager.py deploy`, reads the tables that the
+selected instance's `[gitlab_routing]` row names, for example
+`gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }`. When the row omits a table the command needs,
+or the target has no `[gitlab_routing]`, the command returns BLOCKED
+`target is missing required authority tables: <names>`. See
 [GitLab private and public targets](ci-skills/references/access.md#gitlab-private-and-public-targets).
 `access_check.py` checks configured providers; unrelated provider tables and tools are not required.
 `--publication` additionally requires GitHub configuration. Kubernetes commands need the selected context and exact
@@ -492,23 +501,23 @@ repository's CI, gate, or delivery settings.
 
 ## GitLab operations
 
-For GitLab-only work, the selected target file may contain only `[gitlab_routing]` and the selected GitLab instance
-table with its exact `url`. Pass `--project` or `--group` for the intended operation, or set `project` or `group` in that
-table. `gitlab_job.py` selects its project from `--job-url`. The same
-target selection above applies. Storage, event, and Cilium diagnostics need only `[kubernetes]`; the full
+For GitLab-only work, the selected target file may contain only the selected GitLab instance table,
+`[gitlab_private]` or `[gitlab_public]`, with its exact `url`. `[gitlab_routing]` is optional; when the file declares
+it, each row value must name a table the same file declares. `gitlab_job.py` selects its project from `--job-url`.
+The same target selection above applies. Storage, event, and Cilium diagnostics need only `[kubernetes]`; the full
 `access_check.py` checks whichever authorities the target configures; `--publication` additionally needs GitHub.
-Set `project` in the selected GitLab instance table for the commands below. The
-declared `--project` flag overrides it for one invocation.
+Pass `--project PATH` to each command below. A target that serves one project may set `project` in its GitLab
+instance table; `--project` overrides it for one invocation.
 
 The operation access check reads back the effective GitLab identity and exact numeric target before a write:
 
 ```bash
 conda run -n ci-skills python \
   "$CI_SKILLS_ROOT/bin/gitlab_access.py" check \
-  --json
+  --project group/project --json
 conda run -n ci-skills python \
   "$CI_SKILLS_ROOT/bin/gitlab_milestone.py" create \
-  --title "Release checkpoint" --json
+  --project group/project --title "Release checkpoint" --json
 ```
 
 The second command prints a `DRY_RUN` plan with `plan_digest` and makes no API call. When the requested change is

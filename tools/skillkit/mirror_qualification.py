@@ -3,18 +3,20 @@
 `docs/2026-10-31/live-smoke-inventory.md` (Reusable pairs, `test-mirror-push`) allows
 one bounded qualification when candidate evidence requires renewal. This module runs
 it against an installed copy of the skill. The installed command subprocess and the
-in-process provider both run in the caller's working directory, so both resolve the
-same target file; receipts and outputs go to absolute paths under the work directory.
+in-process provider both run in the working directory of the process that starts the
+qualification, so both resolve the same target file. ``MirrorQualification`` writes
+receipts and outputs to absolute paths under ``work_dir``.
 
 1. live plan; the fixture must hold the input source ID, no destination repository
    and no mirror;
 2. an in-process live plan of the same installed copy; its ``target_source`` must
    equal the subprocess plan's, the source identity must match, and every seed ref
    must point at its input commit;
-3. a wrong confirmation digest, which must block without mutation; ``plan()`` stops
-   here and writes no ledger;
-4. the confirmed apply, written as the APPLIED receipt; the ledger is created
-   exclusively before it and records the created native IDs after it;
+3. a wrong confirmation digest; the installed command must return BLOCKED with
+   ``mutated`` false; ``plan()`` stops here and writes no ledger;
+4. the confirmed apply, written as the APPLIED receipt; ``_allocate`` creates the
+   ledger before the apply, and ``_record_created`` records the created native IDs
+   after it;
 5. after a settle interval, a second live plan and confirmed apply, written as the
    NO_OP receipt;
 6. owned cleanup: the run-created GitLab mirror, then the run-created GitHub
@@ -27,31 +29,22 @@ The allocation ledger in the work directory records each step. A run stops when 
 ledger already exists. ``reconcile()`` finishes the cleanup a failed or interrupted
 run left pending, for the native IDs that ledger recorded only. Provider calls sit
 behind `MirrorProvider`; `NativeMirrorProvider` binds the installed skill's own
-GitLab and GitHub services. Status tokens, record actions and exit codes compared
-with the installed command's output are bound from the installed copy
-(`InstalledStatus`), and so are the keys it is read with (`InstalledFields`); the
-keys defined here name only what this module writes.
+GitLab and GitHub services. ``installed_bindings`` reads the status tokens, record
+actions and exit codes (`InstalledStatus`) and the result keys (`InstalledFields`)
+from the installed copy; this module defines only the keys it writes.
 
-The cleanup record has ``kind``, ``status``, ``captured_at``, ``execution_host``,
-``skill_digest``, ``tested_revision``, ``before`` (``source``, ``destination``,
-``mirror_id``), ``delete`` (``mirror_http_status``, ``destination_http_status``),
-and ``after`` and ``repeat`` (``source``, ``mirror_absent``,
-``destination_http_status``, ``destination_id_http_status``; ``repeat`` adds
-``mutated: false``). ``run()`` writes it to ``mirror-smoke-cleanup.json`` and as
-``smoke_cleanup`` of ``mirror-noop-with-cleanup-receipt.json``. ``reconcile()``
-writes it only to ``mirror-smoke-cleanup.json``, with ``reconciled: true`` added;
-there an object the run did not create has ``null`` ID, statuses and
-``mirror_absent``, and an owned object already absent has delete status 404. That
-record is never merged into a NO_OP receipt: the receipt schema's
-``smoke_cleanup`` has no ``reconciled`` field and integer-only statuses, and
-`tools/check_live_acceptance.py` requires two 204 deletes.
+``run()`` writes the cleanup record to ``mirror-smoke-cleanup.json`` and as
+``smoke_cleanup`` of ``mirror-noop-with-cleanup-receipt.json``; the ``*_FIELD``
+constants below name its keys. ``reconcile()`` writes it only to
+``mirror-smoke-cleanup.json``, with ``reconciled: true``, ``null`` for an object the
+run did not create and 404 for an owned object already absent. ``reconcile()`` never
+merges that record into a NO_OP receipt, because the receipt schema's
+``smoke_cleanup`` has no ``reconciled`` field and `tools/check_live_acceptance.py`
+requires two 204 deletes.
 
 SIGINT, and SIGTERM inside ``terminate_as_interrupt()``, stop a mode without
-starting a deletion. With a ledger held, the ledger is written again with the last
-state reached and the stopping reason is ``interrupted:<state>:next:--reconcile``;
-without one it is ``interrupted:no_ledger``. The ledger and the cleanup files are
-written to a temporary file in the same directory and moved with ``os.replace``;
-the ledger is created with ``os.link``, which never replaces an existing ledger.
+starting a deletion; ``_interruptible`` raises the stopping reasons, and
+``_allocate`` and ``_staged`` describe the atomic ledger writes.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -238,7 +231,7 @@ class SeedRef:
     def parse(cls, text: str) -> SeedRef:
         """Parse ``KIND:NAME:COMMIT``.
 
-        :param text: Ref declaration from the caller.
+        :param text: One ``--seed-ref`` value, ``KIND:NAME:COMMIT``.
         :returns: Validated seed ref.
         :raises QualificationError: The declaration is malformed.
         """
@@ -268,8 +261,9 @@ class QualificationInputs:
     :param seed_refs: Source refs the run must leave unchanged.
     :param run_id: Diagnostic run identifier passed to the command.
     :param gitlab_option: ``GITLAB_TARGET_OPTION`` of the installed catalog.
-    :param gitlab: Selector passed with ``gitlab_option``, or ``None`` for the
-        routing default.
+    :param gitlab: ``private`` or ``public``, from ``--gitlab``. When the value is ``None``,
+        ``command_selection`` omits the option, and the installed command reads
+        ``[gitlab_routing].default``, else ``gitlab_private``.
     :param timeout: Per-command timeout in seconds.
     :param settle_seconds: Pause before the repeat apply and the repeat read-back.
 
@@ -316,7 +310,9 @@ class QualificationInputs:
     .. attribute :: gitlab
         :type: Optional[str]
 
-        Selector passed with ``gitlab_option``, or ``None`` for the routing default.
+        ``private`` or ``public``, from ``--gitlab``. When the value is ``None``,
+        ``command_selection`` omits the option, and the installed command reads
+        ``[gitlab_routing].default``, else ``gitlab_private``.
 
     .. attribute :: timeout
         :type: int
@@ -436,9 +432,9 @@ class InstalledStatus:
     def bind(cls, status: Any, outcome: Any) -> InstalledStatus:
         """Read the tokens from the installed status module and mirror outcomes.
 
-        The record ``action`` is written from ``Outcome`` by the installed mirror
-        command, so the actions come from there and the statuses from
-        ``sys/status.py``.
+        The installed mirror command writes the record ``action`` from
+        ``Outcome``, so ``bind`` reads the actions from ``Outcome`` and the
+        statuses from ``sys/status.py``.
 
         :param status: Installed ``lib.python.sys.status`` module.
         :param outcome: Installed ``Outcome`` enumeration.
@@ -537,7 +533,7 @@ class InstalledFields:
     .. attribute :: mutated
         :type: str
 
-        Whether the result wrote.
+        Key of the flag that reports whether the command wrote.
 
     .. attribute :: tested_revision
         :type: str
@@ -547,7 +543,8 @@ class InstalledFields:
     .. attribute :: target_source
         :type: str
 
-        Target file the command resolved.
+        Key of the target source string the command reports, such as
+        ``cli:/path/target.toml;argv:--gitlab=public``.
 
     .. attribute :: skill
         :type: str
@@ -740,8 +737,9 @@ class InstalledBindings:
 def installed_bindings(skill: Path) -> InstalledBindings:
     """Import the installed copy's ``lib`` modules and bind the names this tool uses.
 
-    ``skill`` goes first on ``sys.path``. Every module must load from ``skill``: a
-    ``lib`` package imported earlier from another directory stops the run.
+    ``installed_bindings`` puts ``skill`` first on ``sys.path`` and raises
+    ``QualificationError`` when a module loads from another directory, for example
+    a ``lib`` package imported earlier.
 
     :param skill: Installed skill directory.
     :returns: Bound names.
@@ -789,8 +787,8 @@ def installed_bindings(skill: Path) -> InstalledBindings:
 def terminate_as_interrupt() -> Iterator[None]:
     """Raise ``KeyboardInterrupt`` on SIGTERM inside the block, as SIGINT does.
 
-    The previous SIGTERM handler is restored on exit; a handler not installed
-    from Python is restored as ``SIG_DFL``.
+    ``terminate_as_interrupt`` restores the previous SIGTERM handler on exit, and
+    restores ``SIG_DFL`` when the previous handler was not installed from Python.
 
     :yields: Control for the guarded block.
     :ytype: None
@@ -830,7 +828,8 @@ class CommandRunner(abc.ABC):
 class InstalledMirrorCommand(CommandRunner):
     """Run ``bin/gitlab_mirror.py`` of the installed copy in a subprocess.
 
-    The subprocess inherits the caller's working directory.
+    The subprocess runs in the working directory of the process that starts the
+    qualification.
     """
 
     def __init__(
@@ -922,8 +921,9 @@ class MirrorProvider(abc.ABC):
 
         :param mirror_id: Native mirror ID.
         :param destination: Destination repository path.
-        :returns: ``None`` when the mirror is absent, otherwise whether it
-            targets the destination's clone URL.
+        :returns: ``None`` when the provider finds no mirror with ``mirror_id``;
+            True when the mirror pushes to the destination clone URL; False
+            otherwise.
         """
 
     @abc.abstractmethod
@@ -1023,9 +1023,10 @@ class MirrorQualification:
     def reconcile(self) -> JSONMap:
         """Finish the cleanup a failed or interrupted run left pending.
 
-        Only the native IDs the ledger records as created by that run are removed;
-        an object already absent is not deleted again. Absence is proven twice and
-        the cleanup record is written with ``reconciled`` set.
+        ``reconcile`` removes only the native IDs that the ledger records as
+        created by that run and does not delete an object that is already absent.
+        It reads absence twice and writes the cleanup record with ``reconciled``
+        set.
 
         :returns: Allocation ledger ending in ``PASS_INDEPENDENT_ABSENCE_AND_REPEAT``.
         :raises QualificationError: No ledger is pending, it names another fixture
@@ -1039,8 +1040,9 @@ class MirrorQualification:
     def _interruptible(self) -> Iterator[None]:
         """Turn ``KeyboardInterrupt`` into a stopping reason; start no deletion.
 
-        With a ledger held, the ledger is written again so its state is the last
-        step reached, and the reason names ``--reconcile`` as the next action.
+        With a ledger held, ``_interruptible`` writes the ledger again with the
+        last step reached as its state, and the reason names ``--reconcile`` as
+        the next action.
 
         :yields: Control for one mode.
         :raises QualificationError: The block was interrupted.
@@ -1343,16 +1345,19 @@ class MirrorQualification:
     ) -> dict[str, object]:
         """Remove the run-created mirror and repository and prove their absence.
 
-        An ID of ``None`` is not owned: it is neither deleted nor read back and its
-        status is ``None``. With ``allow_absent``, an owned object already absent
-        is not deleted and its status is 404; without it, an absent owned object
-        stops the cleanup.
+        ``_cleanup`` treats an ID of ``None`` as not owned: it neither deletes nor
+        reads back that object and records its status as ``None``. With
+        ``allow_absent``, ``_cleanup`` skips the delete of an owned object that is
+        already absent and records 404; without it, ``_cleanup`` raises
+        ``QualificationError``.
 
         :param provider: Native reads and owned deletes.
         :param source: Source evidence recorded by the run.
         :param destination: Destination evidence recorded by the run.
-        :param mirror_id: Run-created mirror ID, or ``None``.
-        :param repository_id: Run-created repository ID, or ``None``.
+        :param mirror_id: Mirror ID that the run created. When the value is
+            ``None``, ``_cleanup`` skips the mirror.
+        :param repository_id: Repository ID that the run created. When the value
+            is ``None``, ``_cleanup`` skips the repository.
         :param receipt: Receipt whose identity binds the cleanup record.
         :param allow_absent: Accept an owned object that is already absent.
         :returns: ``gitlab_mirror_smoke_cleanup`` record.
@@ -1428,8 +1433,8 @@ class MirrorQualification:
         :param source: Source evidence recorded by the run.
         :param mirror_id: Removed mirror ID, or ``None`` when not owned.
         :param repository_id: Removed repository ID, or ``None`` when not owned.
-        :returns: Read-back record with HTTP absence statuses; ``None`` for an
-            object not owned.
+        :returns: Read-back record with HTTP absence statuses; ``_observe`` writes
+            ``None`` for an object the run does not own.
         :raises QualificationError: The source changed, a seed ref moved, or a
             removed object is still present.
         """
@@ -1458,9 +1463,9 @@ class MirrorQualification:
     def _allocate(self, **fields: object) -> None:
         """Create the allocation ledger; it must not exist yet.
 
-        The complete ledger is staged in a temporary file and published with
-        ``os.link``, which fails when a ledger exists. The ledger is held only
-        after the link succeeds.
+        ``_allocate`` stages the complete ledger in a temporary file and publishes
+        it with ``os.link``, which fails when a ledger exists. ``_allocate`` holds
+        the ledger only after the link succeeds.
 
         :param **fields: Ledger fields to set.
         :raises QualificationError: The ledger exists or cannot be written.
@@ -1478,7 +1483,8 @@ class MirrorQualification:
     def _save(self, **fields: object) -> None:
         """Update the allocation ledger and replace its file atomically.
 
-        :param **fields: Ledger fields to set; none rewrites the current ledger.
+        :param **fields: Ledger fields to set. With no fields, ``_save`` rewrites
+            the current ledger unchanged.
         """
         self.ledger.update(fields)
         _write(self.inputs.work_dir / ALLOCATION_FILE, self.ledger)
@@ -1487,8 +1493,9 @@ class MirrorQualification:
 class NativeMirrorProvider(MirrorProvider):
     """Use the installed skill's GitLab and GitHub services of one live plan.
 
-    ``bind`` runs the in-process live plan; the constructor keeps its parts.
-    Installed-lib ``APIError`` and ``OSError`` become ``QualificationError``.
+    ``bind`` runs the in-process live plan; the constructor keeps its services.
+    ``_provider_errors`` converts installed-lib ``APIError`` and ``OSError`` into
+    ``QualificationError``.
     """
 
     def __init__(
@@ -1589,11 +1596,14 @@ class NativeMirrorProvider(MirrorProvider):
     def mirror_targets(self, mirror_id: int, destination: str) -> Optional[bool]:
         """Read whether a mirror exists and pushes to the destination.
 
-        URLs are compared with ``casefold()``, as the installed provider does.
+        ``mirror_targets`` compares URLs with ``casefold()``, as the installed
+        provider does.
 
         :param mirror_id: Native mirror ID.
         :param destination: Destination repository path.
-        :returns: ``None`` when absent, otherwise whether it targets the destination.
+        :returns: ``None`` when the provider finds no mirror with ``mirror_id``;
+            True when the mirror pushes to the destination clone URL; False
+            otherwise.
         :raises QualificationError: A read fails with other than not-found.
         """  # noqa: DOC502 - _provider_errors converts the provider failure.
         with self._errors(MIRROR_READ):
@@ -1803,7 +1813,7 @@ def _status(status: Optional[int]) -> Optional[int]:
     """Render an HTTP status as a plain integer.
 
     :param status: ``HTTPStatus``, integer or ``None``.
-    :returns: The integer, or ``None``.
+    :returns: The integer, or ``None`` when ``status`` is ``None``.
     """
     return None if status is None else int(status)
 
@@ -1860,7 +1870,8 @@ def _json_text(data: JSONMap) -> str:
 def _staged(path: Path, data: JSONMap) -> Iterator[Path]:
     """Write one JSON object to a synced temporary file beside ``path``.
 
-    The temporary file is removed on exit; after ``os.replace`` it no longer exists.
+    ``_staged`` removes the temporary file on exit, unless ``os.replace`` already
+    moved it.
 
     :param path: Final file; the temporary file goes in its directory.
     :param data: Object to write.

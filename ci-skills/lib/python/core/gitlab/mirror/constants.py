@@ -130,7 +130,9 @@ class Field(StrEnum):
 
     .. attribute :: CREATED_MIRROR_ID
 
-        Native POST identity retained without certifying configuration or synchronization.
+        Key of the mirror ID that the GitLab create call returned. The ID does not
+        prove that the mirror configuration or its synchronization passed
+        read-back.
 
     .. attribute :: REPLACED_MIRROR_ID
 
@@ -190,7 +192,7 @@ class Field(StrEnum):
 
     .. attribute :: ROUTING
 
-        Selected GitLab table and its paired tables.
+        Key of the result ``routing`` object.
 
     .. attribute :: REASON
 

@@ -27,9 +27,11 @@
 #
 # This template shows every authority for access_check.py. A Kubernetes
 # command needs only [kubernetes]; a GitLab job needs only one GitLab instance
-# table. Remove unused sections when making a
-# single-authority target. Nothing here grants access; each command checks the
-# authority it uses.
+# table. Remove unused sections when making a single-authority target. When you
+# remove [kubernetes] or [harbor], remove the [gitlab_routing] values that name
+# them; when you remove [gitlab_public], remove its [gitlab_routing] row. A
+# GitLab-only target may drop [gitlab_routing] entirely. Nothing here grants
+# access; each command checks the authority it uses.
 
 [github]
 # The exact host and repository. Enterprise Server hosts work too.
@@ -50,26 +52,27 @@ repository = "owner/repository"
 # GitLab. Up to two instance tables, [gitlab_private] and [gitlab_public].
 # "private" and "public" are keys: --gitlab private reads [gitlab_private],
 # --gitlab public reads [gitlab_public], and the host is each table's url.
-# Without the option a command reads [gitlab_routing].default, else
-# [gitlab_private]. Table names use "_", never ".": TOML reads [gitlab.com] as
-# a table "com" nested in [gitlab], not as a host. The legacy [gitlab] and
+# Table names use "_", never ".": TOML reads [gitlab.com] as a table "com"
+# nested in [gitlab], not as a host. The legacy [gitlab] and
 # [gitlab.NAME] tables are read for one release and print a
 # gitlab_target_deprecated warning.
 [gitlab_routing]
-# Optional. Needed by commands that require Kubernetes or Harbor, such as the
-# runner manager. The instance read when a command gets no --gitlab option;
-# omit it to read gitlab_private.
+# This table is optional. A command that uses GitLab with Kubernetes or Harbor,
+# such as gitlab_runner_manager.py deploy, reads its row. `default` names the
+# instance a command reads without --gitlab; without `default`, the command
+# reads [gitlab_private].
 default = "gitlab_private"
 # With this table, one row per declared instance: the Kubernetes and Harbor
-# tables that belong to that GitLab. Omit a key when the instance has no
-# paired table; a command that needs that table then blocks for this
-# instance. Every result reports the selection as its "routing" object.
+# tables that belong to that GitLab. Omit a key when the instance has no table
+# of that authority; a command that needs that table then blocks for this
+# instance.
 gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
-# An empty row: this GitLab has no cluster and no registry of yours. Fill it
-# only when that GitLab can use them, for example a GitLab Agent or a runner in
-# a cluster that reaches it (ci-skills/references/gitlab-agent.md).
+# This row names no cluster and no registry for this GitLab. Fill it only when
+# that GitLab can use them, for example a GitLab Agent or a runner in a cluster
+# that reaches it (ci-skills/references/gitlab-agent.md).
 gitlab_public = {}
-# The same row as a table, replacing the line above when filled:
+# The same row as a TOML sub-table (a real nesting dot), replacing the line
+# above when filled:
 # [gitlab_routing.gitlab_public]
 # A cluster with egress to this GitLab.
 # kubernetes = "kubernetes"
@@ -88,27 +91,26 @@ url = "https://gitlab.example.com"
 # group = "group"
 # runner_id = 123
 
-# ci-skills reads this token file when a command selects this instance:
-# --gitlab private, or no option while [gitlab_routing].default names it.
-# A relative path resolves beside this target file. Without token_file,
-# ci-skills uses the first of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN
-# that is set, and without those the glab credential store for the host in
-# url. An environment token is not tied to a host: ci-skills sends it to
-# whichever instance the command selects, so each instance declares its own
-# token_file.
+# ci-skills reads token_file; a relative path resolves beside this file.
+# Without token_file, ci-skills uses the first set of GITLAB_TOKEN,
+# GITLAB_ACCESS_TOKEN and OAUTH_TOKEN, then the glab credential store for
+# url's host. An environment token is not tied to a host, so each instance
+# declares its own token_file.
 # The full diagnostics access check needs an instance administrator identity.
 # The GitLab-only check proves identity and target read access; an action's
 # apply and read-back establish whether that action is authorized.
 token_file = "gitlab-private.token"
 
 [gitlab_public]
-# A second GitLab, read with --gitlab public. It supplies its own fields; no
-# field is inherited from [gitlab_private]. Remove this table and its
-# [gitlab_routing] row when there is only one GitLab.
+# A second GitLab, read with --gitlab public. The loader reads only this
+# table's fields for --gitlab public and copies no field from
+# [gitlab_private]. Remove this table and its [gitlab_routing] row when there
+# is only one GitLab.
 url = "https://gitlab.second.example.com"
-# ci-skills reads this token file only when a command runs with
-# --gitlab public. Without it, ci-skills uses the same order as for
-# [gitlab_private], so an environment token would reach this host too.
+# ci-skills reads token_file for --gitlab public; a relative path resolves
+# beside this file. Without token_file, ci-skills uses the first set of
+# GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN, then the glab credential
+# store for url's host.
 token_file = "gitlab-public.token"
 
 [kubernetes]

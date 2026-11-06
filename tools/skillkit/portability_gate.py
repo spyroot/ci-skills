@@ -5,9 +5,12 @@ and target documents consumed by those invocations. It does not execute code or
 resolve arbitrary helper calls. Synthetic origins apply only to their own
 invocation or target authority; receipt and assertion data are not operations.
 
-It also rejects a copy of a target-contract key or reason token as a string
-literal in any selected Python source other than the module that defines it
-(`contract_literals`). Docstrings are prose and are not checked.
+It also rejects, as rule `contract_literal`, a copy of any value in
+`endpoints.GITLAB_CONTRACT_LITERALS` (the GitLab instance and routing table
+names, `--gitlab`, the `--gitlab` and `[gitlab_routing]` reason tokens and the
+deprecation event) as a string literal in a selected Python source other than
+`core/endpoints.py`. `scan_contract_literals` skips module, class and function
+docstrings.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -1202,7 +1205,8 @@ def scan_contract_literals(
 
     :param source: Repository-relative Python source path.
     :param text: UTF-8 source contents from the selected snapshot.
-    :param literals: Literal to owner path; ``contract_literals()`` when omitted.
+    :param literals: Literal to owner path. When the value is ``None``,
+        ``scan_contract_literals`` calls ``contract_literals()``.
     :returns: One finding per offending line, or a parse finding.
     """
     owned = contract_literals() if literals is None else literals

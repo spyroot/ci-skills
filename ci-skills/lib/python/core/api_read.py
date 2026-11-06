@@ -104,7 +104,12 @@ class ApiProviderAction(SkillAction):
     :param host: Explicit provider hostname, or ``None`` for target resolution.
     :param token_file: Token file override, or ``None`` for shared resolution.
     :param output: Selected JSON, YAML, or text representation.
-    :param gitlab_selection: Caller's GitLab instance choice, valid only for GitLab.
+    :param gitlab_selection: ``--gitlab`` and ``--gitlab-profile`` values.
+        ``validate`` raises ``gitlab_profile_requires_gitlab_provider`` when the
+        caller passes either option with ``--provider github``. When the value is
+        ``None``, ``ApiProviderSelection.from_action`` passes no selector to
+        ``load_target``, which reads ``[gitlab_routing].default``, else
+        ``gitlab_private``.
 
     .. attribute :: provider
         :type: GitProvider
@@ -129,7 +134,12 @@ class ApiProviderAction(SkillAction):
     .. attribute :: gitlab_selection
         :type: Optional[GitLabSelection]
 
-        Caller's GitLab instance choice; ``None`` reads the routing default.
+        ``--gitlab`` and ``--gitlab-profile`` values. ``validate`` raises
+        ``gitlab_profile_requires_gitlab_provider`` when the caller passes either
+        option with ``--provider github``. When the value is ``None``,
+        ``ApiProviderSelection.from_action`` passes no selector to
+        ``load_target``, which reads ``[gitlab_routing].default``, else
+        ``gitlab_private``.
     """
 
     provider: GitProvider
@@ -265,7 +275,10 @@ class ApiReadAction(ApiProviderAction):
         :param lines: Inclusive ``start:end`` range, or ``None`` for all text.
         :param paginate: Whether to collect array pages through the native CLI.
         :param output: Selected JSON, YAML, or text representation.
-        :param gitlab_selection: Caller's GitLab choice, or ``None`` for the default.
+        :param gitlab_selection: ``--gitlab`` and ``--gitlab-profile`` values. When
+            the value is ``None``, ``ApiProviderSelection.from_action`` passes no
+            selector to ``load_target``, which reads ``[gitlab_routing].default``,
+            else ``gitlab_private``.
         """
         super().__init__(provider, host, token_file, output, gitlab_selection)
         object.__setattr__(self, "endpoint", endpoint)
@@ -328,8 +341,10 @@ class ApiProviderSelection:
     :param host: Validated hostname from runtime configuration or the explicit option.
     :param token_file: Selected credential-file reference; absent uses shared native
         credential resolution when the binding callback runs.
-    :param route: Selected GitLab table and its pairing, or ``None`` when no
-        target file supplied the provider.
+    :param route: Route of the GitLab table that supplied ``host``.
+        ``from_action`` leaves it ``None`` when no target file exists, when
+        ``--provider`` is ``github``, and when ``--host`` names a host other than
+        the selected table's ``url``.
 
     .. attribute :: provider
         :type: GitProvider
@@ -350,8 +365,9 @@ class ApiProviderSelection:
     .. attribute :: route
         :type: Optional[GitLabRoute]
 
-        Selected GitLab table and its pairing, or ``None`` when no target file
-        supplied the provider.
+        Route of the GitLab table that supplied ``host``. ``from_action`` leaves it
+        ``None`` when no target file exists, when ``--provider`` is ``github``,
+        and when ``--host`` names a host other than the selected table's ``url``.
     """
 
     provider: GitProvider

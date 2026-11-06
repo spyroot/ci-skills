@@ -47,12 +47,13 @@ EXTRA_HEADER_TEMPLATE: Final = "http.{url}.extraheader"
 
 
 def repository_url_key(url: str) -> str:
-    """Compare HTTPS repository routes independently of optional clone suffixes.
+    """Return the comparison key of a repository URL.
 
-    :param url: Repository route already validated by its provider boundary.
-    :returns: Case-insensitive route with an optional HTTPS ``.git`` suffix and
-        trailing slash removed; other transports retain their existing comparison.
-    :raises ValueError: The URL cannot be parsed by the standard URL parser.
+    :param url: Repository URL; the provider that supplies it has validated it.
+    :returns: The case-folded URL. For an ``https`` URL, ``repository_url_key``
+        also strips trailing ``/`` and then one ``.git`` suffix from the path; for
+        other schemes it returns the case-folded URL unchanged.
+    :raises ValueError: ``urllib.parse.urlsplit`` rejects the URL.
     """  # noqa: DOC502 - Standard URL parsing propagates malformed-route errors.
     normalized = url.casefold()
     parsed = urlsplit(normalized)
