@@ -200,16 +200,20 @@ jobs:
             tests/acceptance/runner-tag/*.json
           check-jsonschema --schemafile schemas/live-acceptance-policy.schema.json \
             inventory/ci/live-acceptance.json
+          # The runner read and delete schemas reference gitlab-runner-tag.schema.json by a
+          # relative $ref; resolve it from the checkout, not from the schema's $id URL.
+          read_schema="$PWD/ci-skills/schemas/results/gitlab-runner-read.schema.json"
+          delete_schema="$PWD/ci-skills/schemas/results/gitlab-runner-delete.schema.json"
           if compgen -G 'tests/acceptance/runner-lifecycle/*-get.json' >/dev/null; then
-            check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-read.schema.json \
+            check-jsonschema --base-uri "file://$read_schema" --schemafile "$read_schema" \
               tests/acceptance/runner-lifecycle/*-get.json
           fi
           if compgen -G 'tests/acceptance/runner-lifecycle/*-list.json' >/dev/null; then
-            check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-read.schema.json \
+            check-jsonschema --base-uri "file://$read_schema" --schemafile "$read_schema" \
               tests/acceptance/runner-lifecycle/*-list.json
           fi
           if compgen -G 'tests/acceptance/runner-lifecycle/*-delete-*.json' >/dev/null; then
-            check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-delete.schema.json \
+            check-jsonschema --base-uri "file://$delete_schema" --schemafile "$delete_schema" \
               tests/acceptance/runner-lifecycle/*-delete-*.json
           fi
       - name: Exercise callback, target, install, and command contracts
