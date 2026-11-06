@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Optional
 import pytest
 from conftest import SKILL_ROOT, import_script_module
 from jsonschema import Draft202012Validator
+from lib.python.core.endpoints import GITLAB_PUBLIC_SELECTOR
 from referencing import Registry, Resource
 from test_image_build_chain import (
     ABSTRACT_CALLBACKS,
@@ -228,7 +229,11 @@ def test_chain_schema_rejects_pass_without_complete_runner_delivery(
 )
 @pytest.mark.parametrize(
     ("gitlab_selector", "gitlab_profile"),
-    ((None, None), ("public", None), (None, "public")),
+    (
+        (None, None),
+        (GITLAB_PUBLIC_SELECTOR, None),
+        (None, GITLAB_PUBLIC_SELECTOR),
+    ),
     ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(

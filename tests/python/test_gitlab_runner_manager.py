@@ -23,6 +23,7 @@ from uuid import uuid4
 
 import pytest
 from conftest import import_script_module
+from lib.python.core.endpoints import GITLAB_PUBLIC_SELECTOR
 from test_tool_pod import MemoryCluster
 
 ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
@@ -243,7 +244,11 @@ def test_token_binding_hashes_shared_reader_value_without_exposing_it(
 
 @pytest.mark.parametrize(
     ("gitlab_selector", "gitlab_profile"),
-    ((None, None), ("public", None), (None, "public")),
+    (
+        (None, None),
+        (GITLAB_PUBLIC_SELECTOR, None),
+        (None, GITLAB_PUBLIC_SELECTOR),
+    ),
     ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_offline_prepare_defers_provider_and_runner_token_reads(

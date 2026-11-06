@@ -20,7 +20,7 @@ other meaning. Provider URLs and credentials remain runtime inputs.
 | `test-self-runner` / self-hosted runners | `spyroot/test-self-runner` | dcloud `hott/test-self-runner` | Allocated |
 | `test-k8s-agent` / project Agent access | `spyroot/test-k8s-agent` | dcloud `hott/test-k8s-agent` | Planned |
 | `test-mirror-push` / GitLab → GitHub | `spyroot/test-mirror-push` | dcloud `hott/test-mirror-push` | Qualified |
-| `test-self-runner` / public GitLab | Reuse runner repository above | GitLab.com `spyroot/test-self-runner` | Planned |
+| `test-self-runner` / GitLab.com | Runner repository above | GitLab.com `spyroot/test-self-runner` | Allocated |
 
 Prepare each pair only when its scenario is ready:
 
@@ -115,10 +115,28 @@ without another deletion. The source and its `main`/`smoke-seed` refs remain pre
 No consumer Actions job or GitLab pipeline was dispatched. Original receipts are selected in
 `tests/acceptance/candidate/`; the NO_OP copy includes separately captured cleanup observations.
 
+### Unrecorded destination leftover — 2026-11-06
+
+GitHub `spyroot/test-mirror-push` existed as repository `1442655376`, private, created `2026-11-02T07:40:01Z`, holding
+branch `main` and tag `smoke-seed` at `aafe5d50bbe4a1884b7b4f86668651e9ddbd5222`; GitLab project `261` had no remote
+mirror. No queue record, scratch file, log or session transcript records its creation; it was created 16 minutes
+after the last PR #138 commit (`12ddee8`), which suggests an unrecorded #138 run (inference, not a record). Identity
+was checked at `2026-11-06T01:33:33Z`. The repository was deleted with team approval ("Yes, delete it"); by
+`2026-11-06T01:35:52Z` both `repos/spyroot/test-mirror-push` and `repositories/1442655376` returned 404, and a second
+read at `01:36:27Z` returned `RESOURCE_NOT_FOUND` for both. Evidence is kept outside the repository with the run
+log of issue #133.
+
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
 The `1f2b6f5` qualification remains in the merged CI-14 history. The prior `ae47632` originals remain unchanged under
 `tests/acceptance/historical/pre-ci15-build-retention/`. The renewed `bcf7d59` run verifies the corrected runner
 candidate with the same retained source and creation-ID checks; it does not allocate another retained repository.
+
+## GitLab.com runner project allocation — 2026-11-06
+
+GitLab.com `spyroot/test-self-runner` is project `88575800`, owner namespace `spyroot` (user `38452341`), private and
+empty. It was absent at `2026-11-06T01:19:57Z` (`ci-api get --gitlab public`, `RESOURCE_NOT_FOUND`), created at
+`01:20:18Z` with `POST /projects` (`visibility=private`, no README), and read back at `01:20:26Z` through the same
+installed `ci-api --gitlab public`. It is retained across phases; only run-owned resources in it are disposable.
 
 ## Runner baseline support allocation
 

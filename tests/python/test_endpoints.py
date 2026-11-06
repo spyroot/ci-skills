@@ -26,7 +26,21 @@ from typing import TYPE_CHECKING, Final
 import jsonschema
 import pytest
 import yaml
-from conftest import REPO_ROOT, git, import_script_module, load_module
+from conftest import (
+    REPO_ROOT,
+    git,
+    import_script_module,
+    load_module,
+    paired,
+    render_target,
+    routing_table,
+)
+from lib.python.core.endpoints import (
+    GITLAB_PRIVATE_TABLE,
+    GITLAB_PUBLIC_TABLE,
+    GITLAB_ROUTED_AUTHORITIES,
+    GITLAB_ROUTING_TABLE,
+)
 
 ENDPOINTS = import_script_module("lib.python.core.endpoints")
 CATALOG = import_script_module("lib.python.core.catalog")
@@ -40,20 +54,25 @@ SCHEMA = json.loads(
 )
 TEMPLATE = "target.toml.template"
 UNKNOWN_AUTHORITY = "unregistered_authority"
-ROUTED_EXAMPLE: Final[str] = (
-    "[gitlab_routing]\n"
-    'default = "gitlab_private"\n'
-    'gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }\n'
-    'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }\n'
-    "\n"
-    "[gitlab_private]\n"
-    'url = "https://gitlab.example.test"\n'
-    'token_file = "gitlab-private.token"\n'
-    "\n"
-    "[gitlab_public]\n"
-    'url = "https://gitlab.public.example.test"\n'
-    'token_file = "gitlab-public.token"\n'
-    "runner_id = 7\n"
+ROUTED_EXAMPLE: Final[str] = render_target(
+    {
+        GITLAB_ROUTING_TABLE: routing_table(
+            {
+                GITLAB_PRIVATE_TABLE: paired(*GITLAB_ROUTED_AUTHORITIES),
+                GITLAB_PUBLIC_TABLE: paired(),
+            },
+            default=GITLAB_PRIVATE_TABLE,
+        ),
+        GITLAB_PRIVATE_TABLE: {
+            "url": "https://gitlab.example.test",
+            "token_file": "gitlab-private.token",
+        },
+        GITLAB_PUBLIC_TABLE: {
+            "url": "https://gitlab.public.example.test",
+            "token_file": "gitlab-public.token",
+            "runner_id": 7,
+        },
+    }
 )
 PROFILE_EXAMPLE: Final[str] = (
     '[gitlab."public.test"]\n'
@@ -203,49 +222,6 @@ def test_the_contract_accepts_exactly_the_keys_the_parser_accepted() -> None:
         "directory",
         "host_path",
     }
-
-
-def test_instance_tables_fold_into_the_gitlab_authority() -> None:
-    """Resolve each GitLab instance table to the one ``gitlab`` declaration.
-
-    :returns: None; assertions verify authority lookup, folding, and roles.
-    """
-    contract = ENDPOINTS.TARGET_CONTRACT
-    for table in ("gitlab", "gitlab_private", "gitlab_public"):
-        assert contract.authority_of(table) == "gitlab"
-        assert contract.declares(table, table=True)
-        assert contract.names(table) == contract.names("gitlab")
-        assert contract.canonical_path(f"{table}.token_file") == "gitlab.token_file"
-        assert contract.role(f"{table}.token_file") is ENDPOINTS.Role.ACCESS
-        assert contract.role(f"{table}.runner_id") is ENDPOINTS.Role.VALUE
-    for authority in ("github", "harbor", "kubernetes"):
-        assert contract.authority_of(authority) == authority
-    for table in ("gitlab_routing", "gitlab.com", "kubernetes.node_diagnostics", "x"):
-        assert contract.authority_of(table) is None
-    assert "gitlab_routing" not in contract.authorities
-    assert contract.unpaired() == ()
-
-
-def test_routing_table_declares_default_and_one_row_per_instance() -> None:
-    """Declare ``[gitlab_routing]`` keys as endpoint selectors, never values.
-
-    :returns: None; assertions verify every routing path and its role.
-    """
-    contract = ENDPOINTS.TARGET_CONTRACT
-    assert contract.routing_table() == "gitlab_routing"
-    assert contract.names("gitlab_routing") == {
-        "default",
-        "gitlab_private",
-        "gitlab_public",
-    }
-    assert contract.role("gitlab_routing.default") is ENDPOINTS.Role.ENDPOINT
-    for row in ("gitlab_private", "gitlab_public"):
-        assert contract.declares(f"gitlab_routing.{row}", table=True)
-        assert contract.names(f"gitlab_routing.{row}") == {"kubernetes", "harbor"}
-        for key in ("kubernetes", "harbor"):
-            path = f"gitlab_routing.{row}.{key}"
-            assert contract.role(path) is ENDPOINTS.Role.ENDPOINT
-    assert not any(path.startswith("gitlab_routing") for path in contract.value_keys())
 
 
 def test_routed_example_passes_the_endpoint_gate(repo: Path) -> None:
@@ -640,8 +616,10 @@ def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
     :returns: None; assertions in the body validate the regression.
     """
     template = repo / TEMPLATE
-    lines = template.read_text().splitlines()
-    index = lines.index('url = "https://gitlab.example.com"')
+    text = template.read_text()
+    lines = text.splitlines()
+    url = tomllib.loads(text)[GITLAB_PRIVATE_TABLE]["url"]
+    index = lines.index(f'url = "{url}"')
     lines.insert(index + 1, 'namespace = "ci"')
     template.write_text("\n".join(lines) + "\n")
     code, record = _gate(repo)
@@ -649,7 +627,7 @@ def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
     assert record["findings"] == [
         {
             "rule": "undeclared",
-            "path": "gitlab_private.namespace",
+            "path": f"{GITLAB_PRIVATE_TABLE}.namespace",
             "source": TEMPLATE,
             "line": index + 2,
             "detail": "not an endpoint or access key of the target contract",
@@ -770,7 +748,7 @@ def test_a_value_key_new_since_the_base_fails(repo: Path) -> None:
     template.write_text(current)
     code, record = _gate(repo, "--base", "HEAD")
     assert code == 1
-    assert _rules(record) == [("value_introduced", "gitlab_private.runner_id")]
+    assert _rules(record) == [("value_introduced", f"{GITLAB_PRIVATE_TABLE}.runner_id")]
 
 
 def test_a_value_key_present_at_the_base_is_listed_not_failed(repo: Path) -> None:

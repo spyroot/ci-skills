@@ -198,8 +198,6 @@ def test_every_gitlab_command_offers_the_instance_selector() -> None:
     :returns: None; assertions verify the catalogue and each real parser agree.
     """
     endpoints = import_script_module("lib.python.core.endpoints")
-    assert CATALOG.GITLAB_TARGET_OPTION == "--gitlab"
-    assert CATALOG.GITLAB_PROFILE_OPTION == "--gitlab-profile"
     selecting = [
         script
         for script in CATALOG.COMMANDS

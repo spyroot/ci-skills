@@ -1,10 +1,12 @@
-"""Offline regressions for GitLab instance selection and ``[gitlab_routing]``.
+"""Offline regressions for GitLab instance selection and the routing table.
 
-A target declares ``[gitlab_private]`` and ``[gitlab_public]`` plus one
-``[gitlab_routing]`` table. ``--gitlab private|public`` selects an instance;
-omission selects ``[gitlab_routing].default``. The legacy ``[gitlab]`` table and
-its ``[gitlab.NAME]`` profiles stay readable for one release with a deprecation
-event. Every row asserts exact text.
+A target declares a private and a public GitLab instance table and an optional
+routing table. ``--gitlab private|public`` selects an instance; omission reads
+the routing default, else the private instance. The legacy GitLab table and its
+named profiles stay readable for one release with a deprecation event. Every
+target is composed by the conftest builder from the contract constants, or is
+a copy of the shipped template. Command tests observe what fake ``glab``,
+``kubectl`` and ``helm`` received.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -13,306 +15,545 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-import argparse
-import functools
-from collections.abc import Callable, Mapping
+import copy
+import json
+import sys
+import tomllib
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Final, Optional
+from urllib.parse import urlsplit
 
 import pytest
 from conftest import (
-    import_script_module,
+    FIXTURE_GITHUB,
+    FIXTURE_GITLAB,
+    FIXTURE_HARBOR,
+    FIXTURE_KUBERNETES,
+    TARGET_TEMPLATE,
+    TomlValue,
+    copy_template_target,
+    install_executable,
+    legacy_profile,
+    paired,
     parse_json_output,
+    read_journal,
+    routing_table,
     run_script,
+    write_target,
 )
+from lib.python.core.catalog import (
+    GITLAB_PROFILE_OPTION,
+    GITLAB_TARGET_OPTION,
+    GITLAB_VARIABLES,
+    ROUTED_RESULT_SCHEMA_VERSION,
+)
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    GITLAB_DEFAULT_INSTANCE,
+    GITLAB_DEPRECATION_EVENT,
+    GITLAB_INSTANCE_REQUIRED,
+    GITLAB_LEGACY_PUBLIC_KEY,
+    GITLAB_PRIVATE_DECLARED_TWICE,
+    GITLAB_PRIVATE_SELECTOR,
+    GITLAB_PRIVATE_TABLE,
+    GITLAB_PROFILE_UNKNOWN,
+    GITLAB_PUBLIC_SELECTOR,
+    GITLAB_PUBLIC_TABLE,
+    GITLAB_ROUTED_AUTHORITIES,
+    GITLAB_ROUTING_DEFAULT_KEY,
+    GITLAB_ROUTING_DEFAULT_UNKNOWN,
+    GITLAB_ROUTING_PAIRING_UNKNOWN,
+    GITLAB_ROUTING_ROW_MISSING,
+    GITLAB_ROUTING_ROW_UNKNOWN,
+    GITLAB_ROUTING_TABLE,
+    GITLAB_SELECTION_REQUIRES_GITLAB,
+    GITLAB_SELECTOR_CONFLICT,
+    GITLAB_SELECTOR_UNKNOWN,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+    ROUTING_ARGV_PREFIX,
+    ROUTING_RESULT_KEY,
+    ROUTING_SELECTED_BY_DEFAULT,
+    ROUTING_SELECTED_BY_KEY,
+    ROUTING_SELECTED_BY_LEGACY,
+)
+from lib.python.core.project_binding import (
+    BINDING_ENV,
+    SMOKE_ENV,
+    TARGET_ENV,
+    resolve_target,
+)
+from lib.python.core.schema import specification_validator
+from lib.python.core.target import (
+    GITLAB_INSTANCE_ADVICE,
+    MISSING_AUTHORITY_TABLES,
+    NESTED_TABLE_DIAGNOSTIC,
+    GitLabSelection,
+    TargetError,
+    load_gitlab_target,
+    load_target,
+)
+from test_access_publication_cli import FAKE_ACCESS_TOOLS, TEST_REVISION
 
-TARGET = import_script_module("lib.python.core.target")
-ENDPOINTS = import_script_module("lib.python.core.endpoints")
-BINDING = import_script_module("lib.python.core.project_binding")
-API_READ = import_script_module("lib.python.core.api_read")
-READ_CLI = import_script_module("lib.python.core.read_cli")
-GITLAB_ACTION = import_script_module("lib.python.core.gitlab.gitlab_action")
-SCHEMA = import_script_module("lib.python.core.schema")
-ISSUE = import_script_module("gitlab_issue")
 
-PRIVATE_HOST: Final[str] = "private.example.test"
-PUBLIC_HOST: Final[str] = "public.example.test"
-PRIVATE_TOKEN_PATH: Final[str] = "private.token"
-PUBLIC_TOKEN_PATH: Final[str] = "tokens/public.token"
-PRIVATE_TOKEN_TEXT: Final[str] = "unit-private-token-value"
-PUBLIC_TOKEN_TEXT: Final[str] = "unit-public-token-value"
-TARGET_ENV_SOURCE: Final[str] = "env:CI_SKILLS_TARGET"
-DEPRECATION_EVENT: Final[str] = "gitlab_target_deprecated"
-ROUTING_SCHEMA: Final[str] = "results/gitlab-routing.schema.json"
-ACTION_SCHEMA: Final[str] = "results/gitlab-action.schema.json"
+@dataclass(frozen=True)
+class Instance:
+    """Fixture values of one GitLab instance table.
 
-ROUTING: Final[str] = (
-    "[gitlab_routing]\n"
-    'default = "gitlab_private"\n'
-    'gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }\n'
-    'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }\n'
-)
-SINGLE_ROUTING: Final[str] = (
-    '[gitlab_routing]\ndefault = "gitlab_private"\ngitlab_private = {}\n'
-)
-PRIVATE_TABLE: Final[str] = (
-    "[gitlab_private]\n"
-    f'url = "https://{PRIVATE_HOST}"\n'
-    'project = "consumer/private"\n'
-    f'token_file = "{PRIVATE_TOKEN_PATH}"\n'
-    "runner_id = 11\n"
-)
-PUBLIC_TABLE: Final[str] = (
-    "[gitlab_public]\n"
-    f'url = "https://{PUBLIC_HOST}"\n'
-    'project = "consumer/public"\n'
-    f'token_file = "{PUBLIC_TOKEN_PATH}"\n'
-    "runner_id = 22\n"
-)
-HARBOR_TABLE: Final[str] = (
-    "[harbor]\n"
-    'url = "https://harbor.example.test"\n'
-    'project = "unit"\n'
-    'credential_file = "harbor.credential"\n'
-)
-KUBERNETES_TABLE: Final[str] = (
-    "[kubernetes]\n"
-    'context = "unit-context"\n'
-    'server = "https://api.cluster.example.test:6443"\n'
-)
-ROUTED_TARGET: Final[str] = (
-    ROUTING + PRIVATE_TABLE + PUBLIC_TABLE + HARBOR_TABLE + KUBERNETES_TABLE
-)
-SINGLE_TARGET: Final[str] = SINGLE_ROUTING + PRIVATE_TABLE + KUBERNETES_TABLE
-LEGACY_TABLE: Final[str] = PRIVATE_TABLE.replace("[gitlab_private]", "[gitlab]")
-LEGACY_TARGET: Final[str] = LEGACY_TABLE + KUBERNETES_TABLE
-# The shape reported in issue #133: TOML reads [gitlab.com] as a table "com"
-# nested in [gitlab].
-ISSUE_TARGET: Final[str] = LEGACY_TABLE + PUBLIC_TABLE.replace(
-    "[gitlab_public]", "[gitlab.com]"
-)
-PUBLIC_DEFAULT_TARGET: Final[str] = ROUTED_TARGET.replace(
-    'default = "gitlab_private"', 'default = "gitlab_public"', 1
-)
-PUBLIC_ONLY_TARGET: Final[str] = (
-    '[gitlab_routing]\ndefault = "gitlab_public"\ngitlab_public = {}\n'
-    + PUBLIC_TABLE
-    + KUBERNETES_TABLE
-)
+    :param host: Hostname of the instance URL.
+    :param project: Project path declared by the table.
+    :param token_path: Token file path relative to the target file.
+    :param token_text: Token file content.
+    :param runner: Runner ID declared by the table.
+    """
 
-Loader = Callable[..., object]
+    host: str
+    project: str
+    token_path: str
+    token_text: str
+    runner: int
+
+    @property
+    def url(self) -> str:
+        """Return the HTTPS origin written to the table.
+
+        :returns: Origin built from the host.
+        """
+        return f"https://{self.host}"
+
+    def fields(self) -> dict[str, TomlValue]:
+        """Compose the instance table fields.
+
+        :returns: New mapping of URL, project, token file and runner ID.
+        """
+        return {
+            "url": self.url,
+            "project": self.project,
+            "token_file": self.token_path,
+            "runner_id": self.runner,
+        }
+
+
+PRIVATE: Final = Instance(
+    "private.example.test", "consumer/private", "private.token", "unit-private", 11
+)
+PUBLIC: Final = Instance(
+    "public.example.test",
+    "consumer/public",
+    "tokens/public.token",
+    "unit-public",
+    22,
+)
+ROUTED: Final = GITLAB_ROUTED_AUTHORITIES
+LEGACY_PUBLIC: Final = legacy_profile(GITLAB_LEGACY_PUBLIC_KEY)
+NESTED_CHILD: Final = "foo"
+UNKNOWN_INSTANCE: Final = "unknown_instance"
+NO_SELECTION: Final = GitLabSelection()
+SELECT_PRIVATE: Final = GitLabSelection(selector=GITLAB_PRIVATE_SELECTOR)
+SELECT_PUBLIC: Final = GitLabSelection(selector=GITLAB_PUBLIC_SELECTOR)
+SELECT_PROFILE: Final = GitLabSelection(profile=GITLAB_LEGACY_PUBLIC_KEY)
+ARGV_PRIVATE: Final = (
+    f"{ROUTING_ARGV_PREFIX}{GITLAB_TARGET_OPTION}={GITLAB_PRIVATE_SELECTOR}"
+)
+ARGV_PUBLIC: Final = (
+    f"{ROUTING_ARGV_PREFIX}{GITLAB_TARGET_OPTION}={GITLAB_PUBLIC_SELECTOR}"
+)
+ARGV_PROFILE: Final = (
+    f'{ROUTING_ARGV_PREFIX}{GITLAB_PROFILE_OPTION}="{GITLAB_LEGACY_PUBLIC_KEY}"'
+)
+TARGET_ENV_SOURCE: Final = f"env:{TARGET_ENV}"
+MISSING_ROUTED: Final = MISSING_AUTHORITY_TABLES + ", ".join(sorted(ROUTED))
+ACTION_SCHEMA: Final = "results/gitlab-action.schema.json"
+WORKFLOW_SCHEMA: Final = "results/toolbox-workflow.schema.json"
+TEMPLATE: Final = tomllib.loads(TARGET_TEMPLATE.read_text(encoding="utf-8"))
+TEMPLATE_DEFAULT: Final = TEMPLATE[GITLAB_ROUTING_TABLE][GITLAB_ROUTING_DEFAULT_KEY]
+PROVIDER_TOOLS: Final = ("gh", "glab", "kubectl", "oc", "helm")
+TOKEN_VARIABLE: Final = GITLAB_VARIABLES[0]
+OPEN_BUG: Final = ("open-bug", "--project", "team/app", "--title", "t", "--json")
+# The fake GitLab project a runner deploy plans against.
+DEPLOY_PROJECT: Final = ("--project", "team/app")
+# Removes the entry at a path in `edited`.
+REMOVED: Final = object()
+# Journals every call with the token the caller exported, then answers any
+# `glab api` request with an identity on the host it was asked for.
+FAKE_PROVIDER: Final = f"""#!{sys.executable}
+import json, os, pathlib, sys
+tool = pathlib.Path(sys.argv[0]).name
+args = sys.argv[1:]
+token = os.environ.get(os.environ["FAKE_TOKEN_VARIABLE"])
+with open(os.environ["FAKE_JOURNAL"], "a", encoding="utf-8") as journal:
+    journal.write(json.dumps({{"tool": tool, "argv": args, "token": token}}) + "\\n")
+if tool == "glab" and args[:1] == ["api"]:
+    host = args[args.index("--hostname") + 1]
+    print(json.dumps({{"id": 1, "username": "unit", "web_url": "https://" + host + "/unit"}}))
+    raise SystemExit(0)
+raise SystemExit(98)
+"""
+
+
+def routed_target() -> dict[str, TomlValue]:
+    """Compose both instances, each routed to Kubernetes and Harbor.
+
+    :returns: Routing default private, both instance tables, Harbor, Kubernetes.
+    """
+    return {
+        GITLAB_ROUTING_TABLE: routing_table(
+            {
+                GITLAB_PRIVATE_TABLE: paired(*ROUTED),
+                GITLAB_PUBLIC_TABLE: paired(*ROUTED),
+            },
+            default=GITLAB_PRIVATE_TABLE,
+        ),
+        GITLAB_PRIVATE_TABLE: PRIVATE.fields(),
+        GITLAB_PUBLIC_TABLE: PUBLIC.fields(),
+        HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+        KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+    }
+
+
+def single_target() -> dict[str, TomlValue]:
+    """Compose the private instance alone with an empty routing row.
+
+    :returns: Routing default private, the private table, Kubernetes.
+    """
+    return {
+        GITLAB_ROUTING_TABLE: routing_table(
+            {GITLAB_PRIVATE_TABLE: paired()}, default=GITLAB_PRIVATE_TABLE
+        ),
+        GITLAB_PRIVATE_TABLE: PRIVATE.fields(),
+        KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+    }
+
+
+def legacy_target() -> dict[str, TomlValue]:
+    """Compose the legacy GitLab table holding the private fields.
+
+    :returns: Legacy GitLab table and Kubernetes.
+    """
+    return {
+        GITLAB_AUTHORITY: PRIVATE.fields(),
+        KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+    }
+
+
+def issue_target() -> dict[str, TomlValue]:
+    """Compose the issue #133 shape: legacy fields and the legacy public profile.
+
+    :returns: Legacy GitLab table and its public-key child table.
+    """
+    return {GITLAB_AUTHORITY: PRIVATE.fields(), LEGACY_PUBLIC: PUBLIC.fields()}
+
+
+def public_only_target() -> dict[str, TomlValue]:
+    """Compose the public instance alone, named as the routing default.
+
+    :returns: Routing default public, the public table, Kubernetes.
+    """
+    return {
+        GITLAB_ROUTING_TABLE: routing_table(
+            {GITLAB_PUBLIC_TABLE: paired()}, default=GITLAB_PUBLIC_TABLE
+        ),
+        GITLAB_PUBLIC_TABLE: PUBLIC.fields(),
+        KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+    }
+
+
+def edited(
+    tables: Mapping[str, TomlValue], *changes: tuple[tuple[str, ...], object]
+) -> dict[str, TomlValue]:
+    """Copy a composed target and set or remove one entry per change.
+
+    :param tables: Composed target entries.
+    :param *changes: Key path and new value; ``REMOVED`` deletes the entry.
+    :returns: Changed copy; ``tables`` is unchanged.
+    """
+    result = copy.deepcopy(dict(tables))
+    for path, value in changes:
+        parent = result
+        for key in path[:-1]:
+            parent = parent[key]
+        if value is REMOVED:
+            del parent[path[-1]]
+        else:
+            parent[path[-1]] = value
+    return result
+
+
+def _routing(
+    gitlab: str, kubernetes: Optional[str], harbor: Optional[str], selected: str
+) -> dict[str, Optional[str]]:
+    """Compose an expected result routing object from fixture values.
+
+    :param gitlab: GitLab table the command read.
+    :param kubernetes: Routed Kubernetes table, or None.
+    :param harbor: Routed Harbor table, or None.
+    :param selected: Selection provenance.
+    :returns: Routing object keyed by the contract names.
+    """
+    return {
+        GITLAB_AUTHORITY: gitlab,
+        KUBERNETES_AUTHORITY: kubernetes,
+        HARBOR_AUTHORITY: harbor,
+        ROUTING_SELECTED_BY_KEY: selected,
+    }
+
+
+def _template_routing(instance: str, selected: str) -> dict[str, Optional[str]]:
+    """Compose the routing object the shipped template declares for one instance.
+
+    :param instance: Instance table whose template routing row is read.
+    :param selected: Selection provenance.
+    :returns: Routing object built from the template's own row.
+    """
+    row = TEMPLATE[GITLAB_ROUTING_TABLE][instance]
+    return _routing(
+        instance, row.get(KUBERNETES_AUTHORITY), row.get(HARBOR_AUTHORITY), selected
+    )
+
+
+def _selection_kwargs(selection: GitLabSelection) -> dict[str, Optional[str]]:
+    """Pass a caller selection to the public loaders.
+
+    :param selection: Caller's instance or legacy profile choice.
+    :returns: Loader keyword arguments.
+    """
+    return {"gitlab": selection.selector, "gitlab_profile": selection.profile}
+
+
+def _selection_argv(selection: GitLabSelection) -> tuple[str, ...]:
+    """Render a caller selection as command options.
+
+    :param selection: Caller's instance or legacy profile choice.
+    :returns: Option and value pairs; empty for no selection.
+    """
+    argv: tuple[str, ...] = ()
+    if selection.selector is not None:
+        argv += (GITLAB_TARGET_OPTION, selection.selector)
+    if selection.profile is not None:
+        argv += (GITLAB_PROFILE_OPTION, selection.profile)
+    return argv
+
+
+Loader = Callable[[Path, GitLabSelection], object]
 LOADERS: Final[Mapping[str, Loader]] = {
-    "load_target": lambda path, **selection: (
-        TARGET.load_target(path, required_surfaces=("gitlab",), **selection).gitlab
+    "load_target": lambda path, selection: (
+        load_target(
+            path, required_surfaces=(GITLAB_AUTHORITY,), **_selection_kwargs(selection)
+        ).gitlab
     ),
-    "load_gitlab_target": lambda path, **selection: (
-        TARGET.load_gitlab_target(path, **selection).gitlab
+    "load_gitlab_target": lambda path, selection: (
+        load_gitlab_target(path, **_selection_kwargs(selection)).gitlab
     ),
 }
 
 
 @pytest.fixture
 def target_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Create token files and isolate ambient target selection.
+    """Create both instance token files and isolate ambient target selection.
 
     :param tmp_path: Directory containing only synthetic target and token files.
     :param monkeypatch: Fixture isolating home, cwd, and target selectors.
-    :returns: Path where each test writes its target body.
+    :returns: Path where each test writes its target.
     """
     directory = tmp_path / "configuration"
-    (directory / "tokens").mkdir(parents=True)
-    (directory / PRIVATE_TOKEN_PATH).write_text(PRIVATE_TOKEN_TEXT, encoding="utf-8")
-    (directory / PUBLIC_TOKEN_PATH).write_text(PUBLIC_TOKEN_TEXT, encoding="utf-8")
+    for instance in (PRIVATE, PUBLIC):
+        token = directory / instance.token_path
+        token.parent.mkdir(parents=True, exist_ok=True)
+        token.write_text(instance.token_text, encoding="utf-8")
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(home)
-    for variable in (BINDING.TARGET_ENV, BINDING.BINDING_ENV, BINDING.SMOKE_ENV):
+    for variable in (TARGET_ENV, BINDING_ENV, SMOKE_ENV):
         monkeypatch.delenv(variable, raising=False)
     return directory / "target.toml"
 
 
-def _route(
-    gitlab: str,
-    kubernetes: Optional[str],
-    harbor: Optional[str],
-    selected_by: str,
-) -> object:
-    """Build the expected route through the production value type.
+@pytest.fixture
+def template_path(target_path: Path) -> Path:
+    """Copy the shipped template, with the files it references, to the target path.
 
-    :param gitlab: Table the loader read.
-    :param kubernetes: Routed Kubernetes table, or None.
-    :param harbor: Routed Harbor table, or None.
-    :param selected_by: Selection provenance.
-    :returns: ``GitLabRoute`` value compared with the loaded route.
+    :param target_path: Isolated target path whose directory receives the copy.
+    :returns: Path of the copied template.
     """
-    return TARGET.GitLabRoute(
-        gitlab=gitlab, kubernetes=kubernetes, harbor=harbor, selected_by=selected_by
-    )
+    return copy_template_target(target_path.parent)
 
 
-def test_selector_constants_are_declared_once_in_the_contract() -> None:
-    """Map each CLI choice to exactly one instance table name.
+@pytest.fixture
+def providers(fake_bin: Path, call_journal: Path) -> Mapping[str, str]:
+    """Install journaling fake provider commands.
 
-    :returns: None; assertions pin the contract names every module imports.
+    :param fake_bin: Directory prepended to the child PATH.
+    :param call_journal: Journal receiving one record per provider call.
+    :returns: Child environment naming the journal and the token variable.
     """
-    assert dict(ENDPOINTS.GITLAB_SELECTORS) == {
-        "private": "gitlab_private",
-        "public": "gitlab_public",
-    }
-    assert ENDPOINTS.GITLAB_ROUTING_TABLE == "gitlab_routing"
-    assert ENDPOINTS.GITLAB_ROUTING_DEFAULT_KEY == "default"
-    assert ENDPOINTS.GITLAB_ROUTED_AUTHORITIES == ("kubernetes", "harbor")
+    for tool in PROVIDER_TOOLS:
+        install_executable(fake_bin, tool, FAKE_PROVIDER)
+    return {"FAKE_JOURNAL": str(call_journal), "FAKE_TOKEN_VARIABLE": TOKEN_VARIABLE}
+
+
+def _hostnames(calls: Sequence[Mapping[str, object]]) -> list[str]:
+    """Read the host each journaled ``glab`` call was given.
+
+    :param calls: Journal records of the fake providers.
+    :returns: ``--hostname`` value of every ``glab`` call, in call order.
+    """
+    return [
+        call["argv"][call["argv"].index("--hostname") + 1]
+        for call in calls
+        if call["tool"] == "glab"
+    ]
+
+
+# --- load_target and load_gitlab_target --------------------------------------
 
 
 @pytest.mark.parametrize("loader", tuple(LOADERS))
 @pytest.mark.parametrize(
-    ("body", "selection", "host", "project", "token", "runner", "route"),
+    ("tables", "selection", "instance", "routing"),
     (
         (
-            SINGLE_TARGET,
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab_private", None, None, "default"),
+            single_target(),
+            NO_SELECTION,
+            PRIVATE,
+            _routing(GITLAB_PRIVATE_TABLE, None, None, ROUTING_SELECTED_BY_DEFAULT),
         ),
         (
-            ROUTED_TARGET,
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab_private", "kubernetes", "harbor", "default"),
+            routed_target(),
+            NO_SELECTION,
+            PRIVATE,
+            _routing(
+                GITLAB_PRIVATE_TABLE,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+                ROUTING_SELECTED_BY_DEFAULT,
+            ),
         ),
         (
-            ROUTED_TARGET,
-            {"gitlab": "public"},
-            PUBLIC_HOST,
-            "consumer/public",
-            PUBLIC_TOKEN_PATH,
-            22,
-            ("gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"),
+            routed_target(),
+            SELECT_PUBLIC,
+            PUBLIC,
+            _routing(
+                GITLAB_PUBLIC_TABLE, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY, ARGV_PUBLIC
+            ),
         ),
         (
-            ROUTED_TARGET,
-            {"gitlab": "private"},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab_private", "kubernetes", "harbor", "argv:--gitlab=private"),
+            routed_target(),
+            SELECT_PRIVATE,
+            PRIVATE,
+            _routing(
+                GITLAB_PRIVATE_TABLE,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+                ARGV_PRIVATE,
+            ),
         ),
         (
-            PUBLIC_DEFAULT_TARGET,
-            {},
-            PUBLIC_HOST,
-            "consumer/public",
-            PUBLIC_TOKEN_PATH,
-            22,
-            ("gitlab_public", "kubernetes", "harbor", "default"),
+            edited(
+                routed_target(),
+                (
+                    (GITLAB_ROUTING_TABLE, GITLAB_ROUTING_DEFAULT_KEY),
+                    GITLAB_PUBLIC_TABLE,
+                ),
+            ),
+            NO_SELECTION,
+            PUBLIC,
+            _routing(
+                GITLAB_PUBLIC_TABLE,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+                ROUTING_SELECTED_BY_DEFAULT,
+            ),
         ),
         (
-            LEGACY_TARGET,
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab", None, None, "legacy"),
+            legacy_target(),
+            NO_SELECTION,
+            PRIVATE,
+            _routing(GITLAB_AUTHORITY, None, None, ROUTING_SELECTED_BY_LEGACY),
         ),
         (
-            ISSUE_TARGET,
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab", None, None, "legacy"),
+            issue_target(),
+            NO_SELECTION,
+            PRIVATE,
+            _routing(GITLAB_AUTHORITY, None, None, ROUTING_SELECTED_BY_LEGACY),
         ),
         (
-            ISSUE_TARGET,
-            {"gitlab_profile": "com"},
-            PUBLIC_HOST,
-            "consumer/public",
-            PUBLIC_TOKEN_PATH,
-            22,
-            ("gitlab.com", None, None, 'argv:--gitlab-profile="com"'),
+            issue_target(),
+            SELECT_PROFILE,
+            PUBLIC,
+            _routing(LEGACY_PUBLIC, None, None, ARGV_PROFILE),
         ),
         (
-            LEGACY_TARGET,
-            {"gitlab": "private"},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab", None, None, "argv:--gitlab=private"),
+            legacy_target(),
+            SELECT_PRIVATE,
+            PRIVATE,
+            _routing(GITLAB_AUTHORITY, None, None, ARGV_PRIVATE),
         ),
         (
-            ISSUE_TARGET,
-            {"gitlab": "public"},
-            PUBLIC_HOST,
-            "consumer/public",
-            PUBLIC_TOKEN_PATH,
-            22,
-            ("gitlab.com", None, None, "argv:--gitlab=public"),
+            issue_target(),
+            SELECT_PUBLIC,
+            PUBLIC,
+            _routing(LEGACY_PUBLIC, None, None, ARGV_PUBLIC),
         ),
         (
-            ROUTED_TARGET.replace('default = "gitlab_private"\n', "", 1),
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab_private", "kubernetes", "harbor", "default"),
+            edited(
+                routed_target(),
+                ((GITLAB_ROUTING_TABLE, GITLAB_ROUTING_DEFAULT_KEY), REMOVED),
+            ),
+            NO_SELECTION,
+            PRIVATE,
+            _routing(
+                GITLAB_PRIVATE_TABLE,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+                ROUTING_SELECTED_BY_DEFAULT,
+            ),
         ),
         (
-            PRIVATE_TABLE + KUBERNETES_TABLE,
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab_private", None, None, "default"),
+            {
+                GITLAB_PRIVATE_TABLE: PRIVATE.fields(),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            NO_SELECTION,
+            PRIVATE,
+            _routing(GITLAB_PRIVATE_TABLE, None, None, ROUTING_SELECTED_BY_DEFAULT),
         ),
         (
-            LEGACY_TABLE + PUBLIC_TABLE,
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab", None, None, "legacy"),
+            {GITLAB_AUTHORITY: PRIVATE.fields(), GITLAB_PUBLIC_TABLE: PUBLIC.fields()},
+            NO_SELECTION,
+            PRIVATE,
+            _routing(GITLAB_AUTHORITY, None, None, ROUTING_SELECTED_BY_LEGACY),
         ),
         (
-            LEGACY_TABLE + PUBLIC_TABLE,
-            {"gitlab": "public"},
-            PUBLIC_HOST,
-            "consumer/public",
-            PUBLIC_TOKEN_PATH,
-            22,
-            ("gitlab_public", None, None, "argv:--gitlab=public"),
+            {GITLAB_AUTHORITY: PRIVATE.fields(), GITLAB_PUBLIC_TABLE: PUBLIC.fields()},
+            SELECT_PUBLIC,
+            PUBLIC,
+            _routing(GITLAB_PUBLIC_TABLE, None, None, ARGV_PUBLIC),
         ),
         (
-            LEGACY_TARGET + SINGLE_ROUTING,
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab", None, None, "legacy"),
+            {
+                **legacy_target(),
+                GITLAB_ROUTING_TABLE: routing_table(
+                    {GITLAB_PRIVATE_TABLE: paired()}, default=GITLAB_PRIVATE_TABLE
+                ),
+            },
+            NO_SELECTION,
+            PRIVATE,
+            _routing(GITLAB_AUTHORITY, None, None, ROUTING_SELECTED_BY_LEGACY),
         ),
         (
-            ROUTED_TARGET + '[gitlab.com]\nurl = "https://public.example.test"\n',
-            {},
-            PRIVATE_HOST,
-            "consumer/private",
-            PRIVATE_TOKEN_PATH,
-            11,
-            ("gitlab_private", "kubernetes", "harbor", "default"),
+            {**routed_target(), LEGACY_PUBLIC: {"url": PUBLIC.url}},
+            NO_SELECTION,
+            PRIVATE,
+            _routing(
+                GITLAB_PRIVATE_TABLE,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+                ROUTING_SELECTED_BY_DEFAULT,
+            ),
         ),
     ),
     ids=(
@@ -337,216 +578,245 @@ def test_selector_constants_are_declared_once_in_the_contract() -> None:
 def test_selection_reads_one_instance_and_reports_its_route(
     target_path: Path,
     loader: str,
-    body: str,
-    selection: Mapping[str, str],
-    host: str,
-    project: str,
-    token: str,
-    runner: int,
-    route: tuple[str, Optional[str], Optional[str], str],
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
+    instance: Instance,
+    routing: Mapping[str, Optional[str]],
 ) -> None:
     """Select the declared instance and report the table that was read.
 
-    :param target_path: Path receiving the target body.
+    :param target_path: Path receiving the target.
     :param loader: Public loader exercised by the case.
-    :param body: Complete target TOML.
-    :param selection: ``gitlab`` or ``gitlab_profile`` keyword, or none.
-    :param host: Expected GitLab authority.
-    :param project: Expected project from the selected table.
-    :param token: Expected target-relative token path.
-    :param runner: Expected runner ID from the selected table.
-    :param route: Expected route fields in declaration order.
-    :returns: None; assertions verify the selected values and unchanged input.
+    :param tables: Composed target.
+    :param selection: Caller's instance or profile choice, or none.
+    :param instance: Fixture values of the table that must be read.
+    :param routing: Expected routing object.
+    :returns: None; assertions compare the loaded values with the fixture's.
     """
-    target_path.write_text(body, encoding="utf-8")
+    write_target(target_path, tables)
 
-    selected = LOADERS[loader](target_path, **selection)
+    selected = LOADERS[loader](target_path, selection)
 
-    assert selected.url == f"https://{host}"
-    assert selected.host == host
-    assert selected.project == project
+    assert selected.url == instance.url
+    assert selected.host == instance.host
+    assert selected.project == instance.project
     assert selected.group is None
-    assert selected.runner_id == runner
-    assert selected.token_file == (target_path.parent / token).resolve()
-    assert selected.route == _route(*route)
-    assert target_path.read_text(encoding="utf-8") == body
-
-
-def test_target_routing_is_the_selected_gitlab_route(target_path: Path) -> None:
-    """Expose the selected route on the combined target used by every command.
-
-    :param target_path: Path receiving the routed target.
-    :returns: None; assertions verify one route value for target and GitLab.
-    """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
-
-    target = TARGET.load_target(
-        target_path, required_surfaces=("gitlab", "kubernetes"), gitlab="public"
-    )
-
-    assert target.routing == _route(
-        "gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"
-    )
-    assert target.routing is target.gitlab.route
-
-
-@pytest.mark.parametrize(
-    ("body", "selection", "expected"),
-    (
-        (ROUTED_TARGET, {}, TARGET_ENV_SOURCE),
-        (
-            ROUTED_TARGET,
-            {"gitlab": "public"},
-            f"{TARGET_ENV_SOURCE};argv:--gitlab=public",
-        ),
-        (LEGACY_TARGET, {}, TARGET_ENV_SOURCE),
-        (
-            ISSUE_TARGET,
-            {"gitlab_profile": "com"},
-            f'{TARGET_ENV_SOURCE};argv:--gitlab-profile="com"',
-        ),
-    ),
-    ids=("default", "explicit-public", "legacy", "legacy-profile"),
-)
-def test_selection_source_names_only_caller_selectors(
-    target_path: Path, body: str, selection: Mapping[str, str], expected: str
-) -> None:
-    """Bind an explicit selector into report and confirmation provenance.
-
-    :param target_path: Path receiving the target body.
-    :param body: Complete target TOML.
-    :param selection: Caller selector keyword, or none.
-    :param expected: Exact provenance string.
-    :returns: None; assertions verify the provenance text.
-    """
-    target_path.write_text(body, encoding="utf-8")
-
-    target = TARGET.load_target(target_path, required_surfaces=("gitlab",), **selection)
-
-    assert target.selection_source(TARGET_ENV_SOURCE) == expected
-    assert target.gitlab.selection_source(TARGET_ENV_SOURCE) == expected
+    assert selected.runner_id == instance.runner
+    assert selected.token_file == (target_path.parent / instance.token_path).resolve()
+    assert selected.route.as_dict() == routing
 
 
 @pytest.mark.parametrize("loader", tuple(LOADERS))
 @pytest.mark.parametrize(
-    ("body", "selection", "reason"),
+    ("tables", "selection", "reason"),
     (
-        (SINGLE_TARGET, {"gitlab": "public"}, "gitlab_public_target_required"),
-        (PUBLIC_ONLY_TARGET, {"gitlab": "private"}, "gitlab_private_target_required"),
-        (LEGACY_TARGET, {"gitlab": "public"}, "gitlab_public_target_required"),
-        (PUBLIC_TABLE + KUBERNETES_TABLE, {}, "gitlab_private_target_required"),
         (
-            ROUTED_TARGET.replace('"gitlab_private"\n', '"gitlab_other"\n', 1),
-            {},
-            "gitlab_routing_default_unknown",
+            single_target(),
+            SELECT_PUBLIC,
+            GITLAB_INSTANCE_REQUIRED.format(table=GITLAB_PUBLIC_TABLE),
         ),
         (
-            SINGLE_TARGET.replace('"gitlab_private"\n', '"gitlab_public"\n', 1),
-            {},
-            "gitlab_routing_default_unknown",
+            public_only_target(),
+            SELECT_PRIVATE,
+            GITLAB_INSTANCE_REQUIRED.format(table=GITLAB_PRIVATE_TABLE),
         ),
         (
-            ROUTED_TARGET.replace(
-                'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }\n',
-                "",
-                1,
+            legacy_target(),
+            SELECT_PUBLIC,
+            GITLAB_INSTANCE_REQUIRED.format(table=GITLAB_PUBLIC_TABLE),
+        ),
+        (
+            {
+                GITLAB_PUBLIC_TABLE: PUBLIC.fields(),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            NO_SELECTION,
+            GITLAB_INSTANCE_REQUIRED.format(table=GITLAB_DEFAULT_INSTANCE),
+        ),
+        (
+            edited(
+                public_only_target(),
+                ((GITLAB_ROUTING_TABLE, GITLAB_ROUTING_DEFAULT_KEY), REMOVED),
             ),
-            {},
-            "gitlab_routing_row_missing",
+            NO_SELECTION,
+            GITLAB_INSTANCE_REQUIRED.format(table=GITLAB_DEFAULT_INSTANCE),
         ),
         (
-            SINGLE_TARGET.replace(
-                "gitlab_private = {}\n", "gitlab_private = {}\ngitlab_public = {}\n", 1
+            edited(
+                routed_target(),
+                ((GITLAB_ROUTING_TABLE, GITLAB_ROUTING_DEFAULT_KEY), UNKNOWN_INSTANCE),
             ),
-            {},
-            "gitlab_routing_row_unknown",
+            NO_SELECTION,
+            GITLAB_ROUTING_DEFAULT_UNKNOWN,
         ),
         (
-            SINGLE_TARGET.replace(
-                "gitlab_private = {}\n", "gitlab_private = {}\ngitlab_other = {}\n", 1
+            edited(
+                single_target(),
+                (
+                    (GITLAB_ROUTING_TABLE, GITLAB_ROUTING_DEFAULT_KEY),
+                    GITLAB_PUBLIC_TABLE,
+                ),
             ),
-            {},
-            "gitlab_routing_row_unknown",
+            NO_SELECTION,
+            GITLAB_ROUTING_DEFAULT_UNKNOWN,
         ),
         (
-            ROUTED_TARGET.replace(
-                '{ kubernetes = "kubernetes"', '{ kubernetes = "cluster_b"', 1
+            edited(
+                routed_target(), ((GITLAB_ROUTING_TABLE, GITLAB_PUBLIC_TABLE), REMOVED)
             ),
-            {},
-            "gitlab_routing_kubernetes_unknown",
+            NO_SELECTION,
+            GITLAB_ROUTING_ROW_MISSING,
         ),
         (
-            ROUTED_TARGET.replace(KUBERNETES_TABLE, "", 1),
-            {},
-            "gitlab_routing_kubernetes_unknown",
+            edited(single_target(), ((GITLAB_ROUTING_TABLE, GITLAB_PUBLIC_TABLE), {})),
+            NO_SELECTION,
+            GITLAB_ROUTING_ROW_UNKNOWN,
         ),
         (
-            ROUTED_TARGET.replace(HARBOR_TABLE, "", 1),
-            {},
-            "gitlab_routing_harbor_unknown",
+            edited(single_target(), ((GITLAB_ROUTING_TABLE, UNKNOWN_INSTANCE), {})),
+            NO_SELECTION,
+            GITLAB_ROUTING_ROW_UNKNOWN,
         ),
         (
-            SINGLE_TARGET.replace(
-                "gitlab_private = {}", 'gitlab_private = { registry = "harbor" }', 1
+            edited(
+                routed_target(),
+                (
+                    (GITLAB_ROUTING_TABLE, GITLAB_PRIVATE_TABLE, KUBERNETES_AUTHORITY),
+                    UNKNOWN_INSTANCE,
+                ),
             ),
-            {},
-            "gitlab_routing.gitlab_private contains unsupported fields: registry",
-        ),
-        (
-            SINGLE_TARGET.replace(
-                "gitlab_private = {}", 'gitlab_private = "kubernetes"', 1
+            NO_SELECTION,
+            GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+                routing=GITLAB_ROUTING_TABLE, authority=KUBERNETES_AUTHORITY
             ),
-            {},
-            "gitlab_routing.gitlab_private must be a TOML table",
-        ),
-        (LEGACY_TABLE + ROUTED_TARGET, {}, "gitlab_private_declared_twice"),
-        (
-            ISSUE_TARGET,
-            {"gitlab": "public", "gitlab_profile": "com"},
-            "gitlab_selector_conflict",
         ),
         (
-            ROUTED_TARGET,
-            {"gitlab": "public", "gitlab_profile": "com"},
-            "gitlab_selector_conflict",
-        ),
-        (ROUTED_TARGET, {"gitlab_profile": "com"}, "gitlab_profile_unknown"),
-        (ISSUE_TARGET, {"gitlab_profile": "missing"}, "gitlab_profile_unknown"),
-        (
-            ROUTED_TARGET.replace(
-                'gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }',
-                'gitlab_private = { kubernetes = "kubernetes", harbor = "kubernetes" }',
-                1,
+            edited(routed_target(), ((KUBERNETES_AUTHORITY,), REMOVED)),
+            NO_SELECTION,
+            GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+                routing=GITLAB_ROUTING_TABLE, authority=KUBERNETES_AUTHORITY
             ),
-            {},
-            "gitlab_routing_harbor_unknown",
         ),
         (
-            ROUTED_TARGET.replace(
-                '{ kubernetes = "kubernetes", harbor', "{ kubernetes = 5, harbor", 1
+            edited(routed_target(), ((HARBOR_AUTHORITY,), REMOVED)),
+            NO_SELECTION,
+            GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+                routing=GITLAB_ROUTING_TABLE, authority=HARBOR_AUTHORITY
             ),
-            {},
-            "gitlab_routing_kubernetes_unknown",
         ),
         (
-            'gitlab_routing = "x"\n' + PRIVATE_TABLE + KUBERNETES_TABLE,
-            {},
-            "gitlab_routing must be a TOML table",
-        ),
-        (ROUTED_TARGET, {"gitlab": "bogus"}, "gitlab_selector_unknown"),
-        (
-            SINGLE_ROUTING + KUBERNETES_TABLE,
-            {},
-            "target is missing required authority tables: gitlab",
-        ),
-        (
-            ROUTED_TARGET
-            + '[gitlab_public.com]\nurl = "https://public.example.test"\n',
-            {"gitlab": "public"},
+            edited(
+                single_target(),
+                (
+                    (GITLAB_ROUTING_TABLE, GITLAB_PRIVATE_TABLE),
+                    {"registry": HARBOR_AUTHORITY},
+                ),
+            ),
+            NO_SELECTION,
             (
-                "[gitlab_public.com] is table com nested in [gitlab_public]: TOML "
-                "reads a dot in a table name as nesting; an instance table holds no "
-                "nested table; name each GitLab [gitlab_private] or [gitlab_public]"
+                f"{GITLAB_ROUTING_TABLE}.{GITLAB_PRIVATE_TABLE} contains unsupported "
+                "fields: registry"
+            ),
+        ),
+        (
+            edited(
+                single_target(),
+                ((GITLAB_ROUTING_TABLE, GITLAB_PRIVATE_TABLE), KUBERNETES_AUTHORITY),
+            ),
+            NO_SELECTION,
+            f"{GITLAB_ROUTING_TABLE}.{GITLAB_PRIVATE_TABLE} must be a TOML table",
+        ),
+        (
+            {GITLAB_AUTHORITY: PRIVATE.fields(), **routed_target()},
+            NO_SELECTION,
+            GITLAB_PRIVATE_DECLARED_TWICE,
+        ),
+        (
+            issue_target(),
+            GitLabSelection(GITLAB_PUBLIC_SELECTOR, GITLAB_LEGACY_PUBLIC_KEY),
+            GITLAB_SELECTOR_CONFLICT,
+        ),
+        (
+            routed_target(),
+            GitLabSelection(GITLAB_PUBLIC_SELECTOR, GITLAB_LEGACY_PUBLIC_KEY),
+            GITLAB_SELECTOR_CONFLICT,
+        ),
+        (routed_target(), SELECT_PROFILE, GITLAB_PROFILE_UNKNOWN),
+        (
+            issue_target(),
+            GitLabSelection(profile=UNKNOWN_INSTANCE),
+            GITLAB_PROFILE_UNKNOWN,
+        ),
+        (
+            edited(
+                routed_target(),
+                (
+                    (GITLAB_ROUTING_TABLE, GITLAB_PRIVATE_TABLE, HARBOR_AUTHORITY),
+                    KUBERNETES_AUTHORITY,
+                ),
+            ),
+            NO_SELECTION,
+            GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+                routing=GITLAB_ROUTING_TABLE, authority=HARBOR_AUTHORITY
+            ),
+        ),
+        (
+            edited(
+                routed_target(),
+                (
+                    (GITLAB_ROUTING_TABLE, GITLAB_PRIVATE_TABLE, KUBERNETES_AUTHORITY),
+                    5,
+                ),
+            ),
+            NO_SELECTION,
+            GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+                routing=GITLAB_ROUTING_TABLE, authority=KUBERNETES_AUTHORITY
+            ),
+        ),
+        (
+            edited(routed_target(), ((GITLAB_ROUTING_TABLE,), UNKNOWN_INSTANCE)),
+            NO_SELECTION,
+            f"{GITLAB_ROUTING_TABLE} must be a TOML table",
+        ),
+        (
+            routed_target(),
+            GitLabSelection(selector=UNKNOWN_INSTANCE),
+            GITLAB_SELECTOR_UNKNOWN,
+        ),
+        (
+            {
+                GITLAB_ROUTING_TABLE: routing_table(
+                    {GITLAB_PRIVATE_TABLE: paired()}, default=GITLAB_PRIVATE_TABLE
+                ),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            NO_SELECTION,
+            MISSING_AUTHORITY_TABLES + GITLAB_AUTHORITY,
+        ),
+        (
+            {
+                **routed_target(),
+                f"{GITLAB_PUBLIC_TABLE}.{NESTED_CHILD}": {"url": PUBLIC.url},
+            },
+            SELECT_PUBLIC,
+            NESTED_TABLE_DIAGNOSTIC.format(
+                path=f"{GITLAB_PUBLIC_TABLE}.{NESTED_CHILD}",
+                child=NESTED_CHILD,
+                parent=GITLAB_PUBLIC_TABLE,
+                advice=GITLAB_INSTANCE_ADVICE,
+            ),
+        ),
+        (
+            {
+                GITLAB_PRIVATE_TABLE: PRIVATE.fields(),
+                f"{GITLAB_PUBLIC_TABLE}.{NESTED_CHILD}": {"url": PUBLIC.url},
+            },
+            SELECT_PUBLIC,
+            NESTED_TABLE_DIAGNOSTIC.format(
+                path=f"{GITLAB_PUBLIC_TABLE}.{NESTED_CHILD}",
+                child=NESTED_CHILD,
+                parent=GITLAB_PUBLIC_TABLE,
+                advice=GITLAB_INSTANCE_ADVICE,
             ),
         ),
     ),
@@ -554,7 +824,8 @@ def test_selection_source_names_only_caller_selectors(
         "public-not-declared",
         "private-not-declared",
         "legacy-has-no-public",
-        "public-only-without-default-instance",
+        "public-only-without-routing",
+        "public-only-routing-without-default",
         "default-names-unknown-table",
         "default-names-undeclared-instance",
         "declared-instance-without-row",
@@ -576,28 +847,29 @@ def test_selection_source_names_only_caller_selectors(
         "library-selector-outside-contract",
         "routing-without-instance-table",
         "dotted-header-under-instance",
+        "selected-instance-holds-only-a-nested-table",
     ),
 )
 def test_invalid_selection_or_routing_fails_closed_with_exact_reason(
     target_path: Path,
     loader: str,
-    body: str,
-    selection: Mapping[str, str],
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
     reason: str,
 ) -> None:
     """Reject one broken selection or routing invariant without a fallback.
 
     :param target_path: Path receiving the invalid target.
     :param loader: Public loader whose fail-closed selection is checked.
-    :param body: Target TOML breaking exactly one invariant.
-    :param selection: Caller selector keywords, or none.
+    :param tables: Composed target breaking exactly one invariant.
+    :param selection: Caller's instance or profile choice, or none.
     :param reason: Exact diagnostic expected by the calling agent.
     :returns: None; assertions verify the reason and the unchanged input.
     """
-    target_path.write_text(body, encoding="utf-8")
+    body = write_target(target_path, tables).read_text(encoding="utf-8")
 
-    with pytest.raises(TARGET.TargetError) as error:
-        LOADERS[loader](target_path, **selection)
+    with pytest.raises(TargetError) as error:
+        LOADERS[loader](target_path, selection)
 
     assert str(error.value) == reason
     assert target_path.read_text(encoding="utf-8") == body
@@ -605,76 +877,76 @@ def test_invalid_selection_or_routing_fails_closed_with_exact_reason(
 
 @pytest.mark.parametrize("loader", tuple(LOADERS))
 @pytest.mark.parametrize(
-    ("body", "before", "after", "selection", "message"),
+    ("tables", "selection", "message"),
     (
         (
-            ROUTED_TARGET,
-            f'url = "https://{PUBLIC_HOST}"\n',
-            "",
-            {"gitlab": "public"},
-            "gitlab_public.url must be a nonempty string",
+            edited(routed_target(), ((GITLAB_PUBLIC_TABLE, "url"), REMOVED)),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE}.url must be a nonempty string",
         ),
         (
-            ROUTED_TARGET,
-            f'url = "https://{PUBLIC_HOST}"\n',
-            f'url = "https://{PUBLIC_HOST}/consumer"\n',
-            {"gitlab": "public"},
-            "gitlab_public.url must be an HTTPS origin with a full hostname",
+            edited(
+                routed_target(),
+                ((GITLAB_PUBLIC_TABLE, "url"), f"{PUBLIC.url}/consumer"),
+            ),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE}.url must be an HTTPS origin with a full hostname",
         ),
         (
-            ROUTED_TARGET,
-            'project = "consumer/public"',
-            'project = "/consumer/public"',
-            {"gitlab": "public"},
-            "gitlab_public.project must be a relative path or numeric ID",
+            edited(
+                routed_target(),
+                ((GITLAB_PUBLIC_TABLE, "project"), f"/{PUBLIC.project}"),
+            ),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE}.project must be a relative path or numeric ID",
         ),
         (
-            ROUTED_TARGET,
-            f'token_file = "{PUBLIC_TOKEN_PATH}"',
-            'token_file = ""',
-            {"gitlab": "public"},
-            "gitlab_public.token_file must be a nonempty path when supplied",
+            edited(routed_target(), ((GITLAB_PUBLIC_TABLE, "project"), "")),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE}.project must be a relative path or numeric ID",
         ),
         (
-            ROUTED_TARGET,
-            "runner_id = 22",
-            "runner_id = 0",
-            {"gitlab": "public"},
-            "gitlab_public.runner_id must be a positive numeric ID",
+            edited(routed_target(), ((GITLAB_PRIVATE_TABLE, "project"), "")),
+            NO_SELECTION,
+            f"{GITLAB_PRIVATE_TABLE}.project must be a relative path or numeric ID",
         ),
         (
-            ROUTED_TARGET,
-            "[gitlab_public]\n",
-            '[gitlab_public]\nunknown = "fixture"\n',
-            {"gitlab": "public"},
-            "gitlab_public contains unsupported fields: unknown",
+            edited(routed_target(), ((GITLAB_PUBLIC_TABLE, "token_file"), "")),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE}.token_file must be a nonempty path when supplied",
         ),
         (
-            ROUTED_TARGET,
-            f'url = "https://{PRIVATE_HOST}"\n',
-            "",
-            {},
-            "gitlab_private.url must be a nonempty string",
+            edited(routed_target(), ((GITLAB_PUBLIC_TABLE, "runner_id"), 0)),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE}.runner_id must be a positive numeric ID",
         ),
         (
-            LEGACY_TARGET,
-            f'url = "https://{PRIVATE_HOST}"\n',
-            "",
-            {},
-            "gitlab.url must be a nonempty string",
+            edited(routed_target(), ((GITLAB_PUBLIC_TABLE, "unknown"), "fixture")),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE} contains unsupported fields: unknown",
         ),
         (
-            ISSUE_TARGET,
-            f'url = "https://{PUBLIC_HOST}"\n',
-            "",
-            {"gitlab_profile": "com"},
-            "gitlab.com.url must be a nonempty string",
+            edited(routed_target(), ((GITLAB_PRIVATE_TABLE, "url"), REMOVED)),
+            NO_SELECTION,
+            f"{GITLAB_PRIVATE_TABLE}.url must be a nonempty string",
+        ),
+        (
+            edited(legacy_target(), ((GITLAB_AUTHORITY, "url"), REMOVED)),
+            NO_SELECTION,
+            f"{GITLAB_AUTHORITY}.url must be a nonempty string",
+        ),
+        (
+            edited(issue_target(), ((LEGACY_PUBLIC, "url"), REMOVED)),
+            SELECT_PROFILE,
+            f"{LEGACY_PUBLIC}.url must be a nonempty string",
         ),
     ),
     ids=(
         "public-url-missing",
         "public-url-not-origin",
         "public-project-absolute",
+        "public-project-empty",
+        "private-project-empty",
         "public-token-path-empty",
         "public-runner-zero",
         "public-unknown-field",
@@ -686,70 +958,78 @@ def test_invalid_selection_or_routing_fails_closed_with_exact_reason(
 def test_field_errors_name_the_table_read_and_never_the_credential(
     target_path: Path,
     loader: str,
-    body: str,
-    before: str,
-    after: str,
-    selection: Mapping[str, str],
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
     message: str,
 ) -> None:
     """Qualify a field error with the exact table the loader read.
 
     :param target_path: Path receiving the invalid target.
     :param loader: Public loader whose diagnostic is checked.
-    :param body: Valid target TOML before one fragment is replaced.
-    :param before: Fragment that occurs once in ``body``.
-    :param after: Replacement breaking one field invariant.
-    :param selection: Caller selector keywords, or none.
+    :param tables: Composed target with one invalid field.
+    :param selection: Caller's instance or profile choice, or none.
     :param message: Exact diagnostic expected by the calling agent.
     :returns: None; assertions verify the text and the absence of credentials.
     """
-    assert body.count(before) == 1
-    target_path.write_text(body.replace(before, after, 1), encoding="utf-8")
+    write_target(target_path, tables)
 
-    with pytest.raises(TARGET.TargetError) as error:
-        LOADERS[loader](target_path, **selection)
+    with pytest.raises(TargetError) as error:
+        LOADERS[loader](target_path, selection)
 
     text = str(error.value)
     assert text == message
-    for secret in (PRIVATE_TOKEN_TEXT, PUBLIC_TOKEN_TEXT, str(target_path.parent)):
+    for secret in (PRIVATE.token_text, PUBLIC.token_text, str(target_path.parent)):
         assert secret not in text
 
 
 @pytest.mark.parametrize("loader", tuple(LOADERS))
 @pytest.mark.parametrize(
-    ("before", "after", "selection", "host"),
+    ("tables", "selection", "instance"),
     (
         (
-            f'token_file = "{PRIVATE_TOKEN_PATH}"',
-            'token_file = ""',
-            {"gitlab": "public"},
-            PUBLIC_HOST,
+            edited(routed_target(), ((GITLAB_PRIVATE_TABLE, "token_file"), "")),
+            SELECT_PUBLIC,
+            PUBLIC,
         ),
-        (f'url = "https://{PUBLIC_HOST}"\n', "", {}, PRIVATE_HOST),
+        (
+            edited(routed_target(), ((GITLAB_PUBLIC_TABLE, "url"), REMOVED)),
+            NO_SELECTION,
+            PRIVATE,
+        ),
+        (
+            {
+                GITLAB_PRIVATE_TABLE: PRIVATE.fields(),
+                f"{GITLAB_PUBLIC_TABLE}.{NESTED_CHILD}": {"url": PUBLIC.url},
+            },
+            NO_SELECTION,
+            PRIVATE,
+        ),
     ),
-    ids=("invalid-private-while-public", "invalid-public-while-default"),
+    ids=(
+        "invalid-private-while-public",
+        "invalid-public-while-default",
+        "nested-table-in-unselected-public",
+    ),
 )
 def test_unselected_instance_is_not_validated(
     target_path: Path,
     loader: str,
-    before: str,
-    after: str,
-    selection: Mapping[str, str],
-    host: str,
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
+    instance: Instance,
 ) -> None:
     """Validate only the instance the caller selected.
 
     :param target_path: Path receiving the target.
     :param loader: Public loader exercised by the case.
-    :param before: Fragment of the unselected instance.
-    :param after: Replacement making that instance invalid.
-    :param selection: Caller selector keywords, or none.
-    :param host: Expected selected authority.
+    :param tables: Composed target whose other instance is invalid.
+    :param selection: Caller's instance choice, or none.
+    :param instance: Fixture values of the instance that must load.
     :returns: None; assertions verify the selected instance loads.
     """
-    target_path.write_text(ROUTED_TARGET.replace(before, after, 1), encoding="utf-8")
+    write_target(target_path, tables)
 
-    assert LOADERS[loader](target_path, **selection).host == host
+    assert LOADERS[loader](target_path, selection).host == instance.host
 
 
 @pytest.mark.parametrize("loader", tuple(LOADERS))
@@ -762,16 +1042,14 @@ def test_selected_instance_does_not_inherit_the_other_instance(
     :param loader: Public loader selecting the public instance.
     :returns: None; assertions verify that absent fields stay absent.
     """
-    target_path.write_text(
-        ROUTED_TARGET.replace(
-            PUBLIC_TABLE, f'[gitlab_public]\nurl = "https://{PUBLIC_HOST}"\n'
-        ),
-        encoding="utf-8",
+    write_target(
+        target_path,
+        edited(routed_target(), ((GITLAB_PUBLIC_TABLE,), {"url": PUBLIC.url})),
     )
 
-    selected = LOADERS[loader](target_path, gitlab="public")
+    selected = LOADERS[loader](target_path, SELECT_PUBLIC)
 
-    assert selected.host == PUBLIC_HOST
+    assert selected.host == PUBLIC.host
     assert (selected.project, selected.group, selected.runner_id) == (None, None, None)
     assert selected.token_file is None
 
@@ -780,53 +1058,18 @@ def test_selector_for_a_command_without_gitlab_is_rejected(target_path: Path) ->
     """Refuse a GitLab selector when the command does not select GitLab.
 
     :param target_path: Path receiving the routed target.
-    :returns: None; assertions verify the existing fail-closed reason.
+    :returns: None; assertions verify the fail-closed reason.
     """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
+    write_target(target_path, routed_target())
 
-    with pytest.raises(TARGET.TargetError) as error:
-        TARGET.load_target(
-            target_path, required_surfaces=("kubernetes",), gitlab="public"
+    with pytest.raises(TargetError) as error:
+        load_target(
+            target_path,
+            required_surfaces=(KUBERNETES_AUTHORITY,),
+            **_selection_kwargs(SELECT_PUBLIC),
         )
 
-    assert str(error.value) == "gitlab_profile_requires_gitlab_authority"
-
-
-def test_route_as_dict_matches_the_routing_schema() -> None:
-    """Render the result ``routing`` object and validate it against its schema.
-
-    :returns: None; assertions verify the object, null fields, and rejections.
-    """
-    explicit = _route("gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public")
-    legacy = _route("gitlab", None, None, "legacy")
-
-    assert explicit.as_dict() == {
-        "gitlab": "gitlab_public",
-        "kubernetes": "kubernetes",
-        "harbor": "harbor",
-        "selected_by": "argv:--gitlab=public",
-    }
-    assert legacy.as_dict() == {
-        "gitlab": "gitlab",
-        "kubernetes": None,
-        "harbor": None,
-        "selected_by": "legacy",
-    }
-    for document in (explicit.as_dict(), legacy.as_dict()):
-        SCHEMA.validate_specification(document, ROUTING_SCHEMA)
-    invalid = (
-        {**explicit.as_dict(), "extra": "field"},
-        {
-            key: value
-            for key, value in explicit.as_dict().items()
-            if key != "selected_by"
-        },
-        {**explicit.as_dict(), "kubernetes": 1},
-        {**explicit.as_dict(), "gitlab": ""},
-    )
-    for document in invalid:
-        with pytest.raises(SCHEMA.SpecificationError):
-            SCHEMA.validate_specification(document, ROUTING_SCHEMA)
+    assert str(error.value) == GITLAB_SELECTION_REQUIRES_GITLAB
 
 
 @pytest.mark.parametrize("selection", ("explicit", "environment", "binding"))
@@ -838,279 +1081,669 @@ def test_selection_preserves_target_and_binding_precedence(
     :param target_path: Path receiving the routed target.
     :param selection: Explicit target, environment target, or binding tier.
     :param monkeypatch: Fixture setting competing environment selectors.
-    :returns: None; assertions verify file selection and selected instance.
+    :returns: None; assertions verify file selection and the public instance.
     """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
+    write_target(target_path, routed_target())
     explicit = None
     binding = None
     source = "argv:--target"
     if selection == "explicit":
         explicit = str(target_path)
-        monkeypatch.setenv(BINDING.TARGET_ENV, str(target_path.parent / "missing"))
+        monkeypatch.setenv(TARGET_ENV, str(target_path.parent / "missing"))
     elif selection == "environment":
         source = TARGET_ENV_SOURCE
-        monkeypatch.setenv(BINDING.TARGET_ENV, str(target_path))
+        monkeypatch.setenv(TARGET_ENV, str(target_path))
     else:
-        path = target_path.parent / "binding.toml"
-        path.write_text(
-            'schema_version = "1.0"\ntarget = "target.toml"\n'
-            '[kubernetes]\nsources = [{kind = "file", path = "missing-kubeconfig"}]\n',
-            encoding="utf-8",
+        binding = str(
+            write_target(
+                target_path.parent / "binding.toml",
+                {
+                    "schema_version": "1.0",
+                    "target": target_path.name,
+                    KUBERNETES_AUTHORITY: {
+                        "sources": [{"kind": "file", "path": "missing-kubeconfig"}]
+                    },
+                },
+            )
         )
-        binding = str(path)
         source = "binding"
-        monkeypatch.setenv(BINDING.TARGET_ENV, str(target_path.parent / "missing"))
+        monkeypatch.setenv(TARGET_ENV, str(target_path.parent / "missing"))
 
-    selected = BINDING.resolve_target(
+    selected = resolve_target(
         explicit,
         binding,
-        required_surfaces=("gitlab",),
-        gitlab_selection=TARGET.GitLabSelection(selector="public"),
+        required_surfaces=(GITLAB_AUTHORITY,),
+        gitlab_selection=SELECT_PUBLIC,
     )
 
     assert selected.source_file == target_path.resolve()
     assert selected.source_kind == source
-    assert selected.routing.gitlab == "gitlab_public"
-    assert selected.gitlab.project == "consumer/public"
-
-
-def test_identical_instances_have_distinct_confirmation_digests(
-    target_path: Path,
-) -> None:
-    """Reject confirmation replay across instances with identical provider inputs.
-
-    :param target_path: Target whose two instances hold identical settings.
-    :returns: None; assertions verify the selector binds the action plan.
-    """
-    target_path.write_text(
-        ROUTED_TARGET.replace(
-            PUBLIC_TABLE, PRIVATE_TABLE.replace("[gitlab_private]", "[gitlab_public]")
-        ),
-        encoding="utf-8",
-    )
-    plans = []
-    for selector in ("private", "public"):
-        args = ISSUE.build_parser().parse_args(
-            ["open-bug", "--title", "fixture", "--gitlab", selector]
-        )
-        args.target = str(target_path)
-        workflow = GITLAB_ACTION.GitLabWorkflow.from_args(args)
-        workflow.prepare()
-        plans.append(workflow.state.plan)
-    first, second = plans
-
-    assert (first.origin, first.target_reference, first.target_file, first.body) == (
-        second.origin,
-        second.target_reference,
-        second.target_file,
-        second.body,
-    )
-    assert first.digest != second.digest
-    assert ";argv:--gitlab=private;" in first.target_source
-    assert ";argv:--gitlab=public;" in second.target_source
-    args = ISSUE.build_parser().parse_args(
-        [
-            "open-bug",
-            "--title",
-            "fixture",
-            "--gitlab",
-            "public",
-            "--apply",
-            "--confirm-plan",
-            first.digest,
-        ]
-    )
-    args.target = str(target_path)
-    with pytest.raises(GITLAB_ACTION.ActionError, match="confirm_plan_mismatch"):
-        GITLAB_ACTION.GitLabWorkflow.from_args(args).prepare()
-
-
-@pytest.mark.parametrize("operation", ("check", "get"))
-def test_api_cli_resolves_selected_host_credential_and_route(
-    target_path: Path, operation: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Keep the selected instance in both parsed API operation adapters.
-
-    :param target_path: Path receiving the routed target.
-    :param operation: Identity check or provider-relative GET operation.
-    :param monkeypatch: Fixture selecting the target file.
-    :returns: None; assertions verify host, credential, and route agree.
-    """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
-    monkeypatch.setenv(BINDING.TARGET_ENV, str(target_path))
-    argv = [operation, "--provider", "gitlab"]
-    if operation == "get":
-        argv.extend(["--endpoint", "projects?membership=true"])
-    args = READ_CLI.build_api_parser().parse_args([*argv, "--gitlab", "public"])
-    callbacks = READ_CLI._api_callbacks(args, API_READ.ApiOutput.JSON)
-    action = callbacks.callbacks[0].action
-
-    action.validate()
-    selected = API_READ.ApiProviderSelection.from_action(action)
-
-    assert action.gitlab_selection == TARGET.GitLabSelection(selector="public")
-    assert selected.host == PUBLIC_HOST
-    assert selected.token_file == (target_path.parent / PUBLIC_TOKEN_PATH).resolve()
-    assert selected.route == _route(
-        "gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"
+    assert selected.gitlab.host == PUBLIC.host
+    assert selected.gitlab.project == PUBLIC.project
+    assert (
+        selected.gitlab.token_file == (target_path.parent / PUBLIC.token_path).resolve()
     )
 
 
-@pytest.mark.parametrize("violation", ("github-provider", "conflicting-host"))
-def test_api_selection_conflicts_reject_before_credential_binding(
-    target_path: Path, violation: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Refuse one invalid request invariant before native authentication.
-
-    :param target_path: Path receiving the routed target.
-    :param violation: Provider or host invariant changed from a valid request.
-    :param monkeypatch: Fixture selecting the target and trapping credential reads.
-    :returns: None; assertions verify rejection without reading a credential.
-    """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
-    monkeypatch.setenv(BINDING.TARGET_ENV, str(target_path))
-    monkeypatch.setattr(
-        API_READ,
-        "_token_source",
-        lambda *args, **kwargs: pytest.fail("credential read for rejected selection"),
-    )
-    argv = ["check", "--provider", "gitlab", "--gitlab", "public"]
-    if violation == "github-provider":
-        argv[2] = "github"
-    else:
-        argv.extend(["--host", "other.example.test"])
-    args = READ_CLI.build_api_parser().parse_args(argv)
-
-    with pytest.raises((API_READ.ReadToolError, TARGET.TargetError)):
-        callbacks = READ_CLI._api_callbacks(args, API_READ.ApiOutput.JSON)
-        action = callbacks.callbacks[0].action
-        action.validate()
-        API_READ.ApiProviderSelection.from_action(action)
-
-
-OPEN_BUG: Final[tuple[str, ...]] = (
-    "open-bug",
-    "--project",
-    "team/app",
-    "--title",
-    "t",
-    "--json",
-)
+# --- authorities a combined command reads through the selected route ---------
 
 
 @pytest.mark.parametrize(
-    ("body", "argv", "origin", "routing", "target_source", "deprecations"),
+    ("selection", "required", "optional", "reason", "routing"),
     (
         (
-            ROUTED_TARGET,
+            SELECT_PUBLIC,
+            (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
             (),
-            f"https://{PRIVATE_HOST}",
-            ("gitlab_private", "kubernetes", "harbor", "default"),
+            MISSING_ROUTED,
+            None,
+        ),
+        (
+            SELECT_PUBLIC,
+            (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY),
+            (),
+            MISSING_AUTHORITY_TABLES + KUBERNETES_AUTHORITY,
+            None,
+        ),
+        (
+            SELECT_PUBLIC,
+            (GITLAB_AUTHORITY,),
+            (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
+            None,
+            _routing(GITLAB_PUBLIC_TABLE, None, None, ARGV_PUBLIC),
+        ),
+        (
+            SELECT_PRIVATE,
+            (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
+            (),
+            None,
+            _routing(
+                GITLAB_PRIVATE_TABLE,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+                ARGV_PRIVATE,
+            ),
+        ),
+    ),
+    ids=(
+        "public-runner-deploy-surfaces",
+        "public-runner-delete-surfaces",
+        "public-optional-surfaces",
+        "private-runner-deploy-surfaces",
+    ),
+)
+def test_required_routed_authority_reads_the_route_pairing(
+    target_path: Path,
+    selection: GitLabSelection,
+    required: tuple[str, ...],
+    optional: tuple[str, ...],
+    reason: Optional[str],
+    routing: Optional[Mapping[str, Optional[str]]],
+) -> None:
+    """Read a required Kubernetes or Harbor table only through the selected row.
+
+    The public row pairs nothing and the private row pairs both. An optional
+    authority reads its own table whatever the row says.
+
+    :param target_path: Path receiving the routed target.
+    :param selection: Caller's instance choice.
+    :param required: Authorities the command requires.
+    :param optional: Authorities read only when configured.
+    :param reason: Exact diagnostic, or None when the load succeeds.
+    :param routing: Expected routing object when the load succeeds.
+    :returns: None; assertions compare loaded tables with the fixture's.
+    """
+    write_target(
+        target_path,
+        edited(routed_target(), ((GITLAB_ROUTING_TABLE, GITLAB_PUBLIC_TABLE), {})),
+    )
+
+    def load() -> object:
+        """Load the target with the case's authorities and selection.
+
+        :returns: Loaded target.
+        """
+        return load_target(
+            target_path,
+            required_surfaces=required,
+            optional_surfaces=optional,
+            **_selection_kwargs(selection),
+        )
+
+    if reason is not None:
+        with pytest.raises(TargetError) as error:
+            load()
+        assert str(error.value) == reason
+        return
+    target = load()
+    assert target.routing.as_dict() == routing
+    assert target.kubernetes.context == FIXTURE_KUBERNETES["context"]
+    assert target.kubernetes.server == FIXTURE_KUBERNETES["server"]
+    assert target.harbor.url == FIXTURE_HARBOR["url"]
+    assert target.harbor.project == FIXTURE_HARBOR["project"]
+
+
+@pytest.mark.parametrize(
+    ("tables", "selection", "reason", "routing"),
+    (
+        (
+            {
+                **issue_target(),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            NO_SELECTION,
+            None,
+            _routing(GITLAB_AUTHORITY, None, None, ROUTING_SELECTED_BY_LEGACY),
+        ),
+        (
+            {
+                **issue_target(),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            SELECT_PROFILE,
+            None,
+            _routing(LEGACY_PUBLIC, None, None, ARGV_PROFILE),
+        ),
+        (
+            {
+                **issue_target(),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            SELECT_PRIVATE,
+            MISSING_ROUTED,
+            None,
+        ),
+        (
+            {
+                **issue_target(),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            SELECT_PUBLIC,
+            MISSING_ROUTED,
+            None,
+        ),
+        (
+            {
+                **issue_target(),
+                GITLAB_ROUTING_TABLE: routing_table(
+                    {
+                        GITLAB_PRIVATE_TABLE: paired(),
+                        GITLAB_PUBLIC_TABLE: paired(*ROUTED),
+                    }
+                ),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            SELECT_PROFILE,
+            None,
+            _routing(
+                LEGACY_PUBLIC, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY, ARGV_PROFILE
+            ),
+        ),
+        (
+            {**routed_target(), legacy_profile(UNKNOWN_INSTANCE): PUBLIC.fields()},
+            GitLabSelection(profile=UNKNOWN_INSTANCE),
+            MISSING_ROUTED,
+            None,
+        ),
+        (
+            {**routed_target(), LEGACY_PUBLIC: PUBLIC.fields()},
+            SELECT_PROFILE,
+            MISSING_ROUTED,
+            None,
+        ),
+        (
+            {
+                GITLAB_PRIVATE_TABLE: PRIVATE.fields(),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
+            },
+            NO_SELECTION,
+            MISSING_ROUTED,
+            None,
+        ),
+        (
+            {
+                **legacy_target(),
+                HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
+                GITLAB_ROUTING_TABLE: routing_table(
+                    {GITLAB_PRIVATE_TABLE: paired(KUBERNETES_AUTHORITY)}
+                ),
+            },
+            NO_SELECTION,
+            MISSING_AUTHORITY_TABLES + HARBOR_AUTHORITY,
+            None,
+        ),
+    ),
+    ids=(
+        "legacy-unrouted-no-selector-reads-tables",
+        "legacy-unrouted-profile-reads-tables",
+        "legacy-unrouted-private-selector-blocks",
+        "legacy-unrouted-public-selector-blocks",
+        "legacy-profile-reads-its-routing-row",
+        "routed-target-profile-answering-no-instance",
+        "routed-target-legacy-com-beside-public-instance",
+        "instance-without-routing",
+        "legacy-row-omits-harbor",
+    ),
+)
+def test_combined_command_reads_the_routed_tables_or_blocks(
+    target_path: Path,
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
+    reason: Optional[str],
+    routing: Optional[Mapping[str, Optional[str]]],
+) -> None:
+    """Load GitLab, Kubernetes and Harbor as a runner deploy requires them.
+
+    A legacy target without a routing table reads Kubernetes and Harbor directly
+    only when no ``--gitlab`` selector was given. A legacy profile reads the
+    row of the instance it answers; a profile that answers no instance pairs
+    nothing.
+
+    :param target_path: Path receiving the target.
+    :param tables: Composed target with GitLab, Kubernetes and Harbor tables.
+    :param selection: Caller's instance or profile choice, or none.
+    :param reason: Exact diagnostic, or None when the target loads.
+    :param routing: Expected routing object when the target loads.
+    :returns: None; assertions compare loaded tables with the fixture's.
+    """
+    write_target(target_path, tables)
+
+    def load() -> object:
+        """Load the target as a combined command does.
+
+        :returns: Loaded target.
+        """
+        return load_target(
+            target_path,
+            required_surfaces=(
+                GITLAB_AUTHORITY,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+            ),
+            **_selection_kwargs(selection),
+        )
+
+    if reason is not None:
+        with pytest.raises(TargetError) as error:
+            load()
+        assert str(error.value) == reason
+        return
+    target = load()
+    assert target.routing.as_dict() == routing
+    assert target.kubernetes.context == FIXTURE_KUBERNETES["context"]
+    assert target.harbor.url == FIXTURE_HARBOR["url"]
+
+
+# --- commands: what the fake providers received ------------------------------
+
+
+@pytest.mark.parametrize("operation", ("check", "get"))
+@pytest.mark.parametrize(
+    ("tables", "selection", "instance", "deprecations"),
+    (
+        (routed_target(), NO_SELECTION, PRIVATE, 0),
+        (routed_target(), SELECT_PUBLIC, PUBLIC, 0),
+        (routed_target(), SELECT_PRIVATE, PRIVATE, 0),
+        (issue_target(), NO_SELECTION, PRIVATE, 1),
+        (issue_target(), SELECT_PUBLIC, PUBLIC, 1),
+        (issue_target(), SELECT_PROFILE, PUBLIC, 1),
+    ),
+    ids=(
+        "routed-default",
+        "routed-public",
+        "routed-private",
+        "issue-133-default",
+        "issue-133-public-selector",
+        "issue-133-profile",
+    ),
+)
+def test_api_command_sends_the_selected_host_and_token(
+    target_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    operation: str,
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
+    instance: Instance,
+    deprecations: int,
+) -> None:
+    """Call ``glab`` on the selected instance's host with that instance's token.
+
+    :param target_path: Path receiving the target named by the environment.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal of provider calls.
+    :param operation: Identity check or provider-relative GET.
+    :param tables: Composed target.
+    :param selection: Caller's instance or profile choice, or none.
+    :param instance: Fixture values of the instance the call must reach.
+    :param deprecations: Expected deprecation events on stderr.
+    :returns: None; assertions compare the received host and token with the fixture.
+    """
+    write_target(target_path, tables)
+    endpoint = ("--endpoint", "projects/1") if operation == "get" else ()
+
+    result = run_script(
+        "ci-api",
+        operation,
+        "--provider",
+        GITLAB_AUTHORITY,
+        *endpoint,
+        *_selection_argv(selection),
+        fake_bin=fake_bin,
+        env={**providers, TARGET_ENV: str(target_path)},
+    )
+    calls = read_journal(call_journal)
+
+    assert result.returncode == 0, result.stderr
+    assert calls
+    assert _hostnames(calls) == [instance.host] * len(calls)
+    assert {call["token"] for call in calls} == {instance.token_text}
+    assert result.stderr.count(GITLAB_DEPRECATION_EVENT) == deprecations
+
+
+def test_api_command_on_the_template_reads_the_public_instance(
+    template_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+) -> None:
+    """Reach the shipped template's public URL with the token file it names.
+
+    :param template_path: Copy of the shipped template beside its files.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal of provider calls.
+    :returns: None; assertions compare the call with the template's own values.
+    """
+    target = template_path
+    public = TEMPLATE[GITLAB_PUBLIC_TABLE]
+    token = (template_path.parent / public["token_file"]).read_text(encoding="utf-8")
+
+    result = run_script(
+        "ci-api",
+        "check",
+        "--provider",
+        GITLAB_AUTHORITY,
+        *_selection_argv(SELECT_PUBLIC),
+        fake_bin=fake_bin,
+        env={**providers, TARGET_ENV: str(target)},
+    )
+    calls = read_journal(call_journal)
+
+    assert result.returncode == 0, result.stderr
+    assert calls
+    assert _hostnames(calls) == [urlsplit(public["url"]).netloc] * len(calls)
+    assert {call["token"] for call in calls} == {token}
+    assert GITLAB_DEPRECATION_EVENT not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ("--provider", GITHUB_AUTHORITY, *_selection_argv(SELECT_PUBLIC)),
+        (
+            "--provider",
+            GITLAB_AUTHORITY,
+            *_selection_argv(SELECT_PUBLIC),
+            "--host",
+            "other.example.test",
+        ),
+    ),
+    ids=("github-provider", "conflicting-host"),
+)
+def test_api_selection_conflict_rejects_before_any_provider_call(
+    target_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    argv: tuple[str, ...],
+) -> None:
+    """Refuse an invalid provider or host for the selected instance.
+
+    The command's reasons for these two refusals are not contract constants,
+    so the test asserts the refusal and the provider boundary only.
+
+    :param target_path: Path receiving the routed target with GitHub.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :param argv: Provider, selector and host options of the case.
+    :returns: None; assertions verify the refusal and zero provider calls.
+    """
+    write_target(
+        target_path, {GITHUB_AUTHORITY: dict(FIXTURE_GITHUB), **routed_target()}
+    )
+
+    result = run_script(
+        "ci-api",
+        "check",
+        *argv,
+        fake_bin=fake_bin,
+        env={**providers, TARGET_ENV: str(target_path)},
+    )
+
+    assert result.returncode != 0
+    assert read_journal(call_journal) == []
+
+
+@pytest.mark.parametrize(
+    ("tables", "selection", "instance", "routing", "source", "deprecations"),
+    (
+        (
+            routed_target(),
+            NO_SELECTION,
+            PRIVATE,
+            _routing(
+                GITLAB_PRIVATE_TABLE,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+                ROUTING_SELECTED_BY_DEFAULT,
+            ),
             f"{TARGET_ENV_SOURCE};argv:--project",
             0,
         ),
         (
-            ROUTED_TARGET,
-            ("--gitlab", "public"),
-            f"https://{PUBLIC_HOST}",
-            ("gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"),
-            f"{TARGET_ENV_SOURCE};argv:--gitlab=public;argv:--project",
+            routed_target(),
+            SELECT_PUBLIC,
+            PUBLIC,
+            _routing(
+                GITLAB_PUBLIC_TABLE, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY, ARGV_PUBLIC
+            ),
+            f"{TARGET_ENV_SOURCE};{ARGV_PUBLIC};argv:--project",
             0,
         ),
         (
-            ISSUE_TARGET,
-            (),
-            f"https://{PRIVATE_HOST}",
-            ("gitlab", None, None, "legacy"),
+            issue_target(),
+            NO_SELECTION,
+            PRIVATE,
+            _routing(GITLAB_AUTHORITY, None, None, ROUTING_SELECTED_BY_LEGACY),
             f"{TARGET_ENV_SOURCE};argv:--project",
             1,
         ),
         (
-            ISSUE_TARGET,
-            ("--gitlab-profile", "com"),
-            f"https://{PUBLIC_HOST}",
-            ("gitlab.com", None, None, 'argv:--gitlab-profile="com"'),
-            f'{TARGET_ENV_SOURCE};argv:--gitlab-profile="com";argv:--project',
+            issue_target(),
+            SELECT_PROFILE,
+            PUBLIC,
+            _routing(LEGACY_PUBLIC, None, None, ARGV_PROFILE),
+            f"{TARGET_ENV_SOURCE};{ARGV_PROFILE};argv:--project",
+            1,
+        ),
+        (
+            issue_target(),
+            SELECT_PUBLIC,
+            PUBLIC,
+            _routing(LEGACY_PUBLIC, None, None, ARGV_PUBLIC),
+            f"{TARGET_ENV_SOURCE};{ARGV_PUBLIC};argv:--project",
             1,
         ),
     ),
-    ids=("routed-default", "routed-public", "legacy-issue-133", "legacy-profile"),
+    ids=(
+        "routed-default",
+        "routed-public",
+        "legacy-issue-133",
+        "legacy-profile",
+        "legacy-issue-133-public-selector",
+    ),
 )
 def test_open_bug_dry_run_reports_origin_and_routing(
     target_path: Path,
-    body: str,
-    argv: tuple[str, ...],
-    origin: str,
-    routing: tuple[str, Optional[str], Optional[str], str],
-    target_source: str,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
+    instance: Instance,
+    routing: Mapping[str, Optional[str]],
+    source: str,
     deprecations: int,
 ) -> None:
-    """Run the issue #133 command against a direct target and read its result.
+    """Run the issue #133 command offline and read its result.
 
-    :param target_path: Path receiving the target named by ``CI_SKILLS_TARGET``.
-    :param body: Complete target TOML.
-    :param argv: Selector arguments appended to the issue command.
-    :param origin: Expected GitLab origin.
-    :param routing: Expected ``routing`` fields in declaration order.
-    :param target_source: Expected selection provenance.
-    :param deprecations: Expected count of deprecation events on stderr.
-    :returns: None; assertions verify the DRY_RUN envelope and its schema.
+    :param target_path: Path receiving the target named by the environment.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :param tables: Composed target.
+    :param selection: Caller's instance or profile choice, or none.
+    :param instance: Fixture values of the instance the plan must name.
+    :param routing: Expected routing object.
+    :param source: Expected selection provenance.
+    :param deprecations: Expected deprecation events on stderr.
+    :returns: None; assertions verify the DRY_RUN result and its schema.
     """
-    target_path.write_text(body, encoding="utf-8")
+    write_target(target_path, tables)
 
     result = run_script(
         "gitlab_issue.py",
         *OPEN_BUG,
-        *argv,
-        env={BINDING.TARGET_ENV: str(target_path)},
+        *_selection_argv(selection),
+        fake_bin=fake_bin,
+        env={**providers, TARGET_ENV: str(target_path)},
     )
     data = parse_json_output(result)
 
     assert result.returncode == 0, result.stderr
     assert data["status"] == "DRY_RUN"
-    assert data["phase"] == "OFFLINE_PLAN"
-    assert data["schema_version"] == "1.1"
-    assert data["origin"] == origin
-    assert data["routing"] == _route(*routing).as_dict()
-    assert data["target_source"] == target_source
-    assert result.stderr.count(DEPRECATION_EVENT) == deprecations
-    for secret in (PRIVATE_TOKEN_TEXT, PUBLIC_TOKEN_TEXT):
+    assert data["schema_version"] == ROUTED_RESULT_SCHEMA_VERSION
+    assert data["origin"] == instance.url
+    assert data[ROUTING_RESULT_KEY] == routing
+    assert data["target_source"] == source
+    assert result.stderr.count(GITLAB_DEPRECATION_EVENT) == deprecations
+    for secret in (PRIVATE.token_text, PUBLIC.token_text):
         assert secret not in result.stdout + result.stderr
-    SCHEMA.validate_specification(data, ACTION_SCHEMA)
+    specification_validator(ACTION_SCHEMA).validate(data)
+    assert read_journal(call_journal) == []
 
 
-@pytest.mark.parametrize(
-    ("body", "argv", "reason"),
-    (
-        (SINGLE_TARGET, ("--gitlab", "public"), "gitlab_public_target_required"),
-        (LEGACY_TABLE + SINGLE_TARGET, (), "gitlab_private_declared_twice"),
-    ),
-    ids=("public-not-declared", "private-declared-twice"),
-)
-def test_open_bug_blocks_on_an_unusable_selection(
-    target_path: Path, body: str, argv: tuple[str, ...], reason: str
+def test_open_bug_on_the_template_reads_the_routing_default(
+    template_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
 ) -> None:
-    """Block before any provider call when the selection cannot be satisfied.
+    """Plan against the shipped template's default instance.
 
-    :param target_path: Path receiving the target named by ``CI_SKILLS_TARGET``.
-    :param body: Complete target TOML.
-    :param argv: Selector arguments appended to the issue command.
-    :param reason: Exact reason expected in the BLOCKED result.
-    :returns: None; assertions verify the BLOCKED envelope.
+    :param template_path: Copy of the shipped template beside its files.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :returns: None; assertions compare the plan with the template's own values.
     """
-    target_path.write_text(body, encoding="utf-8")
+    target = template_path
 
     result = run_script(
         "gitlab_issue.py",
         *OPEN_BUG,
-        *argv,
-        env={BINDING.TARGET_ENV: str(target_path)},
+        fake_bin=fake_bin,
+        env={**providers, TARGET_ENV: str(target)},
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 0, result.stderr
+    assert data["status"] == "DRY_RUN"
+    assert data["origin"] == TEMPLATE[TEMPLATE_DEFAULT]["url"]
+    assert data[ROUTING_RESULT_KEY] == _template_routing(
+        TEMPLATE_DEFAULT, ROUTING_SELECTED_BY_DEFAULT
+    )
+    specification_validator(ACTION_SCHEMA).validate(data)
+    assert read_journal(call_journal) == []
+
+
+@pytest.mark.parametrize(
+    ("tables", "selection", "reason"),
+    (
+        (
+            single_target(),
+            SELECT_PUBLIC,
+            GITLAB_INSTANCE_REQUIRED.format(table=GITLAB_PUBLIC_TABLE),
+        ),
+        (
+            {GITLAB_AUTHORITY: PRIVATE.fields(), **single_target()},
+            NO_SELECTION,
+            GITLAB_PRIVATE_DECLARED_TWICE,
+        ),
+        (
+            edited(routed_target(), ((GITLAB_PRIVATE_TABLE, "project"), "")),
+            NO_SELECTION,
+            f"{GITLAB_PRIVATE_TABLE}.project must be a relative path or numeric ID",
+        ),
+        (
+            edited(routed_target(), ((GITLAB_PUBLIC_TABLE, "project"), "")),
+            SELECT_PUBLIC,
+            f"{GITLAB_PUBLIC_TABLE}.project must be a relative path or numeric ID",
+        ),
+    ),
+    ids=(
+        "public-not-declared",
+        "private-declared-twice",
+        "private-project-empty",
+        "public-project-empty",
+    ),
+)
+def test_open_bug_blocks_on_an_unusable_selection(
+    target_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
+    reason: str,
+) -> None:
+    """Block before any provider call when the selection cannot be satisfied.
+
+    :param target_path: Path receiving the target named by the environment.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :param tables: Composed target.
+    :param selection: Caller's instance choice, or none.
+    :param reason: Exact reason expected in the BLOCKED result.
+    :returns: None; assertions verify the BLOCKED result and zero provider calls.
+    """
+    write_target(target_path, tables)
+
+    result = run_script(
+        "gitlab_issue.py",
+        *OPEN_BUG,
+        *_selection_argv(selection),
+        fake_bin=fake_bin,
+        env={**providers, TARGET_ENV: str(target_path)},
     )
     data = parse_json_output(result)
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
     assert [error["reason"] for error in data["errors"]] == [reason]
+    assert ROUTING_RESULT_KEY not in data
+    assert read_journal(call_journal) == []
 
 
 def test_open_bug_rejects_an_unknown_selector_choice(target_path: Path) -> None:
@@ -1119,261 +1752,443 @@ def test_open_bug_rejects_an_unknown_selector_choice(target_path: Path) -> None:
     :param target_path: Path receiving the routed target.
     :returns: None; assertions verify the argument failure before target loading.
     """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
+    write_target(target_path, routed_target())
 
     result = run_script(
         "gitlab_issue.py",
         *OPEN_BUG,
-        "--gitlab",
-        "other",
-        env={BINDING.TARGET_ENV: str(target_path)},
+        GITLAB_TARGET_OPTION,
+        UNKNOWN_INSTANCE,
+        env={TARGET_ENV: str(target_path)},
     )
     data = parse_json_output(result)
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
     assert data["errors"][0]["source"] == "arguments"
-    assert "routing" not in data
+    assert ROUTING_RESULT_KEY not in data
 
 
-def test_open_bug_human_view_prints_the_routing_line(target_path: Path) -> None:
-    """Show the selected GitLab and its pairing in the human summary.
+@pytest.mark.parametrize(
+    ("tables", "selection", "line"),
+    (
+        (
+            routed_target(),
+            SELECT_PUBLIC,
+            (
+                f"Routing: {GITLAB_AUTHORITY}={GITLAB_PUBLIC_TABLE} "
+                f"{KUBERNETES_AUTHORITY}={KUBERNETES_AUTHORITY} "
+                f"{HARBOR_AUTHORITY}={HARBOR_AUTHORITY} ({ARGV_PUBLIC})"
+            ),
+        ),
+        (
+            issue_target(),
+            NO_SELECTION,
+            (
+                f"Routing: {GITLAB_AUTHORITY}={GITLAB_AUTHORITY} "
+                f"{KUBERNETES_AUTHORITY}=none {HARBOR_AUTHORITY}=none "
+                f"({ROUTING_SELECTED_BY_LEGACY})"
+            ),
+        ),
+    ),
+    ids=("routed-public", "legacy-unrouted"),
+)
+def test_open_bug_human_view_prints_the_routing_line(
+    target_path: Path,
+    tables: Mapping[str, TomlValue],
+    selection: GitLabSelection,
+    line: str,
+) -> None:
+    """Print one routing line directly under the status line of the human view.
 
-    :param target_path: Path receiving the routed target.
-    :returns: None; assertions verify the exact human routing line.
+    :param target_path: Path receiving the target.
+    :param tables: Composed target.
+    :param selection: Caller's instance choice, or none.
+    :param line: Exact routing line; an unrouted table prints ``none``.
+    :returns: None; assertions verify the line text and its position.
     """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
+    write_target(target_path, tables)
 
     result = run_script(
         "gitlab_issue.py",
         *OPEN_BUG[:-1],
         "--human",
-        "--gitlab",
-        "public",
-        env={BINDING.TARGET_ENV: str(target_path)},
+        *_selection_argv(selection),
+        env={TARGET_ENV: str(target_path)},
     )
+    lines = result.stdout.splitlines()
 
     assert result.returncode == 0, result.stderr
-    assert (
-        "Routing: gitlab=gitlab_public kubernetes=kubernetes harbor=harbor "
-        "(argv:--gitlab=public)"
-    ) in result.stdout.splitlines()
+    assert lines[1] == line
+    assert lines.count(line) == 1
 
 
-def test_access_check_dry_run_reports_routing_at_version_1_1(
-    target_path: Path,
+def test_identical_instances_have_distinct_confirmation_digests(
+    target_path: Path, providers: Mapping[str, str], fake_bin: Path, call_journal: Path
 ) -> None:
-    """Report the selected GitLab route in the access result as well.
+    """Reject a confirmation digest planned for the other instance.
 
-    :param target_path: Path receiving the routed target.
-    :returns: None; assertions verify the version and the routing object.
+    Both instances hold identical fields, so only the selector differs.
+
+    :param target_path: Target whose two instances hold identical settings.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :returns: None; assertions verify the selector binds the plan digest.
     """
-    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
+    write_target(
+        target_path, edited(routed_target(), ((GITLAB_PUBLIC_TABLE,), PRIVATE.fields()))
+    )
+    environment = {**providers, TARGET_ENV: str(target_path)}
+    plans = [
+        parse_json_output(
+            run_script(
+                "gitlab_issue.py",
+                *OPEN_BUG,
+                *_selection_argv(selection),
+                fake_bin=fake_bin,
+                env=environment,
+            )
+        )
+        for selection in (SELECT_PRIVATE, SELECT_PUBLIC)
+    ]
+    first, second = plans
+
+    applied = run_script(
+        "gitlab_issue.py",
+        *OPEN_BUG,
+        *_selection_argv(SELECT_PUBLIC),
+        "--apply",
+        "--confirm-plan",
+        first["plan_digest"],
+        fake_bin=fake_bin,
+        env=environment,
+    )
+    blocked = parse_json_output(applied)
+
+    assert (
+        first["origin"],
+        first["target"],
+        first["target_file"],
+        first["plan"]["body_sha256"],
+    ) == (
+        second["origin"],
+        second["target"],
+        second["target_file"],
+        second["plan"]["body_sha256"],
+    )
+    assert first["plan_digest"] != second["plan_digest"]
+    assert applied.returncode == 2
+    assert blocked["status"] == "BLOCKED"
+    assert [error["reason"] for error in blocked["errors"]] == [
+        "confirm_plan_mismatch_rerun_dry_run"
+    ]
+    assert read_journal(call_journal) == []
+
+
+@pytest.mark.parametrize(
+    ("selection", "expected"),
+    (
+        (
+            NO_SELECTION,
+            _template_routing(TEMPLATE_DEFAULT, ROUTING_SELECTED_BY_DEFAULT),
+        ),
+        (SELECT_PUBLIC, _template_routing(GITLAB_PUBLIC_TABLE, ARGV_PUBLIC)),
+    ),
+    ids=("default", "public"),
+)
+def test_access_check_dry_run_on_the_template_reports_routing(
+    template_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    selection: GitLabSelection,
+    expected: Mapping[str, Optional[str]],
+) -> None:
+    """Report the shipped template's route in the access result.
+
+    :param template_path: Copy of the shipped template beside its files.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :param selection: Caller's instance choice, or none.
+    :param expected: Routing object built from the template's own row.
+    :returns: None; assertions compare the routing object with the template.
+    """
+    target = template_path
 
     result = run_script(
         "access_check.py",
         "--dry-run",
         "--json",
-        "--gitlab",
-        "public",
-        env={BINDING.TARGET_ENV: str(target_path)},
+        *_selection_argv(selection),
+        fake_bin=fake_bin,
+        env={**providers, TARGET_ENV: str(target)},
     )
     data = parse_json_output(result)
 
     assert result.returncode == 0, result.stderr
     assert data["status"] == "DRY_RUN"
-    assert data["schema_version"] == "1.1"
-    assert (
-        data["routing"]
-        == _route(
-            "gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"
-        ).as_dict()
-    )
+    assert data["schema_version"] == ROUTED_RESULT_SCHEMA_VERSION
+    assert data[ROUTING_RESULT_KEY] == expected
+    assert read_journal(call_journal) == []
 
 
 @pytest.mark.parametrize(
-    ("required", "optional", "reason"),
+    ("selection", "reason"),
     (
-        (
-            ("gitlab", "kubernetes", "harbor"),
-            (),
-            "target is missing required authority tables: harbor, kubernetes",
-        ),
-        (
-            ("gitlab", "kubernetes"),
-            (),
-            "target is missing required authority tables: kubernetes",
-        ),
-        (("gitlab",), ("kubernetes", "harbor"), None),
+        (SELECT_PRIVATE, None),
+        (SELECT_PUBLIC, MISSING_AUTHORITY_TABLES + KUBERNETES_AUTHORITY),
     ),
-    ids=("runner-deploy-surfaces", "runner-delete-surfaces", "optional-surfaces"),
+    ids=("private-row-pairs-kubernetes", "public-row-pairs-nothing"),
 )
-def test_required_routed_authority_reads_the_route_pairing(
+def test_access_check_requiring_kubernetes_uses_the_routed_cluster(
     target_path: Path,
-    required: tuple[str, ...],
-    optional: tuple[str, ...],
+    fake_bin: Path,
+    call_journal: Path,
+    selection: GitLabSelection,
     reason: Optional[str],
 ) -> None:
-    """Block a required Kubernetes or Harbor table the selected route does not pair.
+    """Pass the routed Kubernetes context and kubeconfig to ``kubectl``.
 
-    :param target_path: Path receiving a target whose public row pairs nothing.
-    :param required: Authorities the command requires.
-    :param optional: Authorities read only when configured.
-    :param reason: Exact diagnostic, or None when the load succeeds.
-    :returns: None; assertions verify fail-closed pairing and optional reads.
+    ``--ceph-namespace`` makes Kubernetes required, so the selected row decides
+    whether the command reaches the cluster at all.
+
+    :param target_path: Path receiving the target; its directory holds the kubeconfig.
+    :param fake_bin: Directory receiving the fake providers.
+    :param call_journal: Journal of provider calls.
+    :param selection: Caller's instance choice.
+    :param reason: Missing-authority reason expected for an unpaired row, or None.
+    :returns: None; assertions compare provider arguments with the fixture's.
     """
-    target_path.write_text(
-        ROUTED_TARGET.replace(
-            'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }',
-            "gitlab_public = {}",
-            1,
-        ),
-        encoding="utf-8",
-    )
-    load = functools.partial(
-        TARGET.load_target,
+    for tool in ("gh", "glab", "kubectl"):
+        install_executable(fake_bin, tool, FAKE_ACCESS_TOOLS)
+    kubeconfig = target_path.parent / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    kubernetes = {**FIXTURE_KUBERNETES, "kubeconfig": str(kubeconfig)}
+    target = write_target(
         target_path,
-        required_surfaces=required,
-        optional_surfaces=optional,
-        gitlab="public",
+        {
+            GITHUB_AUTHORITY: dict(FIXTURE_GITHUB),
+            GITLAB_ROUTING_TABLE: routing_table(
+                {
+                    GITLAB_PRIVATE_TABLE: paired(KUBERNETES_AUTHORITY),
+                    GITLAB_PUBLIC_TABLE: paired(),
+                },
+                default=GITLAB_PRIVATE_TABLE,
+            ),
+            GITLAB_PRIVATE_TABLE: dict(FIXTURE_GITLAB),
+            GITLAB_PUBLIC_TABLE: {"url": PUBLIC.url},
+            KUBERNETES_AUTHORITY: kubernetes,
+        },
     )
 
-    if reason is None:
-        target = load()
-        assert target.routing == _route(
-            "gitlab_public", None, None, "argv:--gitlab=public"
-        )
-        assert target.kubernetes is not None and target.harbor is None
+    result = run_script(
+        "access_check.py",
+        "--ceph-namespace",
+        "unit-ceph",
+        "--revision",
+        TEST_REVISION,
+        "--json",
+        *_selection_argv(selection),
+        fake_bin=fake_bin,
+        env={"FAKE_ACCESS_CALLS": str(call_journal), TARGET_ENV: str(target)},
+    )
+    calls = read_journal(call_journal)
+
+    if reason is not None:
+        data = parse_json_output(result)
+        assert result.returncode == 2
+        assert data["errors"][0]["reason"] == reason
+        assert calls == []
         return
-    with pytest.raises(TARGET.TargetError) as error:
-        load()
-    assert str(error.value) == reason
+    kubectl = [call["args"] for call in calls if call["tool"] == "kubectl"]
+    glab = [call["args"] for call in calls if call["tool"] == "glab"]
+    assert kubectl and glab
+    for argv in kubectl:
+        assert argv[argv.index("--context") + 1] == kubernetes["context"]
+        assert argv[argv.index("--kubeconfig") + 1] == str(kubeconfig.resolve())
+    for argv in glab:
+        assert (
+            argv[argv.index("--hostname") + 1] == urlsplit(FIXTURE_GITLAB["url"]).netloc
+        )
 
 
-def test_legacy_route_reads_the_authority_tables_directly(target_path: Path) -> None:
-    """Keep the legacy shape reading [kubernetes] and [harbor] without a route.
+def _runner_deploy(
+    target: Path,
+    harbor: Mapping[str, TomlValue],
+    fake_bin: Path,
+    environment: Mapping[str, str],
+    *argv: str,
+) -> tuple[int, dict[str, object]]:
+    """Run ``gitlab_runner_manager.py deploy`` against one target.
 
-    :param target_path: Path receiving the issue #133 shape plus both tables.
-    :returns: None; assertions verify both tables load.
+    :param target: Target file named by the environment.
+    :param harbor: Harbor table the target declares; its host names the image.
+    :param fake_bin: Directory holding the fake providers.
+    :param environment: Child environment of the fake providers.
+    :param *argv: Mode and selector options of the case.
+    :returns: Exit status and decoded JSON result.
     """
-    target_path.write_text(LEGACY_TARGET + HARBOR_TABLE, encoding="utf-8")
-
-    target = TARGET.load_target(
-        target_path, required_surfaces=("gitlab", "kubernetes", "harbor")
-    )
-
-    assert target.routing == _route("gitlab", None, None, "legacy")
-    assert target.kubernetes.context == "unit-context"
-    assert target.harbor.project == "unit"
-
-
-RUNNER_IMAGE: Final[str] = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
-
-
-@pytest.mark.parametrize(
-    ("row", "status", "reason"),
-    (
-        ('{ kubernetes = "kubernetes", harbor = "harbor" }', "DRY_RUN", None),
-        (
-            "{}",
-            "BLOCKED",
-            "target is missing required authority tables: harbor, kubernetes",
-        ),
-    ),
-    ids=("paired", "unpaired"),
-)
-def test_runner_manager_plan_uses_the_selected_route(
-    target_path: Path, row: str, status: str, reason: Optional[str]
-) -> None:
-    """Plan a runner deploy only into the cluster and registry the route pairs.
-
-    :param target_path: Path receiving the routed target.
-    :param row: ``[gitlab_routing].gitlab_public`` value.
-    :param status: Expected result status.
-    :param reason: Expected error reason for the unpaired row, otherwise None.
-    :returns: None; assertions verify the plan, the routing object and the schema.
-    """
-    target_path.write_text(
-        ROUTED_TARGET.replace(
-            'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }',
-            f"gitlab_public = {row}",
-            1,
-        ),
-        encoding="utf-8",
-    )
-    token = target_path.parent / "runner.token"
+    token = target.parent / "runner.token"
     token.write_text("unit-runner-token\n", encoding="utf-8")
-
+    registry = urlsplit(harbor["url"]).netloc
     result = run_script(
         "gitlab_runner_manager.py",
         "deploy",
-        "--dry-run",
         "--json",
-        "--gitlab",
-        "public",
+        *DEPLOY_PROJECT,
         "--image",
-        RUNNER_IMAGE,
+        f"{registry}/toolbox/ci@sha256:{'a' * 64}",
         "--node",
         "worker-a",
         "--token-file",
         token,
         "--runner-id",
         "73",
-        env={BINDING.TARGET_ENV: str(target_path)},
+        *argv,
+        fake_bin=fake_bin,
+        env={**environment, TARGET_ENV: str(target)},
     )
-    data = parse_json_output(result)
-
-    assert data["status"] == status
-    if reason is not None:
-        assert result.returncode == 2
-        assert [error["reason"] for error in data["errors"]] == [reason]
-        assert "routing" not in data
-        return
-    assert result.returncode == 0, result.stderr
-    assert data["schema_version"] == "1.1"
-    assert (
-        data["routing"]
-        == _route(
-            "gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"
-        ).as_dict()
-    )
-    SCHEMA.validate_specification(data, "results/toolbox-workflow.schema.json")
+    return result.returncode, parse_json_output(result)
 
 
-def test_chain_hands_its_selection_to_the_nested_runner_manager() -> None:
-    """Give the chain's runner manager the caller's selection, so it reads the same route.
+@pytest.mark.parametrize(
+    ("selection", "expected"),
+    (
+        (
+            NO_SELECTION,
+            _template_routing(TEMPLATE_DEFAULT, ROUTING_SELECTED_BY_DEFAULT),
+        ),
+        (SELECT_PRIVATE, _template_routing(GITLAB_PRIVATE_TABLE, ARGV_PRIVATE)),
+    ),
+    ids=("default", "private"),
+)
+def test_runner_deploy_plan_on_the_template_reports_the_paired_route(
+    template_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    selection: GitLabSelection,
+    expected: Mapping[str, Optional[str]],
+) -> None:
+    """Plan a runner deploy into the cluster and registry the template row pairs.
 
-    :returns: None; assertions verify the nested manager arguments.
+    :param template_path: Copy of the shipped template beside its files.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :param selection: Caller's instance choice, or none.
+    :param expected: Routing object built from the template's own row.
+    :returns: None; assertions verify the routing object and the schema.
     """
-    callbacks = import_script_module(
-        "lib.python.core.kubernetes.image_build_chain.callbacks"
-    )
-    chain_args = argparse.Namespace(
-        gitlab="public",
-        gitlab_profile=None,
-        runner_description="unit-runner",
-        runner_label=["unit"],
-        namespace=None,
-    )
-    action = SimpleNamespace(
-        args=chain_args,
-        runner_kind="project",
-        runner_reference="team/app",
-        manager_scope=SimpleNamespace(run_id="unit-run"),
-    )
-    state = SimpleNamespace(
-        created_runner_id=73,
-        selected_node="worker-a",
-        published_image=RUNNER_IMAGE,
-        token_path=Path("/unit/runner.token"),
+    target = template_path
+
+    code, data = _runner_deploy(
+        target,
+        TEMPLATE[HARBOR_AUTHORITY],
+        fake_bin,
+        providers,
+        "--dry-run",
+        *_selection_argv(selection),
     )
 
-    manager_args = callbacks._manager_args(action, state)
+    assert code == 0, data
+    assert data["status"] == "DRY_RUN"
+    assert data["schema_version"] == ROUTED_RESULT_SCHEMA_VERSION
+    assert data[ROUTING_RESULT_KEY] == expected
+    specification_validator(WORKFLOW_SCHEMA).validate(data)
+    assert read_journal(call_journal) == []
 
-    assert TARGET.GitLabSelection.from_args(manager_args) == TARGET.GitLabSelection(
-        selector="public"
+
+def test_template_public_instance_cannot_deploy_a_runner_into_private_tables(
+    template_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+) -> None:
+    """Block a public-GitLab runner deploy that would use the private cluster.
+
+    The shipped template's public row pairs no Kubernetes or Harbor table, so
+    ``--gitlab public`` must not reach the cluster and registry declared for
+    the private GitLab. The live plan and the dry run block alike.
+
+    :param template_path: Copy of the shipped template beside its files.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :returns: None; assertions verify both modes block before any provider call.
+    """
+    target = template_path
+    row = TEMPLATE[GITLAB_ROUTING_TABLE][GITLAB_PUBLIC_TABLE]
+    reason = MISSING_AUTHORITY_TABLES + ", ".join(sorted(set(ROUTED) - set(row)))
+    selector = _selection_argv(SELECT_PUBLIC)
+
+    harbor = TEMPLATE[HARBOR_AUTHORITY]
+    live_code, live = _runner_deploy(target, harbor, fake_bin, providers, *selector)
+    dry_code, dry = _runner_deploy(
+        target, harbor, fake_bin, providers, "--dry-run", *selector
     )
-    assert manager_args.kind == "gitlab_runner_manager"
+
+    for code, data in ((live_code, live), (dry_code, dry)):
+        assert code == 2
+        assert data["status"] == "BLOCKED"
+        assert [error["reason"] for error in data["errors"]] == [reason]
+        assert ROUTING_RESULT_KEY not in data
+    assert live["errors"] == dry["errors"]
+    assert read_journal(call_journal) == []
+
+
+@pytest.mark.parametrize(
+    ("row", "reason"),
+    ((paired(*ROUTED), None), (paired(), MISSING_ROUTED)),
+    ids=("paired", "unpaired"),
+)
+def test_runner_deploy_plan_uses_the_selected_route(
+    target_path: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    row: Mapping[str, TomlValue],
+    reason: Optional[str],
+) -> None:
+    """Plan a runner deploy only into the cluster and registry the route pairs.
+
+    :param target_path: Path receiving the routed target.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :param row: Public routing row.
+    :param reason: Expected reason for the unpaired row, otherwise None.
+    :returns: None; assertions verify the plan, the routing object and the schema.
+    """
+    write_target(
+        target_path,
+        edited(routed_target(), ((GITLAB_ROUTING_TABLE, GITLAB_PUBLIC_TABLE), row)),
+    )
+
+    code, data = _runner_deploy(
+        target_path,
+        FIXTURE_HARBOR,
+        fake_bin,
+        providers,
+        "--dry-run",
+        *_selection_argv(SELECT_PUBLIC),
+    )
+
+    assert read_journal(call_journal) == []
+    if reason is not None:
+        assert code == 2
+        assert data["status"] == "BLOCKED"
+        assert [error["reason"] for error in data["errors"]] == [reason]
+        assert ROUTING_RESULT_KEY not in data
+        return
+    assert code == 0, data
+    assert data["status"] == "DRY_RUN"
+    assert data[ROUTING_RESULT_KEY] == _routing(
+        GITLAB_PUBLIC_TABLE, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY, ARGV_PUBLIC
+    )
+    specification_validator(WORKFLOW_SCHEMA).validate(data)
 
 
 def test_dry_run_deprecation_event_does_not_write_the_log_file(
@@ -1384,65 +2199,56 @@ def test_dry_run_deprecation_event_does_not_write_the_log_file(
     :param target_path: Path receiving the issue #133 legacy shape.
     :returns: None; assertions verify stderr carries the event and no file exists.
     """
-    target_path.write_text(ISSUE_TARGET, encoding="utf-8")
+    write_target(target_path, issue_target())
     log_file = target_path.parent / "ci-api.log"
 
     result = run_script(
         "ci-api",
         "check",
         "--provider",
-        "gitlab",
+        GITLAB_AUTHORITY,
         "--dry-run",
         "--json",
         "--log-file",
         log_file,
-        env={BINDING.TARGET_ENV: str(target_path)},
+        env={TARGET_ENV: str(target_path)},
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stderr.count(DEPRECATION_EVENT) == 1
+    assert result.stderr.count(GITLAB_DEPRECATION_EVENT) == 1
     assert not log_file.exists()
 
 
-@pytest.mark.parametrize(
-    ("body", "reason"),
-    (
-        (
-            PRIVATE_TABLE + KUBERNETES_TABLE + HARBOR_TABLE,
-            "target is missing required authority tables: harbor, kubernetes",
-        ),
-        (LEGACY_TARGET + HARBOR_TABLE, None),
-        (
-            LEGACY_TARGET
-            + HARBOR_TABLE
-            + '[gitlab_routing]\ngitlab_private = { kubernetes = "kubernetes" }\n',
-            "target is missing required authority tables: harbor",
-        ),
-    ),
-    ids=("instance-without-routing", "legacy-without-routing", "legacy-with-routing"),
-)
-def test_combined_commands_need_a_route_row_except_the_unrouted_legacy_shape(
-    target_path: Path, body: str, reason: Optional[str]
+def test_legacy_table_beside_public_instance_reports_the_legacy_table(
+    target_path: Path,
 ) -> None:
-    """Fail closed for an instance without a pairing; keep legacy targets working.
+    """Name the deprecated table, not the selected instance, in the one event.
 
-    :param target_path: Path receiving the target.
-    :param body: Target TOML with GitLab, Kubernetes and Harbor tables.
-    :param reason: Exact diagnostic, or None when the target loads.
-    :returns: None; assertions verify the pairing rule for each shape.
+    :param target_path: Path receiving the legacy table beside the public instance.
+    :returns: None; assertions verify one event whose table is the legacy table.
     """
-    target_path.write_text(body, encoding="utf-8")
-    load = functools.partial(
-        TARGET.load_target,
+    write_target(
         target_path,
-        required_surfaces=("gitlab", "kubernetes", "harbor"),
+        {GITLAB_AUTHORITY: PRIVATE.fields(), GITLAB_PUBLIC_TABLE: PUBLIC.fields()},
     )
 
-    if reason is None:
-        target = load()
-        assert target.kubernetes.context == "unit-context"
-        assert target.harbor.project == "unit"
-        return
-    with pytest.raises(TARGET.TargetError) as error:
-        load()
-    assert str(error.value) == reason
+    result = run_script(
+        "gitlab_issue.py",
+        *OPEN_BUG,
+        *_selection_argv(SELECT_PUBLIC),
+        "--log-format",
+        "json",
+        "--run-id",
+        "unit-run",
+        env={TARGET_ENV: str(target_path)},
+    )
+    events = [
+        json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")
+    ]
+    deprecations = [
+        event for event in events if event["event"] == GITLAB_DEPRECATION_EVENT
+    ]
+
+    assert result.returncode == 0, result.stderr
+    assert len(deprecations) == 1
+    assert deprecations[0]["details"]["table"] == GITLAB_AUTHORITY

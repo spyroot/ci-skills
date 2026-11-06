@@ -18,8 +18,22 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
-from conftest import import_script_module, load_module
+from conftest import (
+    import_script_module,
+    load_module,
+    paired,
+    routing_table,
+    write_target,
+)
 from jsonschema import Draft202012Validator
+from lib.python.core.catalog import GITLAB_PROFILE_OPTION, GITLAB_TARGET_OPTION
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    GITLAB_DEPRECATION_EVENT,
+    GITLAB_PRIVATE_TABLE,
+    GITLAB_PUBLIC_SELECTOR,
+    GITLAB_ROUTING_TABLE,
+)
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 TARGET = import_script_module("lib.python.core.target")
@@ -322,7 +336,11 @@ class FakeAPI:
 )
 @pytest.mark.parametrize(
     ("gitlab_selector", "gitlab_profile"),
-    ((None, None), ("public", None), (None, "public")),
+    (
+        (None, None),
+        (GITLAB_PUBLIC_SELECTOR, None),
+        (None, GITLAB_PUBLIC_SELECTOR),
+    ),
     ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
@@ -372,8 +390,8 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     result = ENTRYPOINTS[kind].main(
         [
             *arguments,
-            *(["--gitlab", gitlab_selector] if gitlab_selector else []),
-            *(["--gitlab-profile", gitlab_profile] if gitlab_profile else []),
+            *([GITLAB_TARGET_OPTION, gitlab_selector] if gitlab_selector else []),
+            *([GITLAB_PROFILE_OPTION, gitlab_profile] if gitlab_profile else []),
             "--apply",
             "--confirm-plan",
             plan.digest,
@@ -1949,21 +1967,23 @@ def test_runner_mode_errors_remain_stable_after_shared_validation(
         GITLAB_ACTION._workflow_mode(args)
 
 
+# GitLab fields of the planned issue target, routed or legacy.
+PLAN_GITLAB: Final = {"url": "https://gitlab.example.test", "project": "unit/repo"}
+
+
 @pytest.mark.parametrize(
-    ("body", "deprecations"),
+    ("tables", "deprecations"),
     (
         (
-            (
-                '[gitlab_routing]\ndefault = "gitlab_private"\ngitlab_private = {}\n'
-                '[gitlab_private]\nurl = "https://gitlab.example.test"\n'
-                'project = "unit/repo"\n'
-            ),
+            {
+                GITLAB_ROUTING_TABLE: routing_table(
+                    {GITLAB_PRIVATE_TABLE: paired()}, default=GITLAB_PRIVATE_TABLE
+                ),
+                GITLAB_PRIVATE_TABLE: dict(PLAN_GITLAB),
+            },
             0,
         ),
-        (
-            '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
-            1,
-        ),
+        ({GITLAB_AUTHORITY: dict(PLAN_GITLAB)}, 1),
     ),
     ids=("routed", "legacy"),
 )
@@ -1971,23 +1991,22 @@ def test_action_plan_json_diagnostic_is_separate_from_machine_result(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    body: str,
+    tables: Mapping[str, object],
     deprecations: int,
 ) -> None:
     """Keep JSON diagnostics on stderr separate from plan JSON on stdout.
 
     Every stderr line is one JSON diagnostic with the caller's run ID; a legacy
-    target adds exactly one ``gitlab_target_deprecated`` event in that format.
+    target adds exactly one deprecation event in that format.
 
     :param monkeypatch: Pytest fixture selecting the target by environment.
     :param tmp_path: Directory receiving the selected project target.
     :param capsys: Pytest fixture capturing both output streams.
-    :param body: Routed or legacy target TOML.
+    :param tables: Routed or legacy target composed by the conftest builder.
     :param deprecations: Expected count of deprecation events.
     :returns: None; assertions in the body validate the regression.
     """
-    target = tmp_path / "target.toml"
-    target.write_text(body, encoding="utf-8")
+    target = write_target(tmp_path / "target.toml", tables)
     monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
     result = ISSUE.main(
         [
@@ -2008,7 +2027,7 @@ def test_action_plan_json_diagnostic_is_separate_from_machine_result(
     assert report["status"] == "DRY_RUN"
     assert {diagnostic["run_id"] for diagnostic in diagnostics} == {"unit-run"}
     events = [diagnostic["event"] for diagnostic in diagnostics]
-    assert events.count("gitlab_target_deprecated") == deprecations
+    assert events.count(GITLAB_DEPRECATION_EVENT) == deprecations
     (diagnostic,) = (item for item in diagnostics if item["event"] == "result")
     assert diagnostic["mode"] == "dry_run"
     assert diagnostic["result"] == "DRY_RUN"

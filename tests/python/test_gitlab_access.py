@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
 from conftest import import_script_module
+from lib.python.core.catalog import GITLAB_PROFILE_OPTION, GITLAB_TARGET_OPTION
+from lib.python.core.endpoints import GITLAB_PUBLIC_SELECTOR
 
 ACCESS = import_script_module("lib.python.access.gitlab")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
@@ -112,7 +114,11 @@ class FakeAPI:
 
 @pytest.mark.parametrize(
     ("gitlab_selector", "gitlab_profile"),
-    ((None, None), ("public", None), (None, "public")),
+    (
+        (None, None),
+        (GITLAB_PUBLIC_SELECTOR, None),
+        (None, GITLAB_PUBLIC_SELECTOR),
+    ),
     ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_shared_setup_resolves_binds_and_reads_access_once(
@@ -262,7 +268,11 @@ def test_shared_setup_resolves_binds_and_reads_access_once(
 
 @pytest.mark.parametrize(
     ("gitlab_selector", "gitlab_profile"),
-    ((None, None), ("public", None), (None, "public")),
+    (
+        (None, None),
+        (GITLAB_PUBLIC_SELECTOR, None),
+        (None, GITLAB_PUBLIC_SELECTOR),
+    ),
     ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
@@ -346,8 +356,8 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
             "team/repo",
             "--revision",
             REVISION,
-            *(["--gitlab", gitlab_selector] if gitlab_selector else []),
-            *(["--gitlab-profile", gitlab_profile] if gitlab_profile else []),
+            *([GITLAB_TARGET_OPTION, gitlab_selector] if gitlab_selector else []),
+            *([GITLAB_PROFILE_OPTION, gitlab_profile] if gitlab_profile else []),
             "--json",
         ]
     )

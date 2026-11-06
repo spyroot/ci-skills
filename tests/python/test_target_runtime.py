@@ -16,6 +16,7 @@ from typing import TypeAlias, Union
 
 import pytest
 from conftest import REPO_ROOT, import_script_module
+from lib.python.core.endpoints import GITLAB_PRIVATE_TABLE
 
 HarborTargetCase: TypeAlias = tuple[
     Path, tuple[Path, ...], Mapping[Path, tuple[bytes, int]]
@@ -119,7 +120,7 @@ def test_load_target_distinguishes_missing_from_unsupported_authorities(
     (
         ("github", "host"),
         ("github", "repository"),
-        ("gitlab_private", "url"),
+        (GITLAB_PRIVATE_TABLE, "url"),
         ("harbor", "url"),
         ("harbor", "project"),
         ("kubernetes", "context"),

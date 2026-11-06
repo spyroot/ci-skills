@@ -30,6 +30,7 @@ from conftest import (
     load_module,
 )
 from jsonschema import Draft202012Validator
+from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION, SCHEMA_VERSION
 from test_gitlab_actions import _plan, _tag_output
 from test_gitlab_mirror import (
     MIRROR_APPLIED_FILE,
@@ -861,7 +862,12 @@ def test_setup_receipts_preserve_freshness_and_shape_checks(
 
 @pytest.mark.parametrize(
     ("version", "accepted"),
-    (("1.0", True), ("1.1", True), ("2.0", False), (None, False)),
+    (
+        (SCHEMA_VERSION, True),
+        (ROUTED_RESULT_SCHEMA_VERSION, True),
+        ("2.0", False),
+        (None, False),
+    ),
     ids=("historical", "routing-minor", "unknown-major", "absent"),
 )
 def test_receipt_schema_version_accepts_the_routing_minor_version(
