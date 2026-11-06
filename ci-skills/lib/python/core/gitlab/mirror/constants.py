@@ -128,6 +128,10 @@ class Field(StrEnum):
 
         Whether confirmation permits replacing the selected failed mirror.
 
+    .. attribute :: CREATED_MIRROR_ID
+
+        Native POST identity retained without certifying configuration or synchronization.
+
     .. attribute :: REPLACED_MIRROR_ID
 
         Exact old native mirror ID, absent without confirmed replacement.
@@ -219,6 +223,7 @@ class Field(StrEnum):
     CREATED = "created"
     REPOSITORY = "repository"
     REPLACEMENT_REQUIRED = "replacement_required"
+    CREATED_MIRROR_ID = "created_mirror_id"
     REPLACED_MIRROR_ID = "replaced_mirror_id"
     PLAN_DIGEST = "plan_digest"
     MUTATED = "mutated"

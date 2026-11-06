@@ -80,6 +80,8 @@ FIELD_DESCRIPTION: Final = "description"
 FIELD_KIND: Final = "kind"
 FIELD_NAME: Final = "name"
 FIELD_LABELS: Final = "labels"
+PROJECT_ID: Final = 42
+PROJECT_PATH: Final = "team/build"
 NAMESPACE_KIND: Final = "Namespace"
 CLUSTER_NAMESPACE: Final = ""
 RUNNER_ID = 73
@@ -492,6 +494,7 @@ def test_manager_reuses_selected_node_scope_account_and_resource_settings(
     state.selected_node = NODE
     state.published_image = TOOLBOX_IMAGE
     state.created_runner_id = RUNNER_ID
+    state.gitlab = SimpleNamespace(access=_verified_project_access())
     state.run_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, False)
     state.token_path = tmp_path / "runner-token"
     state.token_path.write_text("glrt-unit-only\n", encoding="utf-8")
@@ -595,7 +598,8 @@ def _lifecycle_executor(
             origin="https://gitlab.example.test", target_kind="project"
         ),
         api=object(),
-        target_id=42,
+        target_id=PROJECT_ID,
+        access=_verified_project_access(),
     )
     monkeypatch.setattr(
         runner_manager.GITLAB_API, "_lock_root", lambda: tmp_path / "locks"
@@ -1021,3 +1025,62 @@ def test_chain_runner_cleanup_uses_delete_plan_and_restores_execution_context(
         assert record["after"]["global_get_status"] == 404
         assert record["after"]["scoped_absent"] is True
     assert api.calls == expected_calls
+
+
+def _verified_project_access() -> JSONObject:
+    """Reuse the native project receipt shape for chain/manager identity binding.
+
+    :returns: Fresh verified target mapping matching the selected numeric project.
+    """
+    return {
+        FIELD_STATUS: STATUS.PASS,
+        "target": {
+            **runner_lifecycle.VERIFIED_TARGET,
+            "id": PROJECT_ID,
+            "full_path": PROJECT_PATH,
+        },
+    }
+
+
+def test_numeric_project_chain_prepares_inner_manager_from_verified_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retain outer verified identity when the inner manager has no explicit namespace.
+
+    :param tmp_path: Test-owned private runner-token destination.
+    :param monkeypatch: Replace target and credential resolution at existing boundaries.
+    :returns: None after the real inner manager prepares the same deterministic scope.
+    """
+    action = _prepared_action(apply=True)
+    action.args.project = str(PROJECT_ID)
+    action.args.namespace = None
+    action.gitlab_selection = ("project", str(PROJECT_ID))
+    action.repository_identity = IDENTITY.RepositoryIdentity(
+        None, IDENTITY.RepositorySource.UNKNOWN
+    )
+    action.bind_repository(_verified_project_access())
+    expected_scope = action.manager_scope
+    state = action.state
+    state.gitlab = SimpleNamespace(access=_verified_project_access())
+    state.selected_node = NODE
+    state.published_image = TOOLBOX_IMAGE
+    state.created_runner_id = RUNNER_ID
+    state.token_path = tmp_path / "numeric-project-runner-token"
+    state.token_path.write_text("glrt-unit-only\n", encoding="utf-8")
+    state.token_path.chmod(0o600)
+    monkeypatch.setattr(MANAGER_ACTION, "resolve_target", lambda *_a, **_k: _target())
+    monkeypatch.setattr(MANAGER_ACTION, "bind_sources", lambda target, **_k: target)
+    callback = CALLBACKS.PrepareRunnerManager(action)
+    callback.bind(state)
+
+    result = callback.run()
+
+    manager = state.manager_action
+    assert result["verified"] is True
+    assert manager.args.project == str(PROJECT_ID)
+    assert manager.args.namespace is None
+    assert manager.repository_identity.reference == PROJECT_PATH
+    assert manager.repository_identity == action.repository_identity
+    assert manager.candidate_scope == expected_scope
+    assert manager.resolved_description == action.resolved_description
+    assert manager.args.tag == action.args.runner_label
