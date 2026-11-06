@@ -541,16 +541,22 @@ Capture fresh candidate receipts from the installed final candidate and move the
 done. Commands, from the installed copy, with the kube context `authority.sh` names:
 
     CI_SKILLS_TARGET=~/.ci-skills/target.toml python ~/.claude/skills/ci-skills/bin/access_check.py --json \
-        --publication --job-url https://gitlab.dcloud.run/hott/test/-/jobs/59277 --ceph-namespace openshift-storage \
-        --receipt-out tests/acceptance/candidate/access.json
+        --job-url https://gitlab.dcloud.run/hott/test/-/jobs/59277 --ceph-namespace openshift-storage \
+        --receipt-out <private path>
 
-The flags are those recorded in the current `tests/acceptance/candidate/access.json`. The mirror `APPLIED` and
+The flags are those recorded in the current `tests/acceptance/candidate/access.json` (`publication` false, live checks
+`ceph_cluster`, `cilium_status`, `event_trace`, `gitlab_job`, `storage_report`); the GitHub repository the target
+names must exist when it runs. The mirror `APPLIED` and
 `NO_OP` receipts and the `gitlab_mirror_smoke_cleanup` record come from one bounded qualification, the one the smoke
 inventory permits when candidate evidence requires renewal:
 
-    python tools/qualify_mirror.py --skill ~/.claude/skills/ci-skills --work-dir .internal/log/bug-133/mirror \
+    python tools/qualify_mirror.py --skill ~/.claude/skills/ci-skills --work-dir <private directory> \
         --project hott/test-mirror-push --destination spyroot/test-mirror-push --source-id 261 \
-        --seed-ref branches:main:<sha> --seed-ref tags:smoke-seed:<sha> --run-id <id>
+        --seed-ref branches:main:<sha> --seed-ref tags:smoke-seed:<sha> --run-id <id> --apply
+
+Without a mode it is a dry run that stops after the wrong-digest rejection and writes no ledger; `--apply` runs the
+qualification; `--reconcile` removes the IDs a pending ledger records as created. SIGINT or SIGTERM writes the ledger
+and stops with exit 2 naming `--reconcile`; it never starts a deletion.
 
 Run it from the directory whose target the receipts must name (the same `./.ci-skills/target.toml` or
 `CI_SKILLS_TARGET` resolution applies to both halves). The tool binds the installed lib first, then runs the installed
@@ -559,8 +565,7 @@ baseline, a wrong-digest rejection, `--apply --confirm-plan <digest> --receipt-o
 `NO_OP`. It then deletes only the run-created mirror and GitHub repository, each after an ID match, proves both absent,
 repeats cleanup once, and writes `mirror-noop-with-cleanup-receipt.json`. It stops before any write if the
 destination or a mirror already exists, the source ID or a seed ref differs, or the two target sources differ.
-`--plan-only` stops after the rejection and writes no ledger. `--reconcile` reads a pending ledger and removes only
-the IDs it records as created. Then run
+Then run
 `python tools/check_live_acceptance.py --root . --no-aggregate --receipts tests/acceptance/candidate --json`.
 Acceptance: the checker reports `PASS`, and `ci-skills/required` and the `live-acceptance` deployment are green on the
 PR head.

@@ -73,6 +73,22 @@ from lib.python.core.kubernetes.podman_evidence import (
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
+from skillkit.mirror_qualification import (
+    AFTER_FIELD,
+    BEFORE_FIELD,
+    DELETE_FIELD,
+    DESTINATION_FIELD,
+    DESTINATION_HTTP_STATUS_FIELD,
+    DESTINATION_ID_HTTP_STATUS_FIELD,
+    KIND_FIELD,
+    MIRROR_ABSENT_FIELD,
+    MIRROR_HTTP_STATUS_FIELD,
+    MIRROR_ID_FIELD,
+    MUTATED_FIELD,
+    REPEAT_FIELD,
+    SMOKE_CLEANUP_FIELD,
+    SOURCE_FIELD,
+)
 from skillkit.mirror_qualification import CLEANUP_KIND as MIRROR_SMOKE_CLEANUP_KIND
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
@@ -1203,37 +1219,37 @@ def _mirror_smoke_cleanup_verified(
     :returns: Whether only the created objects were removed and the source was retained.
     :raises TypeError: Datetime comparisons reject mixed timezone awareness.
     """
-    cleanup = _mapping(noop.get("smoke_cleanup"))
+    cleanup = _mapping(noop.get(SMOKE_CLEANUP_FIELD))
     records = applied.get("records")
     if not isinstance(records, list) or len(records) != 1:
         return False
     record = _mapping(records[0])
     created = _mapping(record.get("created"))
-    before = _mapping(cleanup.get("before"))
-    deletion = _mapping(cleanup.get("delete"))
+    before = _mapping(cleanup.get(BEFORE_FIELD))
+    deletion = _mapping(cleanup.get(DELETE_FIELD))
     if (
-        cleanup.get("kind") != MIRROR_SMOKE_CLEANUP_KIND
+        cleanup.get(KIND_FIELD) != MIRROR_SMOKE_CLEANUP_KIND
         or not _smoke_cleanup_matches_execution(noop, cleanup, now, max_age_days)
         or created.get("repository") is not True
         or created.get("mirror") is not True
         or _mapping(record.get("before")).get("mirror") is not None
         or record.get("replacement_required") is not False
-        or before.get("source") != record.get("source")
-        or before.get("destination") != record.get("destination")
-        or before.get("mirror_id") != _mapping(record.get("mirror")).get("id")
-        or deletion.get("mirror_http_status") != HTTPStatus.NO_CONTENT
-        or deletion.get("destination_http_status") != HTTPStatus.NO_CONTENT
-        or _mapping(cleanup.get("repeat")).get("mutated") is not False
+        or before.get(SOURCE_FIELD) != record.get("source")
+        or before.get(DESTINATION_FIELD) != record.get("destination")
+        or before.get(MIRROR_ID_FIELD) != _mapping(record.get("mirror")).get("id")
+        or deletion.get(MIRROR_HTTP_STATUS_FIELD) != HTTPStatus.NO_CONTENT
+        or deletion.get(DESTINATION_HTTP_STATUS_FIELD) != HTTPStatus.NO_CONTENT
+        or _mapping(cleanup.get(REPEAT_FIELD)).get(MUTATED_FIELD) is not False
     ):
         return False
     return all(
-        observed.get("source") == record.get("source")
-        and observed.get("mirror_absent") is True
-        and observed.get("destination_http_status") == HTTPStatus.NOT_FOUND
-        and observed.get("destination_id_http_status") == HTTPStatus.NOT_FOUND
+        observed.get(SOURCE_FIELD) == record.get("source")
+        and observed.get(MIRROR_ABSENT_FIELD) is True
+        and observed.get(DESTINATION_HTTP_STATUS_FIELD) == HTTPStatus.NOT_FOUND
+        and observed.get(DESTINATION_ID_HTTP_STATUS_FIELD) == HTTPStatus.NOT_FOUND
         for observed in (
-            _mapping(cleanup.get("after")),
-            _mapping(cleanup.get("repeat")),
+            _mapping(cleanup.get(AFTER_FIELD)),
+            _mapping(cleanup.get(REPEAT_FIELD)),
         )
     )
 
