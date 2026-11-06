@@ -60,13 +60,19 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   it), no option reads `[gitlab_private]` with `routing.selected_by` `default`, and `--gitlab public` reads
   `[gitlab_public]` with `argv:--gitlab=public`, no deprecation event. Evidence files:
   `.internal/log/bug-133/after-*.json` in the primary checkout.
-- [ ] (GPP-07b) Both installed copies are upgraded again at the final functional head and the GPP-M4 commands rerun.
-  The `e5b40eb` installs are stale: `f474eb6` and later commits change result output and table selection.
-- [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head. The earlier holds are
-  cleared: the target pins `kubernetes.kubeconfigs` and `kubernetes.context` for the cluster `authority.sh` names, so
-  no command reads the current kube context; the mirror qualification runs from the tracked
-  `tools/qualify_mirror.py` (GPP-10) instead of the scratch pair. PR #141 merges first; draft PR #138 rebases
-  afterwards.
+- [x] (GPP-07b) Both installed copies are upgraded at the final functional head `931b188` (`INSTALLATION.json`:
+  revision verified, digest `78c36437`). From each install, `gitlab_issue.py open-bug` without an option is DRY_RUN
+  on gitlab.dcloud.run with routing `gitlab_private` + `kubernetes` + `harbor`, and with `--gitlab public` DRY_RUN on
+  gitlab.com with an empty row. Evidence: `.internal/log/bug-133/gpp07b-931b188/`.
+- [x] (GPP-08) Candidate receipts renewed from the `931b188` install. Mirror: one bounded qualification, run
+  `bug133-mirror-20261106`, created GitHub repository `1447750315` and GitLab mirror `17` for source `261`, matched
+  both seed refs, rejected a wrong confirmation without mutation, returned NO_OP on the confirmed repeat, then deleted
+  mirror `17` and repository `1447750315` (204 each), proved absence by name and by ID and repeated cleanup once
+  with no DELETE. Access: `access_check.py --job-url <job 59277> --ceph-namespace openshift-storage`, PASS on all
+  surfaces and five live checks, after `spyroot/test-mirror-push` was restored as `1447753892`.
+  `tools/check_live_acceptance.py --root . --no-aggregate --receipts tests/acceptance/candidate` returned PASS with
+  functional digest `571967cc` at `2026-11-06T02:45:29Z`. The `bcf7d59` receipts are under
+  `tests/acceptance/historical/pre-gitlab-private-public/`.
 - [x] (GPP-09) Legacy removal is tracked as TD-11 (`docs/exec-plans/tech-debt-tracker.md`).
 - [x] (GPP-11) Live AFTER evidence of the capability, from an isolated installed copy at `c76723a` (digest
   `870a657e`), 2026-11-06T01:57:28Z to 02:00:43Z, with no ambient GitLab token, against the user target:
@@ -358,8 +364,12 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - Delivered on PR #141: instance tables, the optional `[gitlab_routing]`, `--gitlab`, route-enforced Kubernetes and
   Harbor selection, the `routing` object in five command families (DEC-15), the legacy path with its deprecation
   event, the tracked mirror qualification tool, and the documents.
-- Not delivered yet: candidate receipts (GPP-08) and the second install upgrade (GPP-07b). DEC-14 and DEC-16 are
-  PROPOSED.
+- Delivered: GPP-07b and GPP-08 at `931b188`, with live AFTER evidence per instance (GPP-11).
+- Not delivered: DEC-14 (GitLab Agent routing and KAS reachability check) and DEC-16 (one `token_file` per
+  instance) stay PROPOSED. Open for the next renewal: the restored `spyroot/test-mirror-push` against the disposable
+  destination rule (Surprises).
+- Lesson: three review cycles found literals and duplicated values that one constants module and a gate rule now
+  catch; define a value once before the first test that uses it.
 - Lesson: the first implementation reported the pairing without using it; a test that asserts behavior for an
   omitted pairing would have caught it before review.
 
@@ -894,4 +904,6 @@ Revision notes: initial version, derived from issue #133 and decisions DEC-01 to
 implementation; milestones, the `bless` row and DEC-14 after the plan review; DEC-15 to DEC-18, the CONFLICT statuses
 and runnable GPP-M4/GPP-M5 commands after the review of `a9eddd5`. Then GPP-10: the recorded answers replace the
 CONFLICT statuses of DEC-03, DEC-05, DEC-08, DEC-10 and DEC-17; DEC-19 states that `gitlab_private`, `gitlab_public` and
-`com` are keys; the mirror producer is tracked in `tools/qualify_mirror.py`.
+`com` are keys; the mirror producer is tracked in `tools/qualify_mirror.py`. Then the constants module and gate rule
+(DEC-07), the pairing rule and the empty public row (DEC-02), the public legacy profile block (DEC-10), the
+`gitlab-agent.md` reference, GPP-07b and GPP-08 at `931b188`, and GPP-11 live evidence.

@@ -126,11 +126,10 @@ that session's permission check and sent no request. By `2026-11-06T01:35:52Z` b
 and `repositories/1442655376` returned 404, and a second read at `01:36:27Z` returned `RESOURCE_NOT_FOUND` for both.
 Who deleted it is not recorded. The team asked for it to be restored so every agent can use it.
 
-Open conflict for the next renewal: a restored `spyroot/test-mirror-push` makes the next bounded qualification stop
-with `destination_present`. This inventory says "The disposable mirror destination is expected absent only after its
-recorded cleanup"; the user says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". It stays open until the user
-decides. Evidence is kept outside the repository with the run
-log of issue #133.
+Open conflict for the next renewal: the restored `spyroot/test-mirror-push` (`1447753892`) makes the next bounded
+qualification stop with `destination_present`. This inventory says "The disposable mirror destination is expected
+absent only after its recorded cleanup"; the user says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". It stays
+open until the user decides. Evidence is kept outside the repository with the run log of issue #133.
 
 ### Mirror qualification read-back — 2026-11-06
 
@@ -142,6 +141,11 @@ repository `1447750315` (HTTP 204 each), read both absent by name and by ID, and
 DELETE (`2026-11-06T02:40:25Z`). An independent read at `02:40:34Z` returned `RESOURCE_NOT_FOUND` by name and by ID
 and no remote mirror on `261`. Selected receipts are in `tests/acceptance/candidate/`; the `bcf7d59` receipts moved
 to `tests/acceptance/historical/pre-gitlab-private-public/`.
+
+After that cleanup, `spyroot/test-mirror-push`, the repository the selected target's `[github]` table names, was
+restored for every agent: repository `1447753892`, private, created `2026-11-06T02:43:05Z`, with `main` and tag
+`smoke-seed` at `aafe5d50bbe4a1884b7b4f86668651e9ddbd5222` pushed from GitLab `261`. Both refs were read back at
+`02:43:56Z`. The access receipt in `tests/acceptance/candidate/access.json` was captured with it present.
 
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
 The `1f2b6f5` qualification remains in the merged CI-14 history. The prior `ae47632` originals remain unchanged under
