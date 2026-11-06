@@ -54,6 +54,28 @@ ARGV_PREFIX: Final = "argv:"
 GITLAB_DEPRECATION_EVENT: Final = "gitlab_target_deprecated"
 GITLAB_DEPRECATION_STATUS: Final = "DEPRECATED"
 GITLAB_DEPRECATION_COMPONENT: Final = "target"
+# Reason tokens of GitLab selection and routing; each is defined once here.
+GITLAB_SELECTOR_CONFLICT: Final = "gitlab_selector_conflict"
+GITLAB_SELECTOR_UNKNOWN: Final = "gitlab_selector_unknown"
+GITLAB_SELECTION_REQUIRES_GITLAB: Final = "gitlab_profile_requires_gitlab_authority"
+GITLAB_PROFILE_NAME_INVALID: Final = "gitlab_profile_name_invalid"
+GITLAB_PROFILE_UNKNOWN: Final = "gitlab_profile_unknown"
+GITLAB_TARGET_SHAPES_MIXED: Final = "gitlab_target_shapes_mixed"
+GITLAB_ROUTING_REQUIRED: Final = "gitlab_routing_required"
+GITLAB_ROUTING_DEFAULT_UNKNOWN: Final = "gitlab_routing_default_unknown"
+GITLAB_ROUTING_ROW_UNKNOWN: Final = "gitlab_routing_row_unknown"
+GITLAB_ROUTING_ROW_MISSING: Final = "gitlab_routing_row_missing"
+MISSING_AUTHORITY_TABLES: Final = "target is missing required authority tables: "
+# A dotted header such as [gitlab.com] is a nested table, not a host name.
+NESTED_TABLE_DIAGNOSTIC: Final = (
+    "[{path}] is table {child} nested in [{parent}]: TOML reads a dot in a "
+    "table name as nesting; {advice}"
+)
+GITLAB_INSTANCE_ADVICE: Final = (
+    "name a GitLab "
+    + " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())
+    + f" and add [{GITLAB_ROUTING_TABLE}]"
+)
 GITLAB_REPLACEMENT: Final = (
     " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())
     + f" with [{GITLAB_ROUTING_TABLE}]; select with "
@@ -211,9 +233,9 @@ class GitLabSelection:
         :raises TargetError: Both options were given, or the selector is unknown.
         """
         if self.selector is not None and self.profile is not None:
-            raise TargetError("gitlab_selector_conflict")
+            raise TargetError(GITLAB_SELECTOR_CONFLICT)
         if self.selector is not None and self.selector not in GITLAB_SELECTORS:
-            raise TargetError("gitlab_selector_unknown")
+            raise TargetError(GITLAB_SELECTOR_UNKNOWN)
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +280,15 @@ class GitLabRoute:
         :returns: True unless the table read is a declared instance table.
         """
         return self.gitlab not in GITLAB_SELECTORS.values()
+
+    def table_for(self, authority: str) -> Optional[str]:
+        """Name the table this route pairs with a routed authority.
+
+        :param authority: One of ``GITLAB_ROUTED_AUTHORITIES``.
+        :returns: Paired table name, or ``None`` when the row omits it.
+        :raises KeyError: ``authority`` is not a routed authority.
+        """
+        return {"kubernetes": self.kubernetes, "harbor": self.harbor}[authority]
 
     def as_dict(self) -> JSONObject:
         """Render the result ``routing`` object.
@@ -315,22 +346,22 @@ class GitLabRouting:
         """  # noqa: DOC502 - Shared table parser validates each row.
         instances = tuple(name for name in GITLAB_SELECTORS.values() if name in data)
         if GITLAB_ROUTING_TABLE not in data:
-            raise TargetError("gitlab_routing_required")
+            raise TargetError(GITLAB_ROUTING_REQUIRED)
         table = data[GITLAB_ROUTING_TABLE]
         if not isinstance(table, dict):
             raise TargetError(f"{GITLAB_ROUTING_TABLE} must be a TOML table")
         default = table.get(GITLAB_ROUTING_DEFAULT_KEY)
         if not isinstance(default, str) or default not in instances:
-            raise TargetError("gitlab_routing_default_unknown")
+            raise TargetError(GITLAB_ROUTING_DEFAULT_UNKNOWN)
         rows = {
             name: row
             for name, row in table.items()
             if name != GITLAB_ROUTING_DEFAULT_KEY
         }
         if set(rows) - set(instances):
-            raise TargetError("gitlab_routing_row_unknown")
+            raise TargetError(GITLAB_ROUTING_ROW_UNKNOWN)
         if set(instances) - set(rows):
-            raise TargetError("gitlab_routing_row_missing")
+            raise TargetError(GITLAB_ROUTING_ROW_MISSING)
         routes: dict[str, GitLabRoute] = {}
         for instance in instances:
             name = TARGET_CONTRACT.dotted_path((GITLAB_ROUTING_TABLE, instance))
@@ -343,7 +374,7 @@ class GitLabRouting:
                     or TARGET_CONTRACT.authority_of(value) != authority
                     or value not in data
                 ):
-                    raise TargetError(f"{GITLAB_ROUTING_TABLE}_{authority}_unknown")
+                    raise TargetError(cls.pairing_unknown(authority))
                 paired[authority] = value
             routes[instance] = GitLabRoute(
                 gitlab=instance, selected_by=SELECTED_BY_DEFAULT, **paired
@@ -361,8 +392,26 @@ class GitLabRouting:
             return self.routes[self.default]
         table = GITLAB_SELECTORS[selection.selector]
         if table not in self.routes:
-            raise TargetError(f"{table}_target_required")
+            raise TargetError(self.instance_required(table))
         return replace(self.routes[table], selected_by=selection.selected_by)
+
+    @staticmethod
+    def instance_required(table: str) -> str:
+        """Name the reason for a selected instance table the target lacks.
+
+        :param table: Instance table name, such as ``gitlab_public``.
+        :returns: Reason token, for example ``gitlab_public_target_required``.
+        """
+        return f"{table}_target_required"
+
+    @staticmethod
+    def pairing_unknown(authority: str) -> str:
+        """Name the reason for a routing row that names an undeclared table.
+
+        :param authority: Routed authority whose value is invalid.
+        :returns: Reason token, for example ``gitlab_routing_kubernetes_unknown``.
+        """
+        return f"{GITLAB_ROUTING_TABLE}_{authority}_unknown"
 
 
 @dataclass(frozen=True)
@@ -987,15 +1036,15 @@ def _legacy_gitlab(
     if selection.selector is not None:
         table = GITLAB_SELECTORS[selection.selector]
         if table != GITLAB_PRIVATE_TABLE:
-            raise TargetError(f"{table}_target_required")
+            raise TargetError(GitLabRouting.instance_required(table))
     selected_by = selection.selected_by or SELECTED_BY_LEGACY
     if selection.profile is None:
         gitlab = {key: item for key, item in value.items() if key in fields}
         return gitlab, GitLabRoute(GITLAB_AUTHORITY, None, None, selected_by)
     if not selection.profile.strip():
-        raise TargetError("gitlab_profile_name_invalid")
+        raise TargetError(GITLAB_PROFILE_NAME_INVALID)
     if selection.profile not in profiles:
-        raise TargetError("gitlab_profile_unknown")
+        raise TargetError(GITLAB_PROFILE_UNKNOWN)
     name = TARGET_CONTRACT.dotted_path((GITLAB_AUTHORITY, selection.profile))
     return (
         _table(value[selection.profile], name, fields),
@@ -1022,15 +1071,41 @@ def _select_gitlab(
     ]
     if GITLAB_AUTHORITY in data:
         if current:
-            raise TargetError("gitlab_target_shapes_mixed")
+            _reject_nested(data[GITLAB_AUTHORITY], GITLAB_AUTHORITY, owns_fields=True)
+            raise TargetError(GITLAB_TARGET_SHAPES_MIXED)
         return _legacy_gitlab(data[GITLAB_AUTHORITY], selection)
     if selection.profile is not None:
-        raise TargetError("gitlab_profile_unknown")
+        raise TargetError(GITLAB_PROFILE_UNKNOWN)
     route = GitLabRouting.parse(data).select(selection)
+    _reject_nested(data[route.gitlab], route.gitlab, owns_fields=False)
     table = _table(
         data[route.gitlab], route.gitlab, TARGET_CONTRACT.names(route.gitlab)
     )
     return table, route
+
+
+def _reject_nested(value: object, name: str, *, owns_fields: bool) -> None:
+    """Explain a dotted header that TOML read as a table nested in ``name``.
+
+    :param value: Parsed table that may hold nested tables.
+    :param name: Table name, such as ``gitlab`` or ``gitlab_public``.
+    :param owns_fields: Report only when the table holds nested tables and no
+        field of its own; a table with fields is a different shape problem.
+    :raises TargetError: A nested table is present, named with its parent.
+    """
+    if not isinstance(value, dict):
+        return
+    nested = sorted(key for key, item in value.items() if isinstance(item, dict))
+    fields = [key for key, item in value.items() if not isinstance(item, dict)]
+    if nested and not (owns_fields and fields):
+        raise TargetError(
+            NESTED_TABLE_DIAGNOSTIC.format(
+                path=TARGET_CONTRACT.dotted_path((name, nested[0])),
+                parent=name,
+                child=TARGET_CONTRACT.quote_key(nested[0]),
+                advice=GITLAB_INSTANCE_ADVICE,
+            )
+        )
 
 
 def _parse_gitlab(
@@ -1098,18 +1173,28 @@ def _load_gitlab(
         table, route, skill_root, target_directory=target_directory
     )
     if route.legacy:
-        log_event(
-            bound_log_settings(),
-            GITLAB_DEPRECATION_COMPONENT,
-            GITLAB_DEPRECATION_EVENT,
-            GITLAB_DEPRECATION_STATUS,
-            level="warning",
-            details={
-                "table": route.gitlab,
-                "selected_by": route.selected_by,
-                "replacement": GITLAB_REPLACEMENT,
-            },
-        )
+        settings = bound_log_settings()
+        try:
+            log_event(
+                settings,
+                GITLAB_DEPRECATION_COMPONENT,
+                GITLAB_DEPRECATION_EVENT,
+                GITLAB_DEPRECATION_STATUS,
+                level="warning",
+                # Same rule as the command's own events: no log file in dry-run.
+                persist=not (
+                    getattr(settings, "describe", False)
+                    or getattr(settings, "dry_run", False)
+                ),
+                details={
+                    "table": route.gitlab,
+                    "selected_by": route.selected_by,
+                    "replacement": GITLAB_REPLACEMENT,
+                },
+            )
+        except OSError:
+            # A diagnostic that cannot be written does not change the selection.
+            pass
     return selected
 
 
@@ -1366,15 +1451,45 @@ def _select_surfaces(
     present = {TARGET_CONTRACT.authority_of(name) for name in data}
     missing = set(required) - present
     if missing:
-        raise TargetError(
-            "target is missing required authority tables: " + ", ".join(sorted(missing))
-        )
+        raise TargetError(MISSING_AUTHORITY_TABLES + ", ".join(sorted(missing)))
     selected = tuple(
         dict.fromkeys((*required, *(name for name in optional if name in present)))
     )
     if not selected:
         raise TargetError("target has no configured authority tables for this command")
     return selected
+
+
+def _routed_tables(
+    route: Optional[GitLabRoute], required: tuple[str, ...]
+) -> Mapping[str, str]:
+    """Name the table each routed authority is read from under ``[gitlab_routing]``.
+
+    A command that requires a routed authority reads the table the selected
+    route pairs with it. A legacy or absent route, or an optional authority,
+    reads the authority's own table.
+
+    :param route: Selected GitLab route, or ``None`` when GitLab is unselected.
+    :param required: Authorities the command requires.
+    :returns: Table name per routed authority.
+    :raises TargetError: The selected route pairs no table with one or more
+        required routed authorities; the diagnostic names all of them.
+    """
+    tables = {authority: authority for authority in GITLAB_ROUTED_AUTHORITIES}
+    if route is None or route.legacy:
+        return tables
+    missing = []
+    for authority in GITLAB_ROUTED_AUTHORITIES:
+        if authority not in required:
+            continue
+        table = route.table_for(authority)
+        if table is None:
+            missing.append(authority)
+        else:
+            tables[authority] = table
+    if missing:
+        raise TargetError(MISSING_AUTHORITY_TABLES + ", ".join(sorted(missing)))
+    return tables
 
 
 def load_target(
@@ -1410,7 +1525,7 @@ def load_target(
     selected = _select_surfaces(data, required_surfaces, optional_surfaces)
     selection = GitLabSelection(gitlab, gitlab_profile)
     if selection.requested and GITLAB_AUTHORITY not in selected:
-        raise TargetError("gitlab_profile_requires_gitlab_authority")
+        raise TargetError(GITLAB_SELECTION_REQUIRES_GITLAB)
 
     github_target = (
         _parse_github(data["github"], skill_root, target_directory=source.parent)
@@ -1422,13 +1537,18 @@ def load_target(
         if GITLAB_AUTHORITY in selected
         else None
     )
+    tables = _routed_tables(
+        gitlab_target.route if gitlab_target is not None else None, required_surfaces
+    )
     harbor_target = (
-        _parse_harbor(data["harbor"], skill_root, target_directory=source.parent)
+        _parse_harbor(
+            data[tables["harbor"]], skill_root, target_directory=source.parent
+        )
         if "harbor" in selected
         else None
     )
     kubernetes_target = (
-        _parse_kubernetes(data["kubernetes"], skill_root)
+        _parse_kubernetes(data[tables["kubernetes"]], skill_root)
         if "kubernetes" in selected
         else None
     )

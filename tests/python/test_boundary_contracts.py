@@ -476,6 +476,27 @@ def test_token_source_native_store_exports_no_credential(
     assert source.environment == {"OTHER_TOKEN": None}
 
 
+def test_log_settings_binding_is_scoped_and_restorable() -> None:
+    """Bind parsed log options for code below the parser and restore the previous ones.
+
+    The autouse ``isolated_log_settings`` fixture starts every test with an empty
+    binding; this test checks binding, rebinding by a parser, and restoring.
+
+    :returns: None; assertions verify each binding state.
+    """
+    assert vars(LOGGING.bound_log_settings()) == {}
+    first = _log_args(log_format="text")
+    token = LOGGING.bind_log_settings(first)
+    assert LOGGING.bound_log_settings() is first
+    parsed = READ_CLI.build_api_parser().parse_args(
+        ["check", "--provider", "gitlab", "--log-format", "json", "--run-id", "unit"]
+    )
+    assert LOGGING.bound_log_settings() is parsed
+    assert LOGGING.bound_log_settings().run_id == "unit"
+    LOGGING.unbind_log_settings(token)
+    assert vars(LOGGING.bound_log_settings()) == {}
+
+
 def test_log_event_derives_error_level_and_rejects_empty_explicit_level(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

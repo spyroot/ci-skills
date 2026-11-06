@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from collections.abc import Mapping, MutableMapping
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
@@ -34,12 +34,29 @@ _LOG_SETTINGS: ContextVar[Optional[argparse.Namespace]] = ContextVar(
 )
 
 
-def bind_log_settings(args: argparse.Namespace) -> None:
+def bind_log_settings(
+    args: argparse.Namespace,
+) -> Token[Optional[argparse.Namespace]]:
     """Bind the parsed diagnostic options of the current invocation.
 
+    One command invocation binds once, from its parser. A caller that binds in
+    a longer-lived process restores the previous binding with
+    ``unbind_log_settings``.
+
     :param args: Parsed command namespace carrying the shared log options.
+    :returns: Token that restores the previous binding.
     """
-    _LOG_SETTINGS.set(args)
+    return _LOG_SETTINGS.set(args)
+
+
+def unbind_log_settings(token: Token[Optional[argparse.Namespace]]) -> None:
+    """Restore the binding that was current before ``bind_log_settings``.
+
+    :param token: Token returned by the matching ``bind_log_settings`` call.
+    :raises ValueError: The token was created in a different context.
+    :raises RuntimeError: The token was already used.
+    """  # noqa: DOC502 - ContextVar.reset validates the token.
+    _LOG_SETTINGS.reset(token)
 
 
 def bound_log_settings() -> argparse.Namespace:

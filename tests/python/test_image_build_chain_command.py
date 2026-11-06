@@ -227,13 +227,16 @@ def test_chain_schema_rejects_pass_without_complete_runner_delivery(
     "explicit", (False, True), ids=("default-live-plan", "explicit-dry-run")
 )
 @pytest.mark.parametrize(
-    "gitlab_selector", (None, "public"), ids=("default-instance", "public-instance")
+    ("gitlab_selector", "gitlab_profile"),
+    ((None, None), ("public", None), (None, "public")),
+    ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     explicit: bool,
     gitlab_selector: Optional[str],
+    gitlab_profile: Optional[str],
 ) -> None:
     """Plan live by default and keep explicit dry-run outside provider setup.
 
@@ -241,13 +244,14 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     :param capsys: Actual JSON emitter capture.
     :param explicit: Whether the caller supplies the explicit dry-run flag.
     :param gitlab_selector: Default or ``--gitlab`` instance used in either planning mode.
+    :param gitlab_profile: Deprecated profile name used in either planning mode.
     :returns: None after checking mode-specific planning and absence of mutation.
     """
     args = _args()
     args.live_plan = False
     args.dry_run = explicit
     args.gitlab = gitlab_selector
-    args.gitlab_profile = None
+    args.gitlab_profile = gitlab_profile
     template = _prepared_action()
     resolutions = []
     bindings = []
@@ -333,7 +337,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         (
             explicit,
             ("gitlab", "kubernetes", "harbor"),
-            GitLabSelection(selector=gitlab_selector),
+            GitLabSelection(gitlab_selector, gitlab_profile),
         )
     ]
     assert bindings == ([] if explicit else [_target_fixture])

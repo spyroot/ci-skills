@@ -46,6 +46,8 @@ from jsonschema.exceptions import SchemaError, ValidationError
 SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
+from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
+from lib.python.core.catalog import SCHEMA_VERSION as RESULT_SCHEMA_VERSION
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
 from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
@@ -161,8 +163,11 @@ class AcceptanceResult(TypedDict, total=False):
 
 
 SCHEMA_VERSION: Final = "1.0"
-# Receipt versions accepted: 1.1 adds the optional GitLab `routing` object (MINOR).
-RECEIPT_SCHEMA_VERSIONS: Final = frozenset({"1.0", "1.1"})
+# Receipt versions accepted: the producers' base version and the MINOR version
+# that adds the optional GitLab `routing` object.
+RECEIPT_SCHEMA_VERSIONS: Final = frozenset(
+    {RESULT_SCHEMA_VERSION, ROUTED_RESULT_SCHEMA_VERSION}
+)
 RECEIPT_KIND: Final = "access_check"
 GITLAB_RECEIPT_KINDS: Final = frozenset(
     {

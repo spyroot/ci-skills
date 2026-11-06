@@ -7,13 +7,14 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shlex
 import stat
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from importlib import import_module, util
 from pathlib import Path
 from types import ModuleType
@@ -80,6 +81,23 @@ def selected_test_paths(command: str) -> tuple[str, ...]:
         if (token == "tests/python" or token.startswith("tests/python/"))
         and (index == 0 or tokens[index - 1] != "--ignore")
     )
+
+
+@pytest.fixture(autouse=True)
+def isolated_log_settings() -> Iterator[None]:
+    """Give each test an empty diagnostic binding and restore it afterwards.
+
+    Command parsers bind their log options for code below the adapter
+    (``core.logging.bind_log_settings``). In one test process that binding
+    would otherwise carry one test's ``--log-file`` into the next test.
+
+    :yields: None while the test runs with no bound log options.
+    :ytype: None
+    """
+    logging_module = import_script_module("lib.python.core.logging")
+    token = logging_module.bind_log_settings(argparse.Namespace())
+    yield
+    logging_module.unbind_log_settings(token)
 
 
 @pytest.fixture

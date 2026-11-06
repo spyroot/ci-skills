@@ -50,7 +50,7 @@ Completed records live in [completed/](../exec-plans/completed/); unfinished pla
 | --- | --- | --- |
 | GitLab operations | [Toolbelt][exec-toolbelt]; standalone runner proof delivered | [Proof per block][toolbelt-gates] |
 | Lifecycle integration | [Hooks][exec-hooks]; implementation/proof pending | [G1–G4 and R1][hooks-gates] |
-| GitLab private/public targets ([#133](https://github.com/spyroot/ci-skills/issues/133)) | [Targets][exec-gitlab-targets]; design accepted, implementation pending | [Verification gates][gitlab-targets-gates] |
+| GitLab private/public targets ([#133](https://github.com/spyroot/ci-skills/issues/133)) | [Targets][exec-gitlab-targets]; implemented on PR #141; receipts and five decisions open | [Verification gates][gitlab-targets-gates] |
 
 The [architecture index](../architecture/index.md) points to the existing design;
 [use cases](../use-cases.md) and [combos](../combos.md) map user outcomes to operations.

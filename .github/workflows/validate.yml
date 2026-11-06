@@ -194,7 +194,8 @@ jobs:
             ci-skills/schemas/results/image-build-readiness.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
-            ci-skills/schemas/results/gitlab-runner-delete.schema.json
+            ci-skills/schemas/results/gitlab-runner-delete.schema.json \
+            ci-skills/schemas/results/gitlab-routing.schema.json
           check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             tests/acceptance/runner-tag/*.json
           check-jsonschema --schemafile schemas/live-acceptance-policy.schema.json \

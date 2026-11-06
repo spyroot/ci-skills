@@ -17,6 +17,7 @@ Resolved documentation discrepancies remain identified separately from unfinishe
 | TD-09 | Pre-existing configured-namespace failure overlap | [#131](https://github.com/spyroot/ci-skills/issues/131) |
 | TD-10 | Legacy ownership, numeric chain and absent-scope delete repetition (P2) | [#132](https://github.com/spyroot/ci-skills/issues/132) |
 | TD-11 | Legacy `[gitlab]`, `[gitlab.NAME]` and `--gitlab-profile` read for one release | [GitLab targets plan][exec-gitlab-targets] DEC-05 |
+| TD-12 | `routing` not yet in `gitlab_job` and `gitlab_pipeline` read and watch results | [GitLab targets plan][exec-gitlab-targets] DEC-15 |
 
 TD-01: prose now credits delivered chain code; the historical structured inventory still labels `R-CI13-007`
 `NOT_IMPLEMENTED`. Outstanding interruption and current-chain proof remain separate work. TD-02: standalone

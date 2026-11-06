@@ -6,7 +6,7 @@
   "type": "object",
   "required": ["schema_version","kind","status","captured_at","errors","summary"],
   "properties": {
-    "schema_version": {"enum":["1.0","1.1"]},
+    "schema_version": {"$ref":"gitlab-runner-tag.schema.json#/properties/schema_version"},
     "kind": {"const":"gitlab_runner"},
     "status": {"enum":["DRY_RUN","PLANNED","PASS","PARTIAL","BLOCKED"]},
     "captured_at": {"type":"string","format":"date-time"},

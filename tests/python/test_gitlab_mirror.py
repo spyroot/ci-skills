@@ -117,6 +117,7 @@ OBSERVATION_FIELDS: Final[tuple[str, ...]] = (
 PROFILE_NAME: Final[str] = "public"
 ALTERNATE_PROFILE_NAME: Final[str] = "private"
 PROFILE_OPTION: Final[str] = "--gitlab"
+LEGACY_PROFILE_OPTION: Final[str] = "--gitlab-profile"
 PUBLIC_INSTANCE: Final[str] = "gitlab_public"
 MINIMUM_POLL_SECONDS: Final[int] = 30
 POLL_BUDGET_SECONDS: Final[int] = 3 * MINIMUM_POLL_SECONDS
@@ -1102,6 +1103,46 @@ def test_command_forwards_gitlab_selection_without_binding_credentials(
     assert action.intent.project == SOURCE_PATH
     assert resolution.call_args.kwargs["gitlab_selection"] == TARGET.GitLabSelection(
         selector=PROFILE_NAME
+    )
+    authentication.assert_not_called()
+
+
+def test_command_forwards_legacy_profile_without_binding_credentials(
+    target_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep the deprecated ``--gitlab-profile`` selector working for one release.
+
+    :param target_file: Fixture path rewritten to the legacy ``[gitlab]`` shape.
+    :param monkeypatch: Observe real resolution and trap offline authentication.
+    :returns: None; the action reads the named legacy table and reports its route.
+    """
+    target_file.write_text(
+        '[github]\nhost = "github.example.test"\nrepository = "unit/repo"\n'
+        f'[gitlab]\nurl = "https://{SOURCE_HOST}"\n'
+        f'[gitlab.{PROFILE_NAME}]\nurl = "https://public.{SOURCE_HOST}"\n'
+        f'project = "{SOURCE_PATH}"\n',
+        encoding=BODY_ENCODING,
+    )
+    monkeypatch.setenv(TARGET_ENVIRONMENT, str(target_file))
+    resolution = Mock(wraps=CLI.resolve_target)
+    authentication = Mock(side_effect=AssertionError("offline mode authenticated"))
+    monkeypatch.setattr(CLI, "resolve_target", resolution)
+    monkeypatch.setattr(CLI, "bind_gitlab_session", authentication)
+    args = CLI.build_parser().parse_args(
+        [*COMMAND_SELECTION, LEGACY_PROFILE_OPTION, PROFILE_NAME, DRY_RUN_OPTION]
+    )
+
+    action = CLI.MirrorCommand(args).prepare()
+
+    assert action.target.routing == TARGET.GitLabRoute(
+        f"gitlab.{PROFILE_NAME}",
+        None,
+        None,
+        f"argv:{LEGACY_PROFILE_OPTION}={json.dumps(PROFILE_NAME)}",
+    )
+    assert action.target.require_gitlab().host == f"public.{SOURCE_HOST}"
+    assert resolution.call_args.kwargs["gitlab_selection"] == TARGET.GitLabSelection(
+        profile=PROFILE_NAME
     )
     authentication.assert_not_called()
 

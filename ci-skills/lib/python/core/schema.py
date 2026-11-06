@@ -44,6 +44,27 @@ def load_schema(name: str) -> JSONObject:
     return value
 
 
+def specification_validator(name: str) -> Draft202012Validator:
+    """Build a validator that resolves every installed schema locally.
+
+    :param name: Relative path of the authoritative installed schema.
+    :returns: Draft 2020-12 validator whose registry holds every installed schema,
+        so a ``$ref`` to a sibling schema never triggers network retrieval.
+    :raises OSError: If a required installed schema is unavailable.
+    :raises ValueError: If an installed schema document is malformed.
+    :raises TypeError: If an installed schema document is not a JSON object.
+    :raises SchemaError: If an installed schema fails its meta-schema.
+    :raises KeyError: If an installed dependency schema lacks its required $id.
+    """  # noqa: DOC503 - Schema file readers and validators propagate failures.
+    resources = []
+    for path in sorted(SCHEMA_DIRECTORY.rglob("*.schema.json")):
+        schema = load_schema(path.relative_to(SCHEMA_DIRECTORY).as_posix())
+        Draft202012Validator.check_schema(schema)
+        resources.append((str(schema["$id"]), Resource.from_contents(schema)))
+    registry = Registry().with_resources(resources)
+    return Draft202012Validator(load_schema(name), registry=registry)
+
+
 def validate_specification(document: JSONObject, name: str) -> None:
     """Validate a document against installed schemas without network retrieval.
 
@@ -58,13 +79,7 @@ def validate_specification(document: JSONObject, name: str) -> None:
     :raises KeyError: If an installed dependency schema lacks its required $id.
     :raises RecursionError: If a schema exceeds the supported nesting depth.
     """  # noqa: DOC503 - Schema file readers and validators propagate failures.
-    resources = []
-    for path in sorted(SCHEMA_DIRECTORY.rglob("*.schema.json")):
-        schema = load_schema(path.relative_to(SCHEMA_DIRECTORY).as_posix())
-        Draft202012Validator.check_schema(schema)
-        resources.append((str(schema["$id"]), Resource.from_contents(schema)))
-    registry = Registry().with_resources(resources)
-    validator = Draft202012Validator(load_schema(name), registry=registry)
+    validator = specification_validator(name)
     try:
         validator.validate(document)
     except ValidationError as exc:

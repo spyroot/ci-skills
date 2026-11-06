@@ -75,6 +75,15 @@ token_file = "gitlab-private.token"
 [gitlab_public]
 url = "https://gitlab.public.example.test"
 token_file = "gitlab-public.token"
+
+[kubernetes]
+context = "admin-context"
+server = "https://api.cluster.example.test:6443"
+
+[harbor]
+url = "https://harbor.example.test"
+project = "example"
+credential_file = "harbor.credentials"
 ```
 
 Rules, each checked before any provider request:
@@ -86,6 +95,14 @@ Rules, each checked before any provider request:
 - A row holds only `kubernetes` and `harbor`; each names a declared table of that authority
   (`gitlab_routing_kubernetes_unknown`, `gitlab_routing_harbor_unknown`). Omit a key when the instance has
   no paired table.
+- A command that requires Kubernetes or Harbor, such as `gitlab_runner_manager.py deploy` or
+  `image_build_readiness.py chain`, reads the table the selected row names. A row that omits it blocks with
+  `target is missing required authority tables: <name>`. In the example above, `--gitlab public` cannot
+  deploy a runner, because the public row pairs no Harbor table. Commands that only read optional authorities,
+  such as `access_check.py`, are not affected.
+- A selector outside `private` and `public` blocks with `gitlab_selector_unknown`.
+- A dotted header such as `[gitlab.com]` beside the instance tables, or `[gitlab_public.com]`, blocks with a
+  diagnostic that names the nested table.
 - `--gitlab public` without `[gitlab_public]` blocks with `gitlab_public_target_required`; the same holds
   for `private`.
 - The selected table supplies its own `url`; `project`, `group`, `runner_id`, and `token_file` keep their
@@ -95,8 +112,10 @@ Rules, each checked before any provider request:
 Table names use `_`, never `.`. TOML reads `[gitlab.com]` as a table `com` nested in `[gitlab]`, not as a
 host. A dot appears only where nesting is real, as in `[kubernetes.node_diagnostics]`.
 
-GitLab action, `access_check` and `gitlab_mirror` results carry a `routing` object at `schema_version` `1.1`
-(`schemas/results/gitlab-routing.schema.json`), and the human view prints it under the status line:
+GitLab action, `access_check`, `gitlab_mirror`, `gitlab_runner_manager` and `image_build_readiness chain`
+results carry a `routing` object at `schema_version` `1.1` (`schemas/results/gitlab-routing.schema.json`). A
+result produced before the target loaded, such as a selection failure, has no `routing`. The human view
+prints it under the status line:
 
 ```text
 Routing: gitlab=gitlab_public kubernetes=kubernetes harbor=none (argv:--gitlab=public)
@@ -113,7 +132,8 @@ a command whose selected authorities exclude GitLab such as the build probe, is 
 The flat `[gitlab]` table and its `[gitlab.NAME]` profiles, selected with `--gitlab-profile NAME`, are
 still read. `[gitlab]` is the private instance: `--gitlab private` reads it and `--gitlab public` blocks.
 Each load writes one `gitlab_target_deprecated` diagnostic on standard error in the selected
-`--log-format`. A target that mixes `[gitlab]` with `[gitlab_private]`, `[gitlab_public]`, or
+`--log-format`, at `--log-level warning` or below; a dry run does not write it to `--log-file`. A target
+that mixes `[gitlab]` with `[gitlab_private]`, `[gitlab_public]`, or
 `[gitlab_routing]` blocks with `gitlab_target_shapes_mixed`; `--gitlab` with `--gitlab-profile` blocks with
 `gitlab_selector_conflict`. Legacy routes report `kubernetes` and `harbor` as `null`. To migrate, rename
 `[gitlab]` to `[gitlab_private]`, rename the profile to `[gitlab_public]`, and add `[gitlab_routing]`.
@@ -130,7 +150,9 @@ Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
 - GitLab uses an explicit `gitlab.token_file`, the `token_file` of the selected instance table (for example
   `gitlab_public.token_file`), then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
-  Otherwise, the selected host's `glab` credential store is used.
+  Otherwise, the selected host's `glab` credential store is used. The environment variable is not bound to
+  one instance: with no `token_file`, it is sent to whichever instance `--gitlab` selects. Declare a
+  `token_file` in each instance table when both instances are used.
 - Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
   combined path, its `kubernetes.kubeconfig` single file, or the kubeconfig
   selected by an explicit project binding. If none is declared, it uses

@@ -13,8 +13,11 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import argparse
+import functools
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Final, Optional
 
 import pytest
@@ -447,6 +450,52 @@ def test_selection_source_names_only_caller_selectors(
         ),
         (ROUTED_TARGET, {"gitlab_profile": "com"}, "gitlab_profile_unknown"),
         (ISSUE_TARGET, {"gitlab_profile": "missing"}, "gitlab_profile_unknown"),
+        (
+            ROUTED_TARGET.replace(
+                'gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }',
+                'gitlab_private = { kubernetes = "kubernetes", harbor = "kubernetes" }',
+                1,
+            ),
+            {},
+            "gitlab_routing_harbor_unknown",
+        ),
+        (
+            ROUTED_TARGET.replace(
+                '{ kubernetes = "kubernetes", harbor', "{ kubernetes = 5, harbor", 1
+            ),
+            {},
+            "gitlab_routing_kubernetes_unknown",
+        ),
+        (
+            'gitlab_routing = "x"\n' + PRIVATE_TABLE + KUBERNETES_TABLE,
+            {},
+            "gitlab_routing must be a TOML table",
+        ),
+        (ROUTED_TARGET, {"gitlab": "bogus"}, "gitlab_selector_unknown"),
+        (
+            SINGLE_ROUTING + KUBERNETES_TABLE,
+            {},
+            "target is missing required authority tables: gitlab",
+        ),
+        (
+            ROUTED_TARGET + '[gitlab.com]\nurl = "https://public.example.test"\n',
+            {},
+            (
+                "[gitlab.com] is table com nested in [gitlab]: TOML reads a dot in a "
+                "table name as nesting; name a GitLab [gitlab_private] or "
+                "[gitlab_public] and add [gitlab_routing]"
+            ),
+        ),
+        (
+            ROUTED_TARGET
+            + '[gitlab_public.com]\nurl = "https://public.example.test"\n',
+            {"gitlab": "public"},
+            (
+                "[gitlab_public.com] is table com nested in [gitlab_public]: TOML "
+                "reads a dot in a table name as nesting; name a GitLab "
+                "[gitlab_private] or [gitlab_public] and add [gitlab_routing]"
+            ),
+        ),
     ),
     ids=(
         "public-not-declared",
@@ -472,6 +521,13 @@ def test_selection_source_names_only_caller_selectors(
         "both-selectors-routed",
         "profile-on-routed-target",
         "unknown-legacy-profile",
+        "row-harbor-names-kubernetes-table",
+        "row-kubernetes-not-a-string",
+        "routing-is-not-a-table",
+        "library-selector-outside-contract",
+        "routing-without-instance-table",
+        "dotted-header-beside-instances",
+        "dotted-header-under-instance",
     ),
 )
 def test_invalid_selection_or_routing_fails_closed_with_exact_reason(
@@ -1085,3 +1141,216 @@ def test_access_check_dry_run_reports_routing_at_version_1_1(
             "gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"
         ).as_dict()
     )
+
+
+@pytest.mark.parametrize(
+    ("required", "optional", "reason"),
+    (
+        (
+            ("gitlab", "kubernetes", "harbor"),
+            (),
+            "target is missing required authority tables: harbor, kubernetes",
+        ),
+        (
+            ("gitlab", "kubernetes"),
+            (),
+            "target is missing required authority tables: kubernetes",
+        ),
+        (("gitlab",), ("kubernetes", "harbor"), None),
+    ),
+    ids=("runner-deploy-surfaces", "runner-delete-surfaces", "optional-surfaces"),
+)
+def test_required_routed_authority_reads_the_route_pairing(
+    target_path: Path,
+    required: tuple[str, ...],
+    optional: tuple[str, ...],
+    reason: Optional[str],
+) -> None:
+    """Block a required Kubernetes or Harbor table the selected route does not pair.
+
+    :param target_path: Path receiving a target whose public row pairs nothing.
+    :param required: Authorities the command requires.
+    :param optional: Authorities read only when configured.
+    :param reason: Exact diagnostic, or None when the load succeeds.
+    :returns: None; assertions verify fail-closed pairing and optional reads.
+    """
+    target_path.write_text(
+        ROUTED_TARGET.replace(
+            'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }',
+            "gitlab_public = {}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    load = functools.partial(
+        TARGET.load_target,
+        target_path,
+        required_surfaces=required,
+        optional_surfaces=optional,
+        gitlab="public",
+    )
+
+    if reason is None:
+        target = load()
+        assert target.routing == _route(
+            "gitlab_public", None, None, "argv:--gitlab=public"
+        )
+        assert target.kubernetes is not None and target.harbor is None
+        return
+    with pytest.raises(TARGET.TargetError) as error:
+        load()
+    assert str(error.value) == reason
+
+
+def test_legacy_route_reads_the_authority_tables_directly(target_path: Path) -> None:
+    """Keep the legacy shape reading [kubernetes] and [harbor] without a route.
+
+    :param target_path: Path receiving the issue #133 shape plus both tables.
+    :returns: None; assertions verify both tables load.
+    """
+    target_path.write_text(LEGACY_TARGET + HARBOR_TABLE, encoding="utf-8")
+
+    target = TARGET.load_target(
+        target_path, required_surfaces=("gitlab", "kubernetes", "harbor")
+    )
+
+    assert target.routing == _route("gitlab", None, None, "legacy")
+    assert target.kubernetes.context == "unit-context"
+    assert target.harbor.project == "unit"
+
+
+RUNNER_IMAGE: Final[str] = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("row", "status", "reason"),
+    (
+        ('{ kubernetes = "kubernetes", harbor = "harbor" }', "DRY_RUN", None),
+        (
+            "{}",
+            "BLOCKED",
+            "target is missing required authority tables: harbor, kubernetes",
+        ),
+    ),
+    ids=("paired", "unpaired"),
+)
+def test_runner_manager_plan_uses_the_selected_route(
+    target_path: Path, row: str, status: str, reason: Optional[str]
+) -> None:
+    """Plan a runner deploy only into the cluster and registry the route pairs.
+
+    :param target_path: Path receiving the routed target.
+    :param row: ``[gitlab_routing].gitlab_public`` value.
+    :param status: Expected result status.
+    :param reason: Expected error reason for the unpaired row, otherwise None.
+    :returns: None; assertions verify the plan, the routing object and the schema.
+    """
+    target_path.write_text(
+        ROUTED_TARGET.replace(
+            'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }',
+            f"gitlab_public = {row}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    token = target_path.parent / "runner.token"
+    token.write_text("unit-runner-token\n", encoding="utf-8")
+
+    result = run_script(
+        "gitlab_runner_manager.py",
+        "deploy",
+        "--dry-run",
+        "--json",
+        "--gitlab",
+        "public",
+        "--image",
+        RUNNER_IMAGE,
+        "--node",
+        "worker-a",
+        "--token-file",
+        token,
+        "--runner-id",
+        "73",
+        env={BINDING.TARGET_ENV: str(target_path)},
+    )
+    data = parse_json_output(result)
+
+    assert data["status"] == status
+    if reason is not None:
+        assert result.returncode == 2
+        assert [error["reason"] for error in data["errors"]] == [reason]
+        assert "routing" not in data
+        return
+    assert result.returncode == 0, result.stderr
+    assert data["schema_version"] == "1.1"
+    assert (
+        data["routing"]
+        == _route(
+            "gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"
+        ).as_dict()
+    )
+    SCHEMA.validate_specification(data, "results/toolbox-workflow.schema.json")
+
+
+def test_chain_hands_its_selection_to_the_nested_runner_manager() -> None:
+    """Give the chain's runner manager the caller's selection, so it reads the same route.
+
+    :returns: None; assertions verify the nested manager arguments.
+    """
+    callbacks = import_script_module(
+        "lib.python.core.kubernetes.image_build_chain.callbacks"
+    )
+    chain_args = argparse.Namespace(
+        gitlab="public",
+        gitlab_profile=None,
+        runner_description="unit-runner",
+        runner_label=["unit"],
+        namespace=None,
+    )
+    action = SimpleNamespace(
+        args=chain_args,
+        runner_kind="project",
+        runner_reference="team/app",
+        manager_scope=SimpleNamespace(run_id="unit-run"),
+    )
+    state = SimpleNamespace(
+        created_runner_id=73,
+        selected_node="worker-a",
+        published_image=RUNNER_IMAGE,
+        token_path=Path("/unit/runner.token"),
+    )
+
+    manager_args = callbacks._manager_args(action, state)
+
+    assert TARGET.GitLabSelection.from_args(manager_args) == TARGET.GitLabSelection(
+        selector="public"
+    )
+    assert manager_args.kind == "gitlab_runner_manager"
+
+
+def test_dry_run_deprecation_event_does_not_write_the_log_file(
+    target_path: Path,
+) -> None:
+    """Follow the command's dry-run rule: diagnostics on stderr, no log file.
+
+    :param target_path: Path receiving the issue #133 legacy shape.
+    :returns: None; assertions verify stderr carries the event and no file exists.
+    """
+    target_path.write_text(ISSUE_TARGET, encoding="utf-8")
+    log_file = target_path.parent / "ci-api.log"
+
+    result = run_script(
+        "ci-api",
+        "check",
+        "--provider",
+        "gitlab",
+        "--dry-run",
+        "--json",
+        "--log-file",
+        log_file,
+        env={BINDING.TARGET_ENV: str(target_path)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.count(DEPRECATION_EVENT) == 1
+    assert not log_file.exists()

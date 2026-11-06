@@ -111,16 +111,20 @@ class FakeAPI:
 
 
 @pytest.mark.parametrize(
-    "gitlab_selector", (None, "public"), ids=("default-instance", "public-instance")
+    ("gitlab_selector", "gitlab_profile"),
+    ((None, None), ("public", None), (None, "public")),
+    ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_shared_setup_resolves_binds_and_reads_access_once(
     monkeypatch: pytest.MonkeyPatch,
     gitlab_selector: Optional[str],
+    gitlab_profile: Optional[str],
 ) -> None:
     """Reuse one target and bound session through resolution, bind, and read.
 
     :param monkeypatch: Pytest fixture replacing each shared setup operation.
     :param gitlab_selector: Default or ``--gitlab`` instance forwarded to resolution.
+    :param gitlab_profile: Deprecated ``--gitlab-profile`` name forwarded unchanged.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -152,7 +156,7 @@ def test_shared_setup_resolves_binds_and_reads_access_once(
         "target": {"id": 42, "full_path": "team/repo"},
     }
     observed: MutableSequence[tuple[str, str]] = []
-    selection = TARGET.GitLabSelection(selector=gitlab_selector)
+    selection = TARGET.GitLabSelection(gitlab_selector, gitlab_profile)
 
     def resolve(
         explicit_target: Optional[str],
@@ -257,18 +261,22 @@ def test_shared_setup_resolves_binds_and_reads_access_once(
 
 
 @pytest.mark.parametrize(
-    "gitlab_selector", (None, "public"), ids=("default-instance", "public-instance")
+    ("gitlab_selector", "gitlab_profile"),
+    ((None, None), ("public", None), (None, "public")),
+    ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     gitlab_selector: Optional[str],
+    gitlab_profile: Optional[str],
 ) -> None:
     """Delegate the live access CLI to shared setup without rewriting receipt.
 
     :param monkeypatch: Pytest fixture replacing shared setup.
     :param capsys: Pytest fixture capturing JSON CLI output.
     :param gitlab_selector: Default or ``--gitlab`` instance selected by CLI arguments.
+    :param gitlab_profile: Deprecated ``--gitlab-profile`` name selected by CLI arguments.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -339,6 +347,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
             "--revision",
             REVISION,
             *(["--gitlab", gitlab_selector] if gitlab_selector else []),
+            *(["--gitlab-profile", gitlab_profile] if gitlab_profile else []),
             "--json",
         ]
     )
@@ -354,7 +363,9 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
                 "project": "team/repo",
                 "group": None,
                 "revision": REVISION,
-                "gitlab_selection": TARGET.GitLabSelection(selector=gitlab_selector),
+                "gitlab_selection": TARGET.GitLabSelection(
+                    gitlab_selector, gitlab_profile
+                ),
             },
         )
     ]

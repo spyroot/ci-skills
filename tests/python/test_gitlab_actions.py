@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from lib.python.core.gitlab.gitlab_actions import ActionPlan
     from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
     from lib.python.core.json_types import JSONObject, JSONValue
+    from lib.python.core.target import GitLabSelection
 
 
 def test_committed_runner_tag_receipts_match_live_contract() -> None:
@@ -184,13 +185,13 @@ def _live_action_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     plan: ActionPlan,
     *,
-    expected_selector: Optional[str] = None,
+    expected_selection: Optional[GitLabSelection] = None,
 ) -> tuple[BoundGitLabSession, JSONObject]:
     """Bind a selected plan to deterministic access doubles.
 
     :param monkeypatch: Pytest fixture replacing target, bind, API, and access.
     :param plan: Action plan whose origin and scope seed the session.
-    :param expected_selector: Exact ``--gitlab`` instance, or None, required at resolution.
+    :param expected_selection: Exact selection required at resolution; None means empty.
     :returns: Bound fixture session and passing access receipt.
     """
     session = _bound_session(
@@ -218,7 +219,7 @@ def _live_action_dependencies(
         :returns: Fixture target and nonsecret source marker.
         """
         assert dry_run is False
-        assert gitlab_selection == TARGET.GitLabSelection(selector=expected_selector)
+        assert gitlab_selection == (expected_selection or TARGET.GitLabSelection())
         return object(), "unit"
 
     monkeypatch.setattr(GITLAB_ACTION, "resolve_gitlab_target", resolve)
@@ -320,7 +321,9 @@ class FakeAPI:
     ),
 )
 @pytest.mark.parametrize(
-    "gitlab_selector", (None, "public"), ids=("default-instance", "public-instance")
+    ("gitlab_selector", "gitlab_profile"),
+    ((None, None), ("public", None), (None, "public")),
+    ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     monkeypatch: pytest.MonkeyPatch,
@@ -329,6 +332,7 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     arguments: Sequence[str],
     operation: str,
     gitlab_selector: Optional[str],
+    gitlab_profile: Optional[str],
 ) -> None:
     """Apply non-runner callbacks without a runner-only live-plan gate.
 
@@ -338,11 +342,16 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     :param arguments: CLI subcommand arguments for that kind.
     :param operation: Operation expected in the final report.
     :param gitlab_selector: Default or ``--gitlab`` instance forwarded by every action CLI.
+    :param gitlab_profile: Deprecated ``--gitlab-profile`` name forwarded by every action CLI.
 
     :returns: None; assertions in the body validate the regression.
     """
     plan = _plan(kind, operation, {"title": "unit"})
-    _live_action_dependencies(monkeypatch, plan, expected_selector=gitlab_selector)
+    _live_action_dependencies(
+        monkeypatch,
+        plan,
+        expected_selection=TARGET.GitLabSelection(gitlab_selector, gitlab_profile),
+    )
     invoked: MutableSequence[str] = []
 
     def complete(*_args: str) -> JSONObject:
@@ -364,6 +373,7 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
         [
             *arguments,
             *(["--gitlab", gitlab_selector] if gitlab_selector else []),
+            *(["--gitlab-profile", gitlab_profile] if gitlab_profile else []),
             "--apply",
             "--confirm-plan",
             plan.digest,

@@ -58,7 +58,8 @@ repository = "owner/repository"
 # The instance read when a command gets no --gitlab option.
 default = "gitlab_private"
 # One row per declared instance: the Kubernetes and Harbor tables that belong
-# to that GitLab. Omit a key when the instance has no paired table. Every
+# to that GitLab. Omit a key when the instance has no paired table; a
+# command that needs that table then blocks for this instance. Every
 # result reports the selection as its "routing" object.
 gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
 gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }
@@ -87,7 +88,9 @@ url = "https://gitlab.example.com"
 # field is inherited from [gitlab_private]. Remove this table and its
 # [gitlab_routing] row when there is only one GitLab.
 url = "https://gitlab.public.example.com"
-# token_file = "gitlab-public.token"
+# Declare a token file per instance: an ambient GITLAB_TOKEN is used for
+# whichever instance is selected when that instance has no token_file.
+token_file = "gitlab-public.token"
 
 [kubernetes]
 # The context name and the API server it must resolve to. The server is
