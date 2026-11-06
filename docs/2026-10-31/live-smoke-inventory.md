@@ -121,9 +121,11 @@ GitHub `spyroot/test-mirror-push` existed as repository `1442655376`, private, c
 branch `main` and tag `smoke-seed` at `aafe5d50bbe4a1884b7b4f86668651e9ddbd5222`; GitLab project `261` had no remote
 mirror. No queue record, scratch file, log or session transcript records its creation; it was created 16 minutes
 after the last PR #138 commit (`12ddee8`), which suggests an unrecorded #138 run (inference, not a record). Identity
-was checked at `2026-11-06T01:33:33Z`. The repository was deleted with team approval ("Yes, delete it"); by
-`2026-11-06T01:35:52Z` both `repos/spyroot/test-mirror-push` and `repositories/1442655376` returned 404, and a second
-read at `01:36:27Z` returned `RESOURCE_NOT_FOUND` for both. Evidence is kept outside the repository with the run
+was checked at `2026-11-06T01:33:33Z`; it was present. A delete from the receipt-renewal session was refused by
+that session's permission check and sent no request. By `2026-11-06T01:35:52Z` both `repos/spyroot/test-mirror-push`
+and `repositories/1442655376` returned 404, and a second read at `01:36:27Z` returned `RESOURCE_NOT_FOUND` for both.
+Who deleted it is not recorded. The team asked for it to be restored so every agent can use it; no repository with
+that name may be created before the restore. Evidence is kept outside the repository with the run
 log of issue #133.
 
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
