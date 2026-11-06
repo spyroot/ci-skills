@@ -723,7 +723,8 @@ class EndpointGate:
             )
             for name in self.contract.unpaired()
         )
-        shown = {use.path for use in template.uses()}
+        # An instance table such as [gitlab_private] shows its authority's keys.
+        shown = {self.contract.canonical_path(use.path) for use in template.uses()}
         result.findings.extend(
             Finding(Rule.UNDOCUMENTED, path, self.TEMPLATE, 0, "declared but not shown")
             for path in self.contract.paths()

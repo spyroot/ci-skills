@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Optional
 import pytest
 from conftest import SKILL_ROOT, import_script_module
 from jsonschema import Draft202012Validator
+from lib.python.core.endpoints import GITLAB_PUBLIC_SELECTOR
 from referencing import Registry, Resource
 from test_image_build_chain import (
     ABSTRACT_CALLBACKS,
@@ -40,6 +41,7 @@ from test_image_build_chain import (
 )
 
 COMMAND = import_script_module("lib.python.core.kubernetes.image_build_chain.command")
+GitLabSelection = import_script_module("lib.python.core.target").GitLabSelection
 MODEL = import_script_module("lib.python.core.kubernetes.image_build_chain.model")
 
 if TYPE_CHECKING:
@@ -226,12 +228,19 @@ def test_chain_schema_rejects_pass_without_complete_runner_delivery(
     "explicit", (False, True), ids=("default-live-plan", "explicit-dry-run")
 )
 @pytest.mark.parametrize(
-    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+    ("gitlab_selector", "gitlab_profile"),
+    (
+        (None, None),
+        (GITLAB_PUBLIC_SELECTOR, None),
+        (None, GITLAB_PUBLIC_SELECTOR),
+    ),
+    ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     explicit: bool,
+    gitlab_selector: Optional[str],
     gitlab_profile: Optional[str],
 ) -> None:
     """Plan live by default and keep explicit dry-run outside provider setup.
@@ -239,12 +248,14 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     :param monkeypatch: Fixture replacing configuration and forbidden live boundaries.
     :param capsys: Actual JSON emitter capture.
     :param explicit: Whether the caller supplies the explicit dry-run flag.
-    :param gitlab_profile: Default or named profile used in either planning mode.
+    :param gitlab_selector: Default or ``--gitlab`` instance used in either planning mode.
+    :param gitlab_profile: Deprecated profile name used in either planning mode.
     :returns: None after checking mode-specific planning and absence of mutation.
     """
     args = _args()
     args.live_plan = False
     args.dry_run = explicit
+    args.gitlab = gitlab_selector
     args.gitlab_profile = gitlab_profile
     template = _prepared_action()
     resolutions = []
@@ -257,18 +268,18 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         *,
         dry_run: bool,
         required_surfaces: Sequence[str],
-        gitlab_profile: Optional[str],
+        gitlab_selection: GitLabSelection,
     ) -> Target:
-        """Record exact mode, surfaces, and profile before returning a target.
+        """Record exact mode, surfaces, and selection before returning a target.
 
         :param _target: Unused explicit target path.
         :param _binding: Unused explicit binding path.
         :param dry_run: Offline or live planning mode selected by the command.
         :param required_surfaces: Providers required by the image-build chain.
-        :param gitlab_profile: Profile forwarded by the shared chain model.
+        :param gitlab_selection: Selection forwarded by the shared chain model.
         :returns: Finite target fixture without resolving external credentials.
         """
-        resolutions.append((dry_run, tuple(required_surfaces), gitlab_profile))
+        resolutions.append((dry_run, tuple(required_surfaces), gitlab_selection))
         return _target_fixture
 
     _target_fixture = _target()
@@ -328,7 +339,11 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     assert output["errors"] == []
     assert "cleanup" not in output
     assert resolutions == [
-        (explicit, ("gitlab", "kubernetes", "harbor"), gitlab_profile)
+        (
+            explicit,
+            ("gitlab", "kubernetes", "harbor"),
+            GitLabSelection(gitlab_selector, gitlab_profile),
+        )
     ]
     assert bindings == ([] if explicit else [_target_fixture])
     assert reads == ([] if explicit else ["live-preflight"])

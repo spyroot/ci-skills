@@ -12,7 +12,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
-from conftest import import_script_module
+from conftest import import_script_module, legacy_profile, render_target
+from lib.python.core.catalog import GITLAB_PROFILE_OPTION
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    GITLAB_LEGACY_PUBLIC_KEY,
+    KUBERNETES_AUTHORITY,
+    ROUTING_ARGV_PREFIX,
+)
 
 ACCESS = import_script_module("gitlab_access")
 CLI = import_script_module("lib.python.core.gitlab.cli")
@@ -33,21 +40,43 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ambient = project / ".ci-skills" / "target.toml"
     ambient.parent.mkdir()
     ambient.write_text(
-        '[gitlab]\nurl = "https://ambient.example.test"\nproject = "team/ambient"\n',
+        render_target(
+            {
+                GITLAB_AUTHORITY: {
+                    "url": "https://ambient.example.test",
+                    "project": "team/ambient",
+                }
+            }
+        ),
         encoding="utf-8",
     )
     bound = project / "bound-target.toml"
     bound.write_text(
-        '[gitlab]\nurl = "https://bound.example.test"\nproject = "team/bound"\n'
-        '[gitlab.com]\nurl = "https://bound.example.test"\nproject = "team/profile"\n',
+        render_target(
+            {
+                GITLAB_AUTHORITY: {
+                    "url": "https://bound.example.test",
+                    "project": "team/bound",
+                },
+                legacy_profile(GITLAB_LEGACY_PUBLIC_KEY): {
+                    "url": "https://bound.example.test",
+                    "project": "team/profile",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     binding = project / "binding.toml"
     binding.write_text(
-        'schema_version = "1.0"\n'
-        'target = "bound-target.toml"\n'
-        "[kubernetes]\n"
-        'sources = [{kind = "file", path = "missing-kubeconfig"}]\n',
+        render_target(
+            {
+                "schema_version": "1.0",
+                "target": bound.name,
+                KUBERNETES_AUTHORITY: {
+                    "sources": [{"kind": "file", "path": "missing-kubeconfig"}]
+                },
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(project)
@@ -116,7 +145,7 @@ def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
 
     project = "team/profile" if named_profile else "team/bound"
     if named_profile:
-        selector.extend(["--gitlab-profile", "com"])
+        selector.extend([GITLAB_PROFILE_OPTION, GITLAB_LEGACY_PUBLIC_KEY])
     code = _invoke(kind, selector, project=project)
     evidence = json.loads(capsys.readouterr().out)
 
@@ -124,7 +153,7 @@ def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
     assert evidence["status"] == "DRY_RUN"
     expected_source = f"{source} -> binding:{binding.resolve()}"
     if named_profile:
-        expected_source += ';argv:--gitlab-profile="com"'
+        expected_source += f';{ROUTING_ARGV_PREFIX}{GITLAB_PROFILE_OPTION}="{GITLAB_LEGACY_PUBLIC_KEY}"'
     if kind == "action":
         expected_source += ";target:gitlab.project"
     assert evidence["target_source"] == expected_source

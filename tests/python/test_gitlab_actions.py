@@ -18,10 +18,25 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
-from conftest import import_script_module, load_module
+from conftest import (
+    import_script_module,
+    load_module,
+    paired,
+    routing_table,
+    write_target,
+)
 from jsonschema import Draft202012Validator
+from lib.python.core.catalog import GITLAB_PROFILE_OPTION, GITLAB_TARGET_OPTION
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    GITLAB_DEPRECATION_EVENT,
+    GITLAB_PRIVATE_TABLE,
+    GITLAB_PUBLIC_SELECTOR,
+    GITLAB_ROUTING_TABLE,
+)
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
+TARGET = import_script_module("lib.python.core.target")
 GITLAB_ACTION = import_script_module("lib.python.core.gitlab.gitlab_action")
 GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 CALLBACKS = import_script_module("lib.python.core.abstract.callback")
@@ -62,6 +77,7 @@ if TYPE_CHECKING:
     from lib.python.core.gitlab.gitlab_actions import ActionPlan
     from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
     from lib.python.core.json_types import JSONObject, JSONValue
+    from lib.python.core.target import GitLabSelection
 
 
 def test_committed_runner_tag_receipts_match_live_contract() -> None:
@@ -183,13 +199,13 @@ def _live_action_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     plan: ActionPlan,
     *,
-    expected_profile: Optional[str] = None,
+    expected_selection: Optional[GitLabSelection] = None,
 ) -> tuple[BoundGitLabSession, JSONObject]:
     """Bind a selected plan to deterministic access doubles.
 
     :param monkeypatch: Pytest fixture replacing target, bind, API, and access.
     :param plan: Action plan whose origin and scope seed the session.
-    :param expected_profile: Exact default or named profile required at resolution.
+    :param expected_selection: Exact selection required at resolution; None means empty.
     :returns: Bound fixture session and passing access receipt.
     """
     session = _bound_session(
@@ -206,18 +222,18 @@ def _live_action_dependencies(
         _binding: Optional[str],
         *,
         dry_run: bool,
-        gitlab_profile: Optional[str],
+        gitlab_selection: TARGET.GitLabSelection,
     ) -> tuple[object, str]:
-        """Require exact profile forwarding before returning a fixture target.
+        """Require exact selection forwarding before returning a fixture target.
 
         :param _target: Unused explicit target path.
         :param _binding: Unused explicit project-binding path.
         :param dry_run: Live action resolution must remain credential-aware.
-        :param gitlab_profile: Profile forwarded by the action CLI.
+        :param gitlab_selection: GitLab selection forwarded by the action CLI.
         :returns: Fixture target and nonsecret source marker.
         """
         assert dry_run is False
-        assert gitlab_profile == expected_profile
+        assert gitlab_selection == (expected_selection or TARGET.GitLabSelection())
         return object(), "unit"
 
     monkeypatch.setattr(GITLAB_ACTION, "resolve_gitlab_target", resolve)
@@ -319,7 +335,13 @@ class FakeAPI:
     ),
 )
 @pytest.mark.parametrize(
-    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+    ("gitlab_selector", "gitlab_profile"),
+    (
+        (None, None),
+        (GITLAB_PUBLIC_SELECTOR, None),
+        (None, GITLAB_PUBLIC_SELECTOR),
+    ),
+    ids=("default-instance", "public-instance", "legacy-profile"),
 )
 def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     monkeypatch: pytest.MonkeyPatch,
@@ -327,6 +349,7 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     kind: str,
     arguments: Sequence[str],
     operation: str,
+    gitlab_selector: Optional[str],
     gitlab_profile: Optional[str],
 ) -> None:
     """Apply non-runner callbacks without a runner-only live-plan gate.
@@ -336,12 +359,17 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     :param kind: Issue, wiki, or milestone command selected by the case.
     :param arguments: CLI subcommand arguments for that kind.
     :param operation: Operation expected in the final report.
-    :param gitlab_profile: Default or named profile forwarded by every action CLI.
+    :param gitlab_selector: Default or ``--gitlab`` instance forwarded by every action CLI.
+    :param gitlab_profile: Deprecated ``--gitlab-profile`` name forwarded by every action CLI.
 
     :returns: None; assertions in the body validate the regression.
     """
     plan = _plan(kind, operation, {"title": "unit"})
-    _live_action_dependencies(monkeypatch, plan, expected_profile=gitlab_profile)
+    _live_action_dependencies(
+        monkeypatch,
+        plan,
+        expected_selection=TARGET.GitLabSelection(gitlab_selector, gitlab_profile),
+    )
     invoked: MutableSequence[str] = []
 
     def complete(*_args: str) -> JSONObject:
@@ -362,7 +390,8 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     result = ENTRYPOINTS[kind].main(
         [
             *arguments,
-            *(["--gitlab-profile", gitlab_profile] if gitlab_profile else []),
+            *([GITLAB_TARGET_OPTION, gitlab_selector] if gitlab_selector else []),
+            *([GITLAB_PROFILE_OPTION, gitlab_profile] if gitlab_profile else []),
             "--apply",
             "--confirm-plan",
             plan.digest,
@@ -1633,7 +1662,7 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
     monkeypatch.setattr(
         GITLAB_ACTION,
         "resolve_gitlab_target",
-        lambda _target, _binding, *, dry_run, gitlab_profile: (object(), "test"),
+        lambda _target, _binding, *, dry_run, gitlab_selection: (object(), "test"),
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
@@ -1694,7 +1723,7 @@ def test_action_access_failure_preserves_the_failed_subcheck(
     monkeypatch.setattr(
         GITLAB_ACTION,
         "resolve_gitlab_target",
-        lambda _target, _binding, *, dry_run, gitlab_profile: (object(), "test"),
+        lambda _target, _binding, *, dry_run, gitlab_selection: (object(), "test"),
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     session = _bound_session(plan)
@@ -1759,7 +1788,7 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
     monkeypatch.setattr(
         GITLAB_ACTION,
         "resolve_gitlab_target",
-        lambda _target, _binding, *, dry_run, gitlab_profile: (object(), "test"),
+        lambda _target, _binding, *, dry_run, gitlab_selection: (object(), "test"),
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
@@ -1938,22 +1967,46 @@ def test_runner_mode_errors_remain_stable_after_shared_validation(
         GITLAB_ACTION._workflow_mode(args)
 
 
+# GitLab fields of the planned issue target, routed or legacy.
+PLAN_GITLAB: Final = {"url": "https://gitlab.example.test", "project": "unit/repo"}
+
+
+@pytest.mark.parametrize(
+    ("tables", "deprecations"),
+    (
+        (
+            {
+                GITLAB_ROUTING_TABLE: routing_table(
+                    {GITLAB_PRIVATE_TABLE: paired()}, default=GITLAB_PRIVATE_TABLE
+                ),
+                GITLAB_PRIVATE_TABLE: dict(PLAN_GITLAB),
+            },
+            0,
+        ),
+        ({GITLAB_AUTHORITY: dict(PLAN_GITLAB)}, 1),
+    ),
+    ids=("routed", "legacy"),
+)
 def test_action_plan_json_diagnostic_is_separate_from_machine_result(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    tables: Mapping[str, object],
+    deprecations: int,
 ) -> None:
     """Keep JSON diagnostics on stderr separate from plan JSON on stdout.
+
+    Every stderr line is one JSON diagnostic with the caller's run ID; a legacy
+    target adds exactly one deprecation event in that format.
 
     :param monkeypatch: Pytest fixture selecting the target by environment.
     :param tmp_path: Directory receiving the selected project target.
     :param capsys: Pytest fixture capturing both output streams.
-
+    :param tables: Routed or legacy target composed by the conftest builder.
+    :param deprecations: Expected count of deprecation events.
     :returns: None; assertions in the body validate the regression.
     """
-    target = tmp_path / "target.toml"
-    target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
-        encoding="utf-8",
-    )
+    target = write_target(tmp_path / "target.toml", tables)
     monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
     result = ISSUE.main(
         [
@@ -1969,9 +2022,12 @@ def test_action_plan_json_diagnostic_is_separate_from_machine_result(
     )
     emitted = capsys.readouterr()
     report = json.loads(emitted.out)
-    diagnostic = json.loads(emitted.err)
+    diagnostics = [json.loads(line) for line in emitted.err.splitlines()]
     assert result == 0
     assert report["status"] == "DRY_RUN"
-    assert diagnostic["run_id"] == "unit-run"
+    assert {diagnostic["run_id"] for diagnostic in diagnostics} == {"unit-run"}
+    events = [diagnostic["event"] for diagnostic in diagnostics]
+    assert events.count(GITLAB_DEPRECATION_EVENT) == deprecations
+    (diagnostic,) = (item for item in diagnostics if item["event"] == "result")
     assert diagnostic["mode"] == "dry_run"
     assert diagnostic["result"] == "DRY_RUN"

@@ -26,7 +26,21 @@ from typing import TYPE_CHECKING, Final
 import jsonschema
 import pytest
 import yaml
-from conftest import REPO_ROOT, git, import_script_module, load_module
+from conftest import (
+    REPO_ROOT,
+    git,
+    import_script_module,
+    load_module,
+    paired,
+    render_target,
+    routing_table,
+)
+from lib.python.core.endpoints import (
+    GITLAB_PRIVATE_TABLE,
+    GITLAB_PUBLIC_TABLE,
+    GITLAB_ROUTED_AUTHORITIES,
+    GITLAB_ROUTING_TABLE,
+)
 
 ENDPOINTS = import_script_module("lib.python.core.endpoints")
 CATALOG = import_script_module("lib.python.core.catalog")
@@ -40,6 +54,26 @@ SCHEMA = json.loads(
 )
 TEMPLATE = "target.toml.template"
 UNKNOWN_AUTHORITY = "unregistered_authority"
+ROUTED_EXAMPLE: Final[str] = render_target(
+    {
+        GITLAB_ROUTING_TABLE: routing_table(
+            {
+                GITLAB_PRIVATE_TABLE: paired(*GITLAB_ROUTED_AUTHORITIES),
+                GITLAB_PUBLIC_TABLE: paired(),
+            },
+            default=GITLAB_PRIVATE_TABLE,
+        ),
+        GITLAB_PRIVATE_TABLE: {
+            "url": "https://gitlab.example.test",
+            "token_file": "gitlab-private.token",
+        },
+        GITLAB_PUBLIC_TABLE: {
+            "url": "https://gitlab.public.example.test",
+            "token_file": "gitlab-public.token",
+            "runner_id": 7,
+        },
+    }
+)
 PROFILE_EXAMPLE: Final[str] = (
     '[gitlab."public.test"]\n'
     'url = "https://public.example.test"\n'
@@ -188,6 +222,24 @@ def test_the_contract_accepts_exactly_the_keys_the_parser_accepted() -> None:
         "directory",
         "host_path",
     }
+
+
+def test_routed_example_passes_the_endpoint_gate(repo: Path) -> None:
+    """Accept the documented routed shape, inline routing rows included.
+
+    :param repo: Existing isolated repository fixture with the real documents.
+    :returns: None; assertions verify every path is declared and the gate passes.
+    """
+    uses = GATE_LIB.TargetDocument("routed.toml", ROUTED_EXAMPLE).uses()
+    assert all(
+        ENDPOINTS.TARGET_CONTRACT.declares(use.path, table=use.is_table) for use in uses
+    )
+    _append(repo / "README.md", f"\n```toml\n{ROUTED_EXAMPLE}```\n")
+
+    code, record = _gate(repo)
+
+    assert code == 0
+    assert record["status"] == "PASS", record["findings"]
 
 
 def test_the_authorities_come_from_the_contract() -> None:
@@ -564,8 +616,10 @@ def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
     :returns: None; assertions in the body validate the regression.
     """
     template = repo / TEMPLATE
-    lines = template.read_text().splitlines()
-    index = lines.index('url = "https://gitlab.example.com"')
+    text = template.read_text()
+    lines = text.splitlines()
+    url = tomllib.loads(text)[GITLAB_PRIVATE_TABLE]["url"]
+    index = lines.index(f'url = "{url}"')
     lines.insert(index + 1, 'namespace = "ci"')
     template.write_text("\n".join(lines) + "\n")
     code, record = _gate(repo)
@@ -573,7 +627,7 @@ def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
     assert record["findings"] == [
         {
             "rule": "undeclared",
-            "path": "gitlab.namespace",
+            "path": f"{GITLAB_PRIVATE_TABLE}.namespace",
             "source": TEMPLATE,
             "line": index + 2,
             "detail": "not an endpoint or access key of the target contract",
@@ -694,7 +748,7 @@ def test_a_value_key_new_since_the_base_fails(repo: Path) -> None:
     template.write_text(current)
     code, record = _gate(repo, "--base", "HEAD")
     assert code == 1
-    assert _rules(record) == [("value_introduced", "gitlab.runner_id")]
+    assert _rules(record) == [("value_introduced", f"{GITLAB_PRIVATE_TABLE}.runner_id")]
 
 
 def test_a_value_key_present_at_the_base_is_listed_not_failed(repo: Path) -> None:

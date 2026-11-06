@@ -173,6 +173,51 @@ def test_each_capability_brings_its_whole_tier(script: Path) -> None:
         )
 
 
+def _option_action(
+    parser: argparse.ArgumentParser, option: str
+) -> list[argparse.Action]:
+    """Find every action accepting one long option in a parser and its subcommands.
+
+    :param parser: Real command parser.
+    :param option: Long option spelling.
+    :returns: Matching actions in traversal order.
+    """
+    found: list[argparse.Action] = []
+    for action in parser._actions:
+        if option in action.option_strings:
+            found.append(action)
+        if isinstance(action, argparse._SubParsersAction):
+            for subparser in action.choices.values():
+                found.extend(_option_action(subparser, option))
+    return found
+
+
+def test_every_gitlab_command_offers_the_instance_selector() -> None:
+    """Offer ``--gitlab private|public`` and the deprecated alias together.
+
+    :returns: None; assertions verify the catalogue and each real parser agree.
+    """
+    endpoints = import_script_module("lib.python.core.endpoints")
+    selecting = [
+        script
+        for script in CATALOG.COMMANDS
+        if CATALOG.supports_gitlab_selection(script)
+    ]
+    assert "gitlab_issue.py" in selecting
+    assert "access_check.py" in selecting
+    for script in selecting:
+        options = CATALOG.options_for(script)
+        assert CATALOG.GITLAB_TARGET_OPTION in options, script
+        assert CATALOG.GITLAB_PROFILE_OPTION in options, script
+        actions = _option_action(_parser_for(script), CATALOG.GITLAB_TARGET_OPTION)
+        assert actions, script
+        for action in actions:
+            assert tuple(action.choices) == tuple(endpoints.GITLAB_SELECTORS), script
+            assert action.default is None, script
+    for script in set(CATALOG.COMMANDS) - set(selecting):
+        assert CATALOG.GITLAB_TARGET_OPTION not in CATALOG.options_for(script), script
+
+
 def test_a_command_without_a_capability_does_not_offer_its_options() -> None:
     """Otherwise the tiers carry no information.
     :returns: None; assertions in the body validate the regression.

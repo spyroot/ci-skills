@@ -13,7 +13,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "enum": ["1.0", "1.1"]
     },
     "kind": {
       "const": "image_build_readiness"
@@ -45,6 +45,9 @@
     },
     "target_source": {
       "type": "string"
+    },
+    "routing": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/routing"
     },
     "filters": {
       "type": "object"

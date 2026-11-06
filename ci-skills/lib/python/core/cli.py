@@ -28,12 +28,15 @@ from lib.python.core.catalog import (
     DEFAULT_AUTHORITIES,
     GITLAB_PROFILE_HELP,
     GITLAB_PROFILE_OPTION,
+    GITLAB_TARGET_HELP,
+    GITLAB_TARGET_OPTION,
     PROJECT_DIR,
     TARGET_FILENAME,
     describe,
     missing_required_options,
-    supports_gitlab_profile,
+    supports_gitlab_selection,
 )
+from lib.python.core.endpoints import GITLAB_SELECTORS
 from lib.python.core.help import CommandHelp, CommandHelpFormatter
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json_object
 from lib.python.core.logging import add_log_arguments, log_event
@@ -43,6 +46,7 @@ from lib.python.core.project_binding import resolve_target_file
 from lib.python.core.report import emit
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import (
+    GitLabSelection,
     Target,
     TargetError,
 )
@@ -176,12 +180,15 @@ class MachineArgumentParser(TrackedArgumentParser):
         self.exit(2)
 
 
-def add_gitlab_profile_argument(result: argparse.ArgumentParser) -> None:
-    """Expose the shared explicit GitLab profile selector.
+def add_gitlab_selection_arguments(result: argparse.ArgumentParser) -> None:
+    """Expose the GitLab instance selector and its deprecated profile alias.
 
     :param result: Parser for a command that supports GitLab configuration.
-    :returns: None after adding the catalogue-declared selector.
+    :returns: None after adding the catalogue-declared selectors.
     """
+    result.add_argument(
+        GITLAB_TARGET_OPTION, choices=tuple(GITLAB_SELECTORS), help=GITLAB_TARGET_HELP
+    )
     result.add_argument(GITLAB_PROFILE_OPTION, metavar="NAME", help=GITLAB_PROFILE_HELP)
 
 
@@ -221,9 +228,9 @@ def parser(
     if (
         kind is not None
         and kind in COMMAND_BY_KIND
-        and supports_gitlab_profile(COMMAND_BY_KIND[kind])
+        and supports_gitlab_selection(COMMAND_BY_KIND[kind])
     ):
-        add_gitlab_profile_argument(result)
+        add_gitlab_selection_arguments(result)
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
     modes.add_argument("--yaml", action="store_true", help="print versioned YAML")
@@ -428,7 +435,7 @@ def _diagnostic_target(args: argparse.Namespace, script: Optional[str]) -> Targe
         dry_run=args.dry_run,
         required_surfaces=required,
         optional_surfaces=optional,
-        gitlab_profile=getattr(args, "gitlab_profile", None),
+        gitlab_selection=GitLabSelection.from_args(args),
     )
     if not args.dry_run:
         target = bind_sources(target, revision=getattr(args, "revision", None))

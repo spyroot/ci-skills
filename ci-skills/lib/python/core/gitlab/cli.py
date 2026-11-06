@@ -39,6 +39,7 @@ from lib.python.core.project_binding import resolve_target as resolve_project_ta
 from lib.python.core.report import emit, report
 from lib.python.core.target import (
     GitLabOperationTarget,
+    GitLabSelection,
     TargetError,
     select_gitlab_reference,
 )
@@ -55,14 +56,14 @@ def resolve_gitlab_target(
     explicit_binding: Optional[str],
     *,
     dry_run: bool = False,
-    gitlab_profile: Optional[str] = None,
+    gitlab_selection: Optional[GitLabSelection] = None,
 ) -> tuple[GitLabOperationTarget, str]:
     """Resolve GitLab settings from a target file or project binding.
 
     :param explicit_target: Internal target-file override, or ``None``.
     :param explicit_binding: Project-binding override, or ``None``.
     :param dry_run: Whether binding resolution may omit live credential-file checks.
-    :param gitlab_profile: Explicit named GitLab profile, or the flat default.
+    :param gitlab_selection: Caller's GitLab choice, or ``None`` for the routing default.
     :returns: GitLab operation target and reportable selection source.
     :raises TargetError: If configuration, GitLab settings, or source identity
         cannot be resolved.
@@ -72,7 +73,7 @@ def resolve_gitlab_target(
         explicit_binding,
         dry_run=dry_run,
         required_surfaces=("gitlab",),
-        gitlab_profile=gitlab_profile,
+        gitlab_selection=gitlab_selection,
     )
     if selected.gitlab is None or selected.source_file is None:
         raise TargetError("gitlab_target_unresolved")
@@ -95,7 +96,7 @@ def setup_gitlab_operation(
     group: Optional[str],
     revision: Optional[str],
     api_client: Optional[GlabAPIClient] = None,
-    gitlab_profile: Optional[str] = None,
+    gitlab_selection: Optional[GitLabSelection] = None,
 ) -> tuple[BoundGitLabSession, JSONObject]:
     """Bind a live GitLab target and return its existing access read-back.
 
@@ -105,7 +106,7 @@ def setup_gitlab_operation(
     :param group: Optional group path or numeric ID override.
     :param revision: Optional claimed source revision of the installed skill.
     :param api_client: Existing API client, or the access check's default client.
-    :param gitlab_profile: Explicit named GitLab profile, or the flat default.
+    :param gitlab_selection: Caller's GitLab choice, or ``None`` for the routing default.
     :returns: The same bound session used for access and its receipt, including
         a BLOCKED receipt when provider read-back does not prove access.
     :raises Exception: The original setup failure, carrying its target,
@@ -117,7 +118,7 @@ def setup_gitlab_operation(
             explicit_target,
             explicit_binding,
             dry_run=False,
-            gitlab_profile=gitlab_profile,
+            gitlab_selection=gitlab_selection,
         )
         target_kind, reference = select_gitlab_reference(
             target, project=project, group=group
@@ -235,7 +236,7 @@ def execute_gitlab_job(args: argparse.Namespace) -> int:
             args.target,
             args.binding,
             dry_run=args.dry_run,
-            gitlab_profile=getattr(args, "gitlab_profile", None),
+            gitlab_selection=GitLabSelection.from_args(args),
         )
         source = "arguments"
         project, _job_id = gitlab_job_reference(args.job_url, target.gitlab.host)
@@ -306,7 +307,7 @@ def execute_gitlab_job_list(args: argparse.Namespace) -> int:
             args.target,
             args.binding,
             dry_run=args.dry_run,
-            gitlab_profile=getattr(args, "gitlab_profile", None),
+            gitlab_selection=GitLabSelection.from_args(args),
         )
         selected_kind, project = select_gitlab_reference(target, project=args.project)
         if selected_kind != "project":

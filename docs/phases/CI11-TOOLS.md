@@ -530,7 +530,8 @@ by the ISO `delete` and temporary Pods). `mutates` is declared per verb in the
 catalog (CI10-PHASES, Modify), so read and write verbs share one main.
 
 Per-tool interface beyond the universal tier and the query grammar (below),
-with config keys and concurrency:
+with config keys and concurrency. `[gitlab]` below means the selected GitLab instance table; see
+[GitLab private and public targets](../../ci-skills/references/access.md#gitlab-private-and-public-targets).
 
 - `gitlab_job.py get|watch|logs`: `--job-url` (`get` also `--project --job-id`);
   `watch` the grammar's `--interval`, `--timeout`; `logs`

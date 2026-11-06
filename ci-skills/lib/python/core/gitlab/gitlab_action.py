@@ -45,7 +45,11 @@ from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabServ
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json
 from lib.python.core.report import emit_result
 from lib.python.core.runtime import sanitize
-from lib.python.core.target import GitLabOperationTarget, TargetError
+from lib.python.core.target import (
+    GitLabOperationTarget,
+    GitLabSelection,
+    TargetError,
+)
 from lib.python.sys.status import DRY_RUN, PARTIAL, PASS, PLANNED
 
 WorkflowMode = Union[ActionMode, Literal["describe"]]
@@ -485,7 +489,7 @@ class GitLabWorkflow:
             args.target,
             args.binding,
             dry_run=self.mode == "offline",
-            gitlab_profile=getattr(args, "gitlab_profile", None),
+            gitlab_selection=GitLabSelection.from_args(args),
         )
         self.target: GitLabOperationTarget = target
         self.state.plan = make_plan(args.kind, args, target, source)

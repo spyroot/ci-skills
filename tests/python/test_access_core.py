@@ -19,6 +19,7 @@ import pytest
 from conftest import import_script_module
 
 TEST_REVISION = "a" * 40
+GitLabSelection = import_script_module("lib.python.core.target").GitLabSelection
 
 
 if TYPE_CHECKING:
@@ -100,25 +101,27 @@ def _load_target(
     *,
     required_surfaces: Optional[tuple[str, ...]] = None,
     optional_surfaces: tuple[str, ...] = (),
-    gitlab_profile: Optional[str] = None,
+    gitlab_selection: Optional[GitLabSelection] = None,
 ) -> Target:
     """Load the nonsecret target with optional surface filtering.
 
     :param path: Fixture target TOML path.
     :param required_surfaces: Provider surfaces to retain during loading.
     :param optional_surfaces: Configured provider surfaces selected when present.
-    :param gitlab_profile: Selected named GitLab profile, or the legacy default.
+    :param gitlab_selection: Caller's GitLab selection, or None for the default.
     :returns: Parsed target used by access checks.
     """
+    selection = gitlab_selection or GitLabSelection()
+    keywords = {"gitlab": selection.selector, "gitlab_profile": selection.profile}
     if required_surfaces is None:
         return import_script_module("lib.python.core.target").load_target(
-            path, optional_surfaces=optional_surfaces, gitlab_profile=gitlab_profile
+            path, optional_surfaces=optional_surfaces, **keywords
         )
     return import_script_module("lib.python.core.target").load_target(
         path,
         required_surfaces=required_surfaces,
         optional_surfaces=optional_surfaces,
-        gitlab_profile=gitlab_profile,
+        **keywords,
     )
 
 
@@ -602,12 +605,12 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
     monkeypatch.setattr(
         cli,
         "resolve_project_target",
-        lambda _target, _binding, *, dry_run, required_surfaces, optional_surfaces, gitlab_profile=None: (
+        lambda _target, _binding, *, dry_run, required_surfaces, optional_surfaces, gitlab_selection=None: (
             _load_target(
                 target_file,
                 required_surfaces=required_surfaces,
                 optional_surfaces=optional_surfaces,
-                gitlab_profile=gitlab_profile,
+                gitlab_selection=gitlab_selection,
             )
         ),
     )

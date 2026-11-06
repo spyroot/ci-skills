@@ -20,7 +20,28 @@ from typing import TYPE_CHECKING, Final, Optional
 from unittest.mock import Mock, call, create_autospec
 
 import pytest
-from conftest import import_script_module
+from conftest import (
+    fixture_tables,
+    import_script_module,
+    legacy_profile,
+    paired,
+    write_target,
+)
+from lib.python.core.catalog import GITLAB_PROFILE_OPTION, GITLAB_TARGET_OPTION
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    GITLAB_LEGACY_PUBLIC_KEY,
+    GITLAB_PRIVATE_SELECTOR,
+    GITLAB_PUBLIC_SELECTOR,
+    GITLAB_PUBLIC_TABLE,
+    GITLAB_ROUTING_TABLE,
+    GITLAB_SELECTORS,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+    ROUTING_ARGV_PREFIX,
+    ROUTING_SELECTED_BY_KEY,
+)
 
 REFS: Final = import_script_module("lib.python.core.git.refs")
 REMOTE: Final = import_script_module("lib.python.core.git.remote")
@@ -114,9 +135,9 @@ OBSERVATION_FIELDS: Final[tuple[str, ...]] = (
     "source_refs",
     "destination_refs",
 )
-PROFILE_NAME: Final[str] = "public"
-ALTERNATE_PROFILE_NAME: Final[str] = "alternate"
-PROFILE_OPTION: Final[str] = "--gitlab-profile"
+PUBLIC_SELECTION: Final[str] = (
+    f"{ROUTING_ARGV_PREFIX}{GITLAB_TARGET_OPTION}={GITLAB_PUBLIC_SELECTOR}"
+)
 MINIMUM_POLL_SECONDS: Final[int] = 30
 POLL_BUDGET_SECONDS: Final[int] = 3 * MINIMUM_POLL_SECONDS
 PAIR_ACTIONS_REASON: Final[str] = "mirror_pair_actions_unverified"
@@ -475,7 +496,7 @@ def test_mirror_pair_preserves_absent_before_and_accepts_fresh_plan_digest() -> 
         (
             MIRROR_NO_OP_FILE,
             ("target_source",),
-            f"{FIXTURE_CREDENTIAL_SOURCE};argv:{PROFILE_OPTION}={json.dumps(PROFILE_NAME)}",
+            f"{FIXTURE_CREDENTIAL_SOURCE};{PUBLIC_SELECTION}",
             PAIR_IDENTITY_REASON,
         ),
         (
@@ -1066,35 +1087,99 @@ def test_command_offline_emits_valid_result_without_workflow_or_authentication(
     authentication.assert_not_called()
 
 
-def test_command_forwards_named_gitlab_profile_without_binding_credentials(
+def test_command_forwards_gitlab_selection_without_binding_credentials(
     target_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Select a caller-named source authority through the actual mirror parser.
 
-    :param target_file: Existing synthetic provider fixture extended by one profile.
+    :param target_file: Fixture path rewritten with a public instance and its row.
     :param monkeypatch: Observe real resolution and trap offline authentication.
-    :returns: None; the selected action carries the exact named profile and source.
+    :returns: None; the selected action carries the public instance and its route.
     """
-    with target_file.open("a", encoding=BODY_ENCODING) as stream:
-        stream.write(
-            f'\n[gitlab.{PROFILE_NAME}]\nurl="https://public.{SOURCE_HOST}"\n'
-            f'project="{SOURCE_PATH}"\n'
-        )
+    tables = fixture_tables()
+    tables[GITLAB_ROUTING_TABLE][GITLAB_PUBLIC_TABLE] = paired()
+    tables[GITLAB_PUBLIC_TABLE] = {
+        "url": f"https://public.{SOURCE_HOST}",
+        "project": SOURCE_PATH,
+    }
+    write_target(target_file, tables)
     monkeypatch.setenv(TARGET_ENVIRONMENT, str(target_file))
     resolution = Mock(wraps=CLI.resolve_target)
     authentication = Mock(side_effect=AssertionError("offline mode authenticated"))
     monkeypatch.setattr(CLI, "resolve_target", resolution)
     monkeypatch.setattr(CLI, "bind_gitlab_session", authentication)
     args = CLI.build_parser().parse_args(
-        [*COMMAND_SELECTION, PROFILE_OPTION, PROFILE_NAME, DRY_RUN_OPTION]
+        [
+            *COMMAND_SELECTION,
+            GITLAB_TARGET_OPTION,
+            GITLAB_PUBLIC_SELECTOR,
+            DRY_RUN_OPTION,
+        ]
     )
 
     action = CLI.MirrorCommand(args).prepare()
 
-    assert action.target.require_gitlab().profile == PROFILE_NAME
+    assert action.target.routing.as_dict() == {
+        GITLAB_AUTHORITY: GITLAB_PUBLIC_TABLE,
+        KUBERNETES_AUTHORITY: None,
+        HARBOR_AUTHORITY: None,
+        ROUTING_SELECTED_BY_KEY: PUBLIC_SELECTION,
+    }
     assert action.target.require_gitlab().host == f"public.{SOURCE_HOST}"
     assert action.intent.project == SOURCE_PATH
-    assert resolution.call_args.kwargs["gitlab_profile"] == PROFILE_NAME
+    assert resolution.call_args.kwargs["gitlab_selection"] == TARGET.GitLabSelection(
+        selector=GITLAB_PUBLIC_SELECTOR
+    )
+    authentication.assert_not_called()
+
+
+def test_command_forwards_legacy_profile_without_binding_credentials(
+    target_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep the deprecated ``--gitlab-profile`` selector working for one release.
+
+    :param target_file: Fixture path rewritten to the issue #133 legacy shape.
+    :param monkeypatch: Observe real resolution and trap offline authentication.
+    :returns: None; the action reads the named legacy table and reports its route.
+    """
+    public = legacy_profile(GITLAB_LEGACY_PUBLIC_KEY)
+    tables = fixture_tables()
+    write_target(
+        target_file,
+        {
+            GITHUB_AUTHORITY: tables[GITHUB_AUTHORITY],
+            GITLAB_AUTHORITY: {"url": f"https://{SOURCE_HOST}"},
+            public: {"url": f"https://public.{SOURCE_HOST}", "project": SOURCE_PATH},
+        },
+    )
+    monkeypatch.setenv(TARGET_ENVIRONMENT, str(target_file))
+    resolution = Mock(wraps=CLI.resolve_target)
+    authentication = Mock(side_effect=AssertionError("offline mode authenticated"))
+    monkeypatch.setattr(CLI, "resolve_target", resolution)
+    monkeypatch.setattr(CLI, "bind_gitlab_session", authentication)
+    args = CLI.build_parser().parse_args(
+        [
+            *COMMAND_SELECTION,
+            GITLAB_PROFILE_OPTION,
+            GITLAB_LEGACY_PUBLIC_KEY,
+            DRY_RUN_OPTION,
+        ]
+    )
+
+    action = CLI.MirrorCommand(args).prepare()
+
+    assert action.target.routing.as_dict() == {
+        GITLAB_AUTHORITY: public,
+        KUBERNETES_AUTHORITY: None,
+        HARBOR_AUTHORITY: None,
+        ROUTING_SELECTED_BY_KEY: (
+            f'{ROUTING_ARGV_PREFIX}{GITLAB_PROFILE_OPTION}="{GITLAB_LEGACY_PUBLIC_KEY}"'
+        ),
+    }
+    assert action.target.require_gitlab().host == f"public.{SOURCE_HOST}"
+    assert resolution.call_args.kwargs["gitlab_selection"] == TARGET.GitLabSelection(
+        profile=GITLAB_LEGACY_PUBLIC_KEY
+    )
     authentication.assert_not_called()
 
 
@@ -1751,9 +1836,11 @@ def test_same_host_profile_alias_binds_provenance_and_confirmation_digest(
     args = CLI.build_parser().parse_args([*COMMAND_SELECTION, CLI.LIVE_PLAN_OPTION])
     plans: list[WORKFLOW.MirrorPlan] = []
     sources: list[str] = []
-    for name in (PROFILE_NAME, ALTERNATE_PROFILE_NAME):
+    for name in (GITLAB_PUBLIC_SELECTOR, GITLAB_PRIVATE_SELECTOR):
+        selection = f"{ROUTING_ARGV_PREFIX}{GITLAB_TARGET_OPTION}={name}"
+        route = TARGET.GitLabRoute(GITLAB_SELECTORS[name], None, None, selection)
         target = replace(
-            selected, gitlab=replace(selected.require_gitlab(), profile=name)
+            selected, gitlab=replace(selected.require_gitlab(), route=route)
         )
         action = CLI.MirrorAction(
             target,
@@ -1769,7 +1856,7 @@ def test_same_host_profile_alias_binds_provenance_and_confirmation_digest(
         authentication.bind(command.state)
         authentication.read_config()
         assert command.state.session is not None
-        expected_source = target.selection_source(CLI.EnvelopeField.TARGET.value)
+        expected_source = f"{CLI.EnvelopeField.TARGET.value};{selection}"
         assert command.state.session.target_source == expected_source
         command.state.gitlab = source_service
         command.state.github_identity = GITHUB_SESSION.GitHubIdentitySession(

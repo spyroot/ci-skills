@@ -9,7 +9,15 @@ pods, nodes, namespaces, pipelines, milestones, merge requests -- it reads from
 the live system at run time.
 
 `TARGET_CONTRACT` is the one declaration of the allowed keys. `core/target.py`
-accepts exactly these and `catalog.AUTHORITIES` is derived from it. The
+accepts exactly these and `catalog.AUTHORITIES` is derived from it.
+
+GitLab is one authority, `gitlab`, declared by up to two instance tables:
+`[gitlab_private]` and `[gitlab_public]`. The optional `[gitlab_routing]` names
+the default instance (else `GITLAB_DEFAULT_INSTANCE`) and the Kubernetes and
+Harbor tables paired with each instance. Table
+names use `_`, never `.`: TOML reads `[gitlab.com]` as a table `com` nested in
+`[gitlab]`. The legacy `[gitlab]` table and its `[gitlab.NAME]` profiles are
+read for one release. The
 repository gate that checks the tracked documents against it,
 `gates/gate-ci-skills-endpoints.py`, lives outside the skill
 (`tools/skillkit/endpoint_gate.py`). Adding an authority (a registry, say) is one
@@ -28,9 +36,88 @@ import tomllib
 from collections.abc import Iterator, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Final, Optional, Union
 
 BARE_TOML_KEY: Final = re.compile(r"[A-Za-z0-9_-]+\Z")
+# Authority names: each is the top-level table of that authority in TARGET_CONTRACT.
+GITHUB_AUTHORITY: Final = "github"
+HARBOR_AUTHORITY: Final = "harbor"
+KUBERNETES_AUTHORITY: Final = "kubernetes"
+# The one GitLab authority and its two instance tables. `--gitlab` choices are
+# the keys of GITLAB_SELECTORS; each value is the table that choice reads.
+GITLAB_AUTHORITY: Final = "gitlab"
+GITLAB_PRIVATE_TABLE: Final = "gitlab_private"
+GITLAB_PUBLIC_TABLE: Final = "gitlab_public"
+GITLAB_PRIVATE_SELECTOR: Final = "private"
+GITLAB_PUBLIC_SELECTOR: Final = "public"
+# The command option that takes one GITLAB_SELECTORS key.
+GITLAB_TARGET_OPTION: Final = "--gitlab"
+GITLAB_SELECTORS: Final = MappingProxyType(
+    {
+        GITLAB_PRIVATE_SELECTOR: GITLAB_PRIVATE_TABLE,
+        GITLAB_PUBLIC_SELECTOR: GITLAB_PUBLIC_TABLE,
+    }
+)
+# The instance read when neither `--gitlab` nor `[gitlab_routing].default` names one.
+GITLAB_DEFAULT_INSTANCE: Final = GITLAB_PRIVATE_TABLE
+# Legacy shape, read for one release: `[gitlab]` fields answer `gitlab_private` and
+# the child table under this key answers `gitlab_public`. Matched by key, never by URL.
+GITLAB_LEGACY_PUBLIC_KEY: Final = "com"
+# `[gitlab_routing]`: optional `default` names the instance read without `--gitlab`;
+# one row per declared instance names its paired Kubernetes and Harbor tables.
+GITLAB_ROUTING_TABLE: Final = "gitlab_routing"
+GITLAB_ROUTING_DEFAULT_KEY: Final = "default"
+GITLAB_ROUTED_AUTHORITIES: Final = (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY)
+# The result `routing` object: the GitLab table read, each routed table or null,
+# and how the instance was selected (ROUTING_SELECTED_BY_* or the caller's option).
+ROUTING_RESULT_KEY: Final = "routing"
+ROUTING_SELECTED_BY_KEY: Final = "selected_by"
+ROUTING_SELECTED_BY_DEFAULT: Final = "default"
+ROUTING_SELECTED_BY_LEGACY: Final = "legacy"
+ROUTING_ARGV_PREFIX: Final = "argv:"
+# Reason tokens of GitLab selection and routing. The two templates take a table
+# name, or the routing table and a routed authority.
+GITLAB_SELECTOR_CONFLICT: Final = "gitlab_selector_conflict"
+GITLAB_SELECTOR_UNKNOWN: Final = "gitlab_selector_unknown"
+GITLAB_SELECTION_REQUIRES_GITLAB: Final = "gitlab_profile_requires_gitlab_authority"
+GITLAB_PROFILE_NAME_INVALID: Final = "gitlab_profile_name_invalid"
+GITLAB_PROFILE_UNKNOWN: Final = "gitlab_profile_unknown"
+GITLAB_PRIVATE_DECLARED_TWICE: Final = "gitlab_private_declared_twice"
+GITLAB_ROUTING_DEFAULT_UNKNOWN: Final = "gitlab_routing_default_unknown"
+GITLAB_ROUTING_ROW_UNKNOWN: Final = "gitlab_routing_row_unknown"
+GITLAB_ROUTING_ROW_MISSING: Final = "gitlab_routing_row_missing"
+GITLAB_INSTANCE_REQUIRED: Final = "{table}_target_required"
+GITLAB_ROUTING_PAIRING_UNKNOWN: Final = "{routing}_{authority}_unknown"
+# One stderr diagnostic per load of the legacy shape (TD-11 removes it).
+GITLAB_DEPRECATION_EVENT: Final = "gitlab_target_deprecated"
+# Values defined only in this module. tools/skillkit/portability_gate.py rejects a
+# copy of any of them as a string literal in another Python source.
+GITLAB_CONTRACT_LITERALS: Final = (
+    *GITLAB_SELECTORS.values(),
+    GITLAB_ROUTING_TABLE,
+    GITLAB_TARGET_OPTION,
+    GITLAB_SELECTOR_CONFLICT,
+    GITLAB_SELECTOR_UNKNOWN,
+    GITLAB_SELECTION_REQUIRES_GITLAB,
+    GITLAB_PROFILE_NAME_INVALID,
+    GITLAB_PROFILE_UNKNOWN,
+    GITLAB_PRIVATE_DECLARED_TWICE,
+    GITLAB_ROUTING_DEFAULT_UNKNOWN,
+    GITLAB_ROUTING_ROW_UNKNOWN,
+    GITLAB_ROUTING_ROW_MISSING,
+    GITLAB_DEPRECATION_EVENT,
+    *(
+        GITLAB_INSTANCE_REQUIRED.format(table=table)
+        for table in GITLAB_SELECTORS.values()
+    ),
+    *(
+        GITLAB_ROUTING_PAIRING_UNKNOWN.format(
+            routing=GITLAB_ROUTING_TABLE, authority=authority
+        )
+        for authority in GITLAB_ROUTED_AUTHORITIES
+    ),
+)
 
 
 class Role(StrEnum):
@@ -98,6 +185,7 @@ class Table:
     :param fields: Keys accepted directly under the table.
     :param tables: Nested tables accepted directly under the table.
     :param named_profiles: Whether one named child may repeat this table's fields.
+    :param instances: Other top-level table names that declare this authority.
 
     .. attribute :: name
         :type: str
@@ -118,12 +206,18 @@ class Table:
         :type: bool
 
         Whether one named child may repeat the declared fields.
+
+    .. attribute :: instances
+        :type: tuple[str, ...]
+
+        Other top-level table names that declare this authority.
     """
 
     name: str
     fields: tuple[Field, ...] = ()
     tables: tuple[Table, ...] = ()
     named_profiles: bool = False
+    instances: tuple[str, ...] = ()
 
     def names(self) -> frozenset[str]:
         """List keys accepted directly beneath this target table.
@@ -152,15 +246,18 @@ class Table:
 class TargetContract:
     """The allowed tables and keys of a target file, by dotted path."""
 
-    def __init__(self, authorities: tuple[Table, ...]):
-        """Index target authority declarations for path and role lookup.
+    def __init__(self, authorities: tuple[Table, ...], routing: Optional[Table] = None):
+        """Index target authority and routing declarations for lookup.
 
         :param authorities: Top-level authority tables allowed in a target file.
+        :param routing: Top-level table pairing an instance with other tables,
+            or ``None`` for a contract without one.
         """
         self._authorities = authorities
+        self._routing = routing
         self._paths: MutableMapping[str, Union[Table, Field]] = {}
-        for authority in authorities:
-            self._paths.update(authority.walk())
+        for table in (*authorities, *((routing,) if routing else ())):
+            self._paths.update(table.walk())
 
     @property
     def authorities(self) -> tuple[str, ...]:
@@ -169,6 +266,39 @@ class TargetContract:
         :returns: Tuple of authority table names.
         """
         return tuple(table.name for table in self._authorities)
+
+    @property
+    def tables(self) -> tuple[str, ...]:
+        """Return every top-level table name a target file may declare.
+
+        :returns: Authority, instance, and routing table names.
+        """
+        return (
+            *(
+                name
+                for table in self._authorities
+                for name in (table.name, *table.instances)
+            ),
+            *((self._routing.name,) if self._routing else ()),
+        )
+
+    def authority_of(self, table: str) -> Optional[str]:
+        """Resolve a top-level table name to the authority it declares.
+
+        :param table: Top-level table name, such as ``gitlab_public``.
+        :returns: Authority name, or ``None`` for routing and undeclared names.
+        """
+        for authority in self._authorities:
+            if table == authority.name or table in authority.instances:
+                return authority.name
+        return None
+
+    def routing_table(self) -> Optional[str]:
+        """Return the name of the table that pairs instances with other tables.
+
+        :returns: Routing table name, or ``None`` for a contract without one.
+        """
+        return self._routing.name if self._routing else None
 
     @staticmethod
     def quote_key(name: str) -> str:
@@ -206,14 +336,18 @@ class TargetContract:
         return ".".join(cls.quote_key(part) for part in parts)
 
     def canonical_path(self, path: str) -> str:
-        """Resolve a named profile path to its shared authority declaration.
+        """Resolve an instance or named profile path to its authority declaration.
 
         :param path: Concrete dotted table or field path.
-        :returns: Declared authority path for a valid profile, otherwise the input.
+        :returns: Declared authority path for an instance table or a valid
+            profile, otherwise the input.
         """
         if path in self._paths:
             return path
         parts = self.path_parts(path)
+        owner = self.authority_of(parts[0]) if parts else None
+        if owner is not None and owner != parts[0]:
+            return self.dotted_path((owner, *parts[1:]))
         authority = self._paths.get(parts[0]) if parts else None
         if (
             isinstance(authority, Table)
@@ -286,7 +420,7 @@ class TargetContract:
 TARGET_CONTRACT = TargetContract(
     (
         Table(
-            "github",
+            GITHUB_AUTHORITY,
             Field.of(Role.ENDPOINT, "host", "repository")
             + Field.of(Role.ACCESS, "token_file")
             # The selected target declares which checks branch protection
@@ -294,22 +428,24 @@ TARGET_CONTRACT = TargetContract(
             + Field.of(Role.VALUE, "required_checks"),
         ),
         Table(
-            "gitlab",
+            GITLAB_AUTHORITY,
             Field.of(Role.ENDPOINT, "url", "project", "group")
             + Field.of(Role.ACCESS, "token_file")
             # Readable from the runners API.
             + Field.of(Role.VALUE, "runner_id"),
+            # Legacy [gitlab.NAME] profiles, read for one release (TD-11).
             named_profiles=True,
+            instances=tuple(GITLAB_SELECTORS.values()),
         ),
         Table(
-            "harbor",
+            HARBOR_AUTHORITY,
             Field.of(Role.ENDPOINT, "url", "project")
             + Field.of(
                 Role.ACCESS, "credential_file", "username_file", "password_file"
             ),
         ),
         Table(
-            "kubernetes",
+            KUBERNETES_AUTHORITY,
             Field.of(Role.ENDPOINT, "context", "server")
             + Field.of(Role.ACCESS, "kubeconfig", "kubeconfigs"),
             (
@@ -337,5 +473,15 @@ TARGET_CONTRACT = TargetContract(
                 ),
             ),
         ),
-    )
+    ),
+    # Each row value names a table of the routed authority, so it selects an
+    # endpoint; it is never a value read from a live system.
+    Table(
+        GITLAB_ROUTING_TABLE,
+        Field.of(Role.ENDPOINT, GITLAB_ROUTING_DEFAULT_KEY),
+        tuple(
+            Table(name, Field.of(Role.ENDPOINT, *GITLAB_ROUTED_AUTHORITIES))
+            for name in GITLAB_SELECTORS.values()
+        ),
+    ),
 )

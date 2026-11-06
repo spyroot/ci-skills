@@ -30,6 +30,7 @@ from conftest import (
     load_module,
 )
 from jsonschema import Draft202012Validator
+from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION, SCHEMA_VERSION
 from test_gitlab_actions import _plan, _tag_output
 from test_gitlab_mirror import (
     MIRROR_APPLIED_FILE,
@@ -857,6 +858,36 @@ def test_setup_receipts_preserve_freshness_and_shape_checks(
         else "access.json"
     )
     assert f"{name}:{reason}" in result["problems"]
+
+
+@pytest.mark.parametrize(
+    ("version", "accepted"),
+    (
+        (SCHEMA_VERSION, True),
+        (ROUTED_RESULT_SCHEMA_VERSION, True),
+        ("2.0", False),
+        (None, False),
+    ),
+    ids=("historical", "routing-minor", "unknown-major", "absent"),
+)
+def test_receipt_schema_version_accepts_the_routing_minor_version(
+    version: Optional[str], accepted: bool
+) -> None:
+    """Accept 1.0 and 1.1 receipts; 1.1 only adds the optional routing object.
+
+    :param version: ``schema_version`` written into the access receipt.
+    :param accepted: Whether the checker must accept that version.
+    :returns: None; assertions verify the exact problem reason.
+    """
+    setup = _access_setup()
+    setup["access.json"]["schema_version"] = version
+
+    result = _evaluate(setup)
+
+    problem = "access.json:schema_version_unexpected"
+    assert (problem not in result["problems"]) is accepted
+    if accepted:
+        assert result["status"] == "PASS", result["problems"]
 
 
 def test_repeat_operations_require_matching_plan_and_resource() -> None:

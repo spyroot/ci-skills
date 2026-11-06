@@ -1,5 +1,10 @@
 """Shared diagnostic arguments and bounded structured logging.
 
+The command parser binds its parsed options once (`bind_log_settings`). Code
+below the command adapter, such as the target loader, writes its events with
+`bound_log_settings()`, so `--log-format`, `--log-level`, `--log-file` and
+`--run-id` apply to every diagnostic of the invocation.
+
 Author Mustafa Bayramov
 mbayramo@cisco.com
 spyroot@gmail.com
@@ -12,6 +17,7 @@ import json
 import os
 import sys
 from collections.abc import Mapping, MutableMapping
+from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
@@ -22,6 +28,44 @@ from lib.python.sys.status import (
 )
 
 LOG_LEVELS: Mapping[str, int] = {"debug": 0, "info": 1, "warning": 2, "error": 3}
+# Diagnostic options of the current invocation; empty until a parser binds them.
+_LOG_SETTINGS: ContextVar[Optional[argparse.Namespace]] = ContextVar(
+    "ci_skills_log_settings", default=None
+)
+
+
+def bind_log_settings(
+    args: argparse.Namespace,
+) -> Token[Optional[argparse.Namespace]]:
+    """Bind the parsed diagnostic options of the current invocation.
+
+    One command invocation binds once, from its parser. A caller that binds in
+    a longer-lived process restores the previous binding with
+    ``unbind_log_settings``.
+
+    :param args: Parsed command namespace carrying the shared log options.
+    :returns: Token that restores the previous binding.
+    """
+    return _LOG_SETTINGS.set(args)
+
+
+def unbind_log_settings(token: Token[Optional[argparse.Namespace]]) -> None:
+    """Restore the binding that was current before ``bind_log_settings``.
+
+    :param token: Token returned by the matching ``bind_log_settings`` call.
+    :raises ValueError: The token was created in a different context.
+    :raises RuntimeError: The token was already used.
+    """  # noqa: DOC502 - ContextVar.reset validates the token.
+    _LOG_SETTINGS.reset(token)
+
+
+def bound_log_settings() -> argparse.Namespace:
+    """Read the diagnostic options bound by the current command parser.
+
+    :returns: Parsed namespace, or an empty namespace before any parser ran.
+    """
+    bound = _LOG_SETTINGS.get()
+    return bound if bound is not None else argparse.Namespace()
 
 
 def add_log_arguments(result: argparse.ArgumentParser) -> None:

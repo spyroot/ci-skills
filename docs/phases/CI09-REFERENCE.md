@@ -923,7 +923,9 @@ Commands / combos
 
 ###### Render 6. Its optional inputs, only if needed
 
-Produced by: this task, after the pipeline watch pull request. One-line JSON: 933 bytes.
+Produced by: this task, after the pipeline watch pull request. One-line JSON: 933 bytes. `gitlab.project` in this
+render means `project` of the selected GitLab instance table; see
+[GitLab private and public targets](../../ci-skills/references/access.md#gitlab-private-and-public-targets).
 
 ```text
 $ reference.py next gitlab pipeline run watch options

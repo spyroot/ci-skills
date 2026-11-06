@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 from collections.abc import MutableMapping, MutableSequence
 
+from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
+from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.gitlab.gitlab_actions import ActionError
 from lib.python.core.gitlab.gitlab_api import GitLabAPIError
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
@@ -66,6 +68,9 @@ class ImageBuildChain:
             output["target_source"] = target.source_kind or ""
             if target.skill is not None:
                 output["skill"] = copy_json(target.skill)
+            if target.routing is not None:
+                output[ROUTING_RESULT_KEY] = target.routing.as_dict()
+                output["schema_version"] = ROUTED_RESULT_SCHEMA_VERSION
         return output
 
     def _records(self) -> list[JSONObject]:

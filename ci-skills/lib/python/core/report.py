@@ -20,6 +20,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    GITLAB_ROUTED_AUTHORITIES,
+    ROUTING_RESULT_KEY,
+    ROUTING_SELECTED_BY_KEY,
+)
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -568,10 +574,25 @@ def human(data: JSONObject) -> str:
             lines.append(
                 f"Cleanup: {json_object(data['cleanup']).get('status', 'UNKNOWN')}"
             )
+    if data.get(ROUTING_RESULT_KEY):
+        lines.insert(1, _routing_line(json_object(data[ROUTING_RESULT_KEY])))
     lines.extend(_report_file_lines(data))
     if kind == "gitlab_job" and data.get("operation") == "list":
         lines.append(f"Truncated: {str(data.get('truncated', False)).lower()}")
     return "\n".join(lines) + "\n"
+
+
+def _routing_line(routing: JSONObject) -> str:
+    """Render the selected GitLab and its paired tables on one line.
+
+    :param routing: Result ``routing`` object; a ``null`` table prints ``none``.
+    :returns: ``Routing: gitlab=... kubernetes=... harbor=... (selected_by)``.
+    """
+    tables = " ".join(
+        f"{name}={routing.get(name) or 'none'}"
+        for name in (GITLAB_AUTHORITY, *GITLAB_ROUTED_AUTHORITIES)
+    )
+    return f"Routing: {tables} ({routing.get(ROUTING_SELECTED_BY_KEY, 'unknown')})"
 
 
 def _report_file_lines(data: JSONObject) -> Sequence[str]:

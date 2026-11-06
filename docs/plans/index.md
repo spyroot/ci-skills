@@ -50,6 +50,7 @@ Completed records live in [completed/](../exec-plans/completed/); unfinished pla
 | --- | --- | --- |
 | GitLab operations | [Toolbelt][exec-toolbelt]; standalone runner proof delivered | [Proof per block][toolbelt-gates] |
 | Lifecycle integration | [Hooks][exec-hooks]; implementation/proof pending | [G1–G4 and R1][hooks-gates] |
+| GitLab instance targets `gitlab_private`/`gitlab_public` ([#133](https://github.com/spyroot/ci-skills/issues/133)) | [Targets][exec-gitlab-targets]; implemented on PR #141; receipts pending | [Verification gates][gitlab-targets-gates] |
 
 The [architecture index](../architecture/index.md) points to the existing design;
 [use cases](../use-cases.md) and [combos](../combos.md) map user outcomes to operations.
@@ -90,6 +91,7 @@ The [portability gate][portability] and [endpoint gate][endpoints] retain their 
 [exec-ci13]: ../exec-plans/active/ci13-image-build-readiness.md
 [exec-toolbelt]: ../exec-plans/active/gitlab-toolbelt-plan.md
 [exec-hooks]: ../exec-plans/active/skill-session-hook.md
+[exec-gitlab-targets]: ../exec-plans/active/gitlab-private-public-targets.md
 [ci01]: ../phases/CI01-CATALOG.md
 [ci01-gates]: ../phases/CI01-CATALOG.md#gates
 [ci02]: ../phases/CI02-CLI.md
@@ -114,6 +116,7 @@ The [portability gate][portability] and [endpoint gate][endpoints] retain their 
 [ci15-gates]: ../phases/CI15-RUNNER-WORKFLOWS.md#gates
 [toolbelt-gates]: ../exec-plans/active/gitlab-toolbelt-plan.md#gates-and-proof-per-block
 [hooks-gates]: ../exec-plans/active/skill-session-hook.md#gates
+[gitlab-targets-gates]: ../exec-plans/active/gitlab-private-public-targets.md#concrete-steps
 [workflow]: ../../.github/workflows/validate.yml
 [smoke]: ../../inventory/ci/smoke-tests.yaml
 [validation]: ../../README.md#validation

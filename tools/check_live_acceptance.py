@@ -30,6 +30,7 @@ import json
 import re
 import runpy
 import subprocess
+import sys
 import tarfile
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
@@ -45,7 +46,10 @@ from jsonschema.exceptions import SchemaError, ValidationError
 
 SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
+from lib.python.core.catalog import SCHEMA_VERSION as RESULT_SCHEMA_VERSION
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
 from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
@@ -69,8 +73,23 @@ from lib.python.core.kubernetes.podman_evidence import (
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
-
-MIRROR_SMOKE_CLEANUP_KIND: Final = "gitlab_mirror_smoke_cleanup"
+from skillkit.mirror_qualification import (
+    AFTER_FIELD,
+    BEFORE_FIELD,
+    DELETE_FIELD,
+    DESTINATION_FIELD,
+    DESTINATION_HTTP_STATUS_FIELD,
+    DESTINATION_ID_HTTP_STATUS_FIELD,
+    KIND_FIELD,
+    MIRROR_ABSENT_FIELD,
+    MIRROR_HTTP_STATUS_FIELD,
+    MIRROR_ID_FIELD,
+    MUTATED_FIELD,
+    REPEAT_FIELD,
+    SMOKE_CLEANUP_FIELD,
+    SOURCE_FIELD,
+)
+from skillkit.mirror_qualification import CLEANUP_KIND as MIRROR_SMOKE_CLEANUP_KIND
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -161,6 +180,11 @@ class AcceptanceResult(TypedDict, total=False):
 
 
 SCHEMA_VERSION: Final = "1.0"
+# Receipt versions accepted: the producers' base version and the MINOR version
+# that adds the optional GitLab `routing` object.
+RECEIPT_SCHEMA_VERSIONS: Final = frozenset(
+    {RESULT_SCHEMA_VERSION, ROUTED_RESULT_SCHEMA_VERSION}
+)
 RECEIPT_KIND: Final = "access_check"
 GITLAB_RECEIPT_KINDS: Final = frozenset(
     {
@@ -580,7 +604,7 @@ def _check_common(
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
     """  # noqa: DOC502 - Datetime comparison and recursive redaction can fail.
     problems: MutableSequence[str] = []
-    if receipt.get("schema_version") != SCHEMA_VERSION:
+    if receipt.get("schema_version") not in RECEIPT_SCHEMA_VERSIONS:
         problems.append(f"{name}:schema_version_unexpected")
     if receipt.get("status") != "PASS":
         problems.append(f"{name}:status_not_pass")
@@ -1195,37 +1219,37 @@ def _mirror_smoke_cleanup_verified(
     :returns: Whether only the created objects were removed and the source was retained.
     :raises TypeError: Datetime comparisons reject mixed timezone awareness.
     """
-    cleanup = _mapping(noop.get("smoke_cleanup"))
+    cleanup = _mapping(noop.get(SMOKE_CLEANUP_FIELD))
     records = applied.get("records")
     if not isinstance(records, list) or len(records) != 1:
         return False
     record = _mapping(records[0])
     created = _mapping(record.get("created"))
-    before = _mapping(cleanup.get("before"))
-    deletion = _mapping(cleanup.get("delete"))
+    before = _mapping(cleanup.get(BEFORE_FIELD))
+    deletion = _mapping(cleanup.get(DELETE_FIELD))
     if (
-        cleanup.get("kind") != MIRROR_SMOKE_CLEANUP_KIND
+        cleanup.get(KIND_FIELD) != MIRROR_SMOKE_CLEANUP_KIND
         or not _smoke_cleanup_matches_execution(noop, cleanup, now, max_age_days)
         or created.get("repository") is not True
         or created.get("mirror") is not True
         or _mapping(record.get("before")).get("mirror") is not None
         or record.get("replacement_required") is not False
-        or before.get("source") != record.get("source")
-        or before.get("destination") != record.get("destination")
-        or before.get("mirror_id") != _mapping(record.get("mirror")).get("id")
-        or deletion.get("mirror_http_status") != HTTPStatus.NO_CONTENT
-        or deletion.get("destination_http_status") != HTTPStatus.NO_CONTENT
-        or _mapping(cleanup.get("repeat")).get("mutated") is not False
+        or before.get(SOURCE_FIELD) != record.get("source")
+        or before.get(DESTINATION_FIELD) != record.get("destination")
+        or before.get(MIRROR_ID_FIELD) != _mapping(record.get("mirror")).get("id")
+        or deletion.get(MIRROR_HTTP_STATUS_FIELD) != HTTPStatus.NO_CONTENT
+        or deletion.get(DESTINATION_HTTP_STATUS_FIELD) != HTTPStatus.NO_CONTENT
+        or _mapping(cleanup.get(REPEAT_FIELD)).get(MUTATED_FIELD) is not False
     ):
         return False
     return all(
-        observed.get("source") == record.get("source")
-        and observed.get("mirror_absent") is True
-        and observed.get("destination_http_status") == HTTPStatus.NOT_FOUND
-        and observed.get("destination_id_http_status") == HTTPStatus.NOT_FOUND
+        observed.get(SOURCE_FIELD) == record.get("source")
+        and observed.get(MIRROR_ABSENT_FIELD) is True
+        and observed.get(DESTINATION_HTTP_STATUS_FIELD) == HTTPStatus.NOT_FOUND
+        and observed.get(DESTINATION_ID_HTTP_STATUS_FIELD) == HTTPStatus.NOT_FOUND
         for observed in (
-            _mapping(cleanup.get("after")),
-            _mapping(cleanup.get("repeat")),
+            _mapping(cleanup.get(AFTER_FIELD)),
+            _mapping(cleanup.get(REPEAT_FIELD)),
         )
     )
 

@@ -19,7 +19,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "enum": ["1.0", "1.1"]
     },
     "kind": {
       "enum": [
@@ -183,6 +183,9 @@
     },
     "tested_revision": {
       "$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"
+    },
+    "routing": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/routing"
     },
     "trace_artifact": {
       "type": "string",

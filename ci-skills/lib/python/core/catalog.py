@@ -40,7 +40,18 @@ from lib.python.core.catalog_types import (
     NodeDefinition,
     ReadDefinition,
 )
-from lib.python.core.endpoints import TARGET_CONTRACT
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    GITLAB_DEFAULT_INSTANCE,
+    GITLAB_ROUTING_DEFAULT_KEY,
+    GITLAB_ROUTING_TABLE,
+    GITLAB_SELECTORS,
+    GITLAB_TARGET_OPTION,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+    TARGET_CONTRACT,
+)
 from lib.python.core.json_types import (
     JSONValue,
     copy_json_object,
@@ -49,11 +60,23 @@ from lib.python.core.json_types import (
 )
 
 SCHEMA_VERSION = "1.0"
+# Result schemas that carry the optional `routing` object accept 1.0 and 1.1
+# (MINOR: an added optional field); their producers emit this version.
+ROUTED_RESULT_SCHEMA_VERSION: Final = "1.1"
 SKILL_NAME = "ci-skills"
 GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
+# `--gitlab private|public` selects one GitLab instance table. The deprecated
+# `--gitlab-profile NAME` selects a legacy [gitlab.NAME] table (TD-11).
+GITLAB_TARGET_HELP: Final = (
+    f"GitLab instance: {' or '.join(GITLAB_SELECTORS)} reads "
+    + " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())
+    + f"; omission reads [{GITLAB_ROUTING_TABLE}].{GITLAB_ROUTING_DEFAULT_KEY}"
+    + f", else [{GITLAB_DEFAULT_INSTANCE}]"
+)
 GITLAB_PROFILE_OPTION: Final = "--gitlab-profile"
 GITLAB_PROFILE_HELP: Final = (
-    "select one complete [gitlab.NAME] profile; omission uses [gitlab]"
+    "deprecated: select one legacy [gitlab.NAME] profile; "
+    f"use {GITLAB_TARGET_OPTION} instead"
 )
 
 # Every API command accepts these. Node diagnostics share the target protocol.
@@ -147,7 +170,7 @@ CAPABILITY_OPTIONS: dict[str, dict[str, str]] = {
 
 # The authorities a target file declares; `core/endpoints.py` owns the list.
 AUTHORITIES = TARGET_CONTRACT.authorities
-DEFAULT_AUTHORITIES: Final = ("github", "gitlab", "kubernetes")
+DEFAULT_AUTHORITIES: Final = (GITHUB_AUTHORITY, GITLAB_AUTHORITY, KUBERNETES_AUTHORITY)
 
 # The token variables each client honours, most preferred first. Declared here
 # because three places need the same answer -- source binding, the unbound
@@ -187,7 +210,7 @@ ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
         "receipt names the effective source for each required authority. "
         "Use access_check.py to check the configured GitHub, GitLab and Kubernetes authorities."
     ),
-    "github": [
+    GITHUB_AUTHORITY: [
         {
             "source": "target:github.token_file",
             "when": "the target declares a token file",
@@ -205,7 +228,7 @@ ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
             "when": "gh holds a credential for the exact host",
         },
     ],
-    "gitlab": [
+    GITLAB_AUTHORITY: [
         {
             "source": "target:gitlab.token_file",
             "when": "the target declares a token file",
@@ -221,7 +244,7 @@ ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
             "when": "glab holds a credential for the exact FQDN",
         },
     ],
-    "harbor": [
+    HARBOR_AUTHORITY: [
         {
             "source": "target:harbor.credential_file",
             "when": "combined native credential file is selected",
@@ -231,7 +254,7 @@ ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
             "when": "paired existing files are selected",
         },
     ],
-    "kubernetes": [
+    KUBERNETES_AUTHORITY: [
         {
             "source": "target:kubernetes.kubeconfigs",
             "when": "the target declares kubectl's ordered, combined path",
@@ -292,7 +315,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_mirror",
         "purpose": "Synchronize a selected GitLab project to GitHub with independent ref verification.",
         "use_when": "Configure or reconcile a native GitLab-to-GitHub push mirror.",
-        "requires": ("gitlab", "github"),
+        "requires": (GITLAB_AUTHORITY, GITHUB_AUTHORITY),
         "capabilities": (),
         "mutates": True,
         "options": {
@@ -344,7 +367,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "purpose": "Build, publish, deploy and register a toolbox-backed GitHub runner.",
         "use_when": "Create, update or delete a GitHub runner using the configured cluster and "
         "Harbor.",
-        "requires": ("github", "kubernetes", "harbor"),
+        "requires": (GITHUB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
         "capabilities": ("namespaced",),
         "mutates": True,
         "options": {
@@ -388,7 +411,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; "
         "join its booted node, inspect it or release a previous run. "
         "See references/ocp-node-image.md.",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "options": {
@@ -495,7 +518,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "tool_pod",
         "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
         "use_when": "Run tooling in a retained cluster Pod for another callback or command.",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "options": {
@@ -554,7 +577,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "toolbox",
         "purpose": "Build or delete a toolbox using the configured OpenShift and Harbor.",
         "use_when": "Build one validated toolbox specification independently of a runner.",
-        "requires": ("kubernetes", "harbor"),
+        "requires": (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
         "capabilities": (),
         "mutates": True,
         "options": {
@@ -597,7 +620,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "harbor_push",
         "purpose": "Copy a selected image to Harbor and verify the immutable digest.",
         "use_when": "Publish an existing image without building or creating a runner.",
-        "requires": ("harbor",),
+        "requires": (HARBOR_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "options": {
@@ -634,7 +657,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "harbor_pull",
         "purpose": "Pull a Harbor toolbox in Kubernetes and execute its doctor.",
         "use_when": "Prove a published toolbox image works, with temporary Job cleanup.",
-        "requires": ("kubernetes", "harbor"),
+        "requires": (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
         "capabilities": ("namespaced",),
         "mutates": True,
         "options": {
@@ -670,7 +693,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "image_build_readiness",
         "purpose": "Probe nested Podman or build and publish a toolbox for a running GitLab runner.",
         "use_when": "Prove nested execution alone, or configure a GitLab runner with a published toolbox.",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": ("node_scoped", "namespaced"),
         "mutates": True,
         "options": {
@@ -702,7 +725,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "subcommands": {
             "probe": {
                 "purpose": "Run a temporary Podman Job on one selected worker.",
-                "requires_authorities": ("kubernetes",),
+                "requires_authorities": (KUBERNETES_AUTHORITY,),
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
                 "side_effects": "Creates and removes a temporary namespace, conditional "
@@ -712,7 +735,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
             "chain": {
                 "purpose": "Build and publish the toolbox, then configure a runner using that image.",
-                "requires_authorities": ("kubernetes", "gitlab", "harbor"),
+                "requires_authorities": (
+                    KUBERNETES_AUTHORITY,
+                    GITLAB_AUTHORITY,
+                    HARBOR_AUTHORITY,
+                ),
                 "required_options": ("--toolbox-spec",),
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
@@ -772,7 +799,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_job",
         "purpose": "Get one CI job or list bounded jobs from one GitLab project.",
         "use_when": "You need exact job facts or a filtered view of recent jobs.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": ("filters_records", "time_ranged"),
         "options": {
             "--job-url": "full HTTPS URL of one job for get",
@@ -816,7 +843,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "You need exact pipeline state, a confirmed start, or bounded "
             "completion evidence."
         ),
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "required_tools": ("glab",),
         "mutates": True,
@@ -897,7 +924,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_access",
         "purpose": "Resolve the effective GitLab credential and read back identity and exact target.",
         "use_when": "Before a GitLab operation; this route needs GitLab access only.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "options": {
             "--project": "select the exact project path or numeric ID",
@@ -917,7 +944,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_milestone",
         "purpose": "Create or update an exact GitLab milestone with independent read-back.",
         "use_when": "A selected project or group milestone needs a requested change.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "side_effects": "Confirmed apply may create or update the selected milestone.",
@@ -969,7 +996,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_issue",
         "purpose": "Create or reuse an exact GitLab bug issue with independent read-back.",
         "use_when": "A selected project needs a requested bug issue.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "side_effects": "Confirmed apply may create the selected bug issue.",
@@ -1003,7 +1030,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_repository",
         "purpose": "Commit caller-supplied files to a GitLab branch and verify their bytes.",
         "use_when": "Create or update project source, a Dockerfile or pipeline configuration.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "related": ("gitlab_pipeline.py", "gitlab_mr.py"),
@@ -1048,7 +1075,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_merge_request",
         "purpose": "Create a GitLab merge request or attach it to a milestone.",
         "use_when": "Open an MR for selected branches or assign an existing MR's milestone.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "related": (
@@ -1108,7 +1135,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_wiki",
         "purpose": "Create or update an exact GitLab wiki page with independent read-back.",
         "use_when": "A selected project wiki page needs requested content.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "side_effects": "Confirmed apply may create or update the selected wiki page.",
@@ -1150,7 +1177,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "gitlab_runner",
         "purpose": "Read and manage a selected GitLab runner record with verified actions.",
         "use_when": "A job names a runner to inspect, or a project needs runner record management.",
-        "requires": ("gitlab",),
+        "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
         "side_effects": "Apply may create, assign, tag, or delete a runner record.",
@@ -1232,7 +1259,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "purpose": "Deploy or remove one toolbox-backed GitLab shell runner.",
         "use_when": "A pre-created project or group runner must execute on the "
         "exact worker proven ready for Podman.",
-        "requires": ("gitlab", "kubernetes", "harbor"),
+        "requires": (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
         "capabilities": ("namespaced", "node_scoped"),
         "mutates": True,
         "options": {
@@ -1271,7 +1298,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                     "--node",
                 ],
                 "result_schema": "schemas/results/toolbox-workflow.schema.json",
-                "requires_authorities": ["gitlab", "kubernetes", "harbor"],
+                "requires_authorities": [
+                    GITLAB_AUTHORITY,
+                    KUBERNETES_AUTHORITY,
+                    HARBOR_AUTHORITY,
+                ],
                 "side_effects": "Confirmed apply opens or reuses one run scope, "
                 "creates a run-owned SCC RoleBinding only when required, and "
                 "retains the verified manager workload.",
@@ -1282,7 +1313,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "delete": {
                 "required_options": ["--runner-id", "--description", "--run-id"],
                 "result_schema": "schemas/results/toolbox-workflow.schema.json",
-                "requires_authorities": ["gitlab", "kubernetes"],
+                "requires_authorities": [GITLAB_AUTHORITY, KUBERNETES_AUTHORITY],
                 "side_effects": "Confirmed apply removes only run-owned manager "
                 "resources and preserves the GitLab runner record.",
                 "read_back": "Owned Deployment and Secrets absent, exact runner "
@@ -1300,6 +1331,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "GitLab runner manager",
             "OpenShift SCC access",
             "GitLab runner",
+            "GitLab Agent connectivity",
         ),
         "required_tools": ("glab", "kubectl", "oc on OpenShift"),
         "returns": "A run ID and confirmed plan, or verified workload and exact "
@@ -1314,7 +1346,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "storage_report",
         "purpose": "Correlate claims, volumes, attachments, pods and controllers.",
         "use_when": "A workload will not start or a volume looks stuck, and you need the chain.",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": ("filters_records", "namespaced", "node_scoped"),
         "options": {
             "--storage-class": "restrict to one StorageClass",
@@ -1330,7 +1362,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "interval; a zero count with zero errors means the events aged out, "
             "not that the read failed."
         ),
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": ("filters_records", "namespaced", "time_ranged"),
         "options": {
             "--kind": "involved object kind",
@@ -1343,7 +1375,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "cilium_status",
         "purpose": "Aggregate Cilium agent, operator and node health by real exec.",
         "use_when": "Connectivity is suspect, or a node's CNI may differ from its Ready condition.",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": ("filters_records", "namespaced", "node_scoped"),
         "options": {},
         "returns": "One record per agent with non-TTY health and actionable peer findings; UNKNOWN where exec could not run.",
@@ -1352,7 +1384,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "ceph_cluster",
         "purpose": "Read Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods.",
         "use_when": "A selected Rook Ceph cluster needs API-backed diagnostics.",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": ("namespaced", "node_scoped"),
         "options": {
             "--operator": "operator deployment name",
@@ -1372,7 +1404,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         ),
         "execution_surface": "OpenShift API and temporary oc debug Pods",
         "required_tools": ("kubectl", "oc", "ip on the selected node"),
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": ("node_scoped",),
         "mutates": True,
         "options": {
@@ -1408,7 +1440,7 @@ NODE_LOCAL_OPTIONS: dict[str, str] = {
 NODE_LOCAL_COMMANDS: Mapping[str, NodeDefinition] = {
     "cilium_node.py": {
         "kind": "cilium_node",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "purpose": "Read Cilium daemon status and health from an existing agent Pod on one node.",
         "use_when": "A selected node needs Cilium daemon and peer diagnosis.",
         "required_tools": ("kubectl",),
@@ -1416,7 +1448,7 @@ NODE_LOCAL_COMMANDS: Mapping[str, NodeDefinition] = {
     },
     "ceph_kernel.py": {
         "kind": "ceph_kernel",
-        "requires": ("kubernetes",),
+        "requires": (KUBERNETES_AUTHORITY,),
         "purpose": "Classify host Ceph/RBD kernel journal lines through an existing Pod.",
         "use_when": "A selected node has a Pod with a verified host journal mount.",
         "required_tools": ("kubectl", "journalctl in the selected Pod"),
@@ -1458,7 +1490,8 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
         "options": {
             **READ_OPTIONS,
             "--provider": "native provider: github or gitlab",
-            "--host": "provider host override; must match an explicit GitLab profile",
+            "--host": "provider host override; must match an explicitly selected GitLab",
+            GITLAB_TARGET_OPTION: GITLAB_TARGET_HELP,
             GITLAB_PROFILE_OPTION: GITLAB_PROFILE_HELP,
             "--token-file": "existing token-file reference; otherwise use shared credential resolution",
             "--endpoint": "relative GET endpoint; required by get",
@@ -1543,10 +1576,10 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
 PROPOSITION_VERSION: Final = "3.0"
 PROPOSITION_CLUSTERS: Final = MappingProxyType(
     {
-        "glab": "gitlab",
-        "kubernetes": "kubernetes",
-        "github": "github",
-        "harbor": "harbor",
+        "glab": GITLAB_AUTHORITY,
+        KUBERNETES_AUTHORITY: KUBERNETES_AUTHORITY,
+        GITHUB_AUTHORITY: GITHUB_AUTHORITY,
+        HARBOR_AUTHORITY: HARBOR_AUTHORITY,
     }
 )
 PROPOSITION_REFERENCES: Final = MappingProxyType(
@@ -1618,6 +1651,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "GitLab runner manager": {
             "summary": "Runner token, exact-node deployment, verification and cleanup.",
             "pointer": "references/gitlab-runner-manager.md",
+        },
+        "GitLab Agent connectivity": {
+            "summary": "When a cluster can attach to a GitLab project, KAS address and the planned attach flow.",
+            "pointer": "references/gitlab-agent.md",
         },
         "Native OCP YAML example": {
             "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
@@ -1730,7 +1767,7 @@ def command_authorities(script: str) -> Sequence[str]:
     if script in NODE_LOCAL_COMMANDS:
         return NODE_LOCAL_COMMANDS[script]["requires"]
     if script == "bin/ci-api":
-        return ("github", "gitlab")
+        return (GITHUB_AUTHORITY, GITLAB_AUTHORITY)
     if script in READ_COMMANDS:
         return READ_COMMANDS[script]["requires_authorities"]
     return DISCOVERY_COMMANDS[script]["requires_authorities"]
@@ -1780,9 +1817,9 @@ def _proposition_offering(
         else {name for script in scripts for name in command_authorities(script)}
     )
     names = ["access", "project binding"] if authorities else []
-    if "gitlab" in authorities:
+    if GITLAB_AUTHORITY in authorities:
         names.append("mcp")
-    if "harbor" in authorities:
+    if HARBOR_AUTHORITY in authorities:
         names.append("toolbox specification")
     if include_command_references:
         for script in scripts:
@@ -1876,7 +1913,7 @@ def missing_required_options(script: str, args: Namespace) -> list[str]:
     return missing
 
 
-def supports_gitlab_profile(script: str) -> bool:
+def supports_gitlab_selection(script: str) -> bool:
     """Identify commands whose declared authority set includes GitLab.
 
     :param script: Registered API command filename.
@@ -1884,8 +1921,8 @@ def supports_gitlab_profile(script: str) -> bool:
     """
     entry = COMMANDS[script]
     authorities = (*entry["requires"], *entry.get("optional_requires", ()))
-    return "gitlab" in authorities or any(
-        "gitlab" in command.get("requires_authorities", ())
+    return GITLAB_AUTHORITY in authorities or any(
+        GITLAB_AUTHORITY in command.get("requires_authorities", ())
         for command in entry.get("subcommands", {}).values()
     )
 
@@ -1899,7 +1936,8 @@ def options_for(script: str) -> dict[str, str]:
     """
     entry = COMMANDS[script]
     merged = dict(UNIVERSAL_OPTIONS)
-    if supports_gitlab_profile(script):
+    if supports_gitlab_selection(script):
+        merged[GITLAB_TARGET_OPTION] = GITLAB_TARGET_HELP
         merged[GITLAB_PROFILE_OPTION] = GITLAB_PROFILE_HELP
     for capability in entry["capabilities"]:
         merged.update(CAPABILITY_OPTIONS[capability])

@@ -50,7 +50,12 @@ from lib.python.core.read_tools import (
     ReadExit,
     ReadToolError,
 )
-from lib.python.core.target import TargetError, load_target
+from lib.python.core.target import (
+    GitLabRoute,
+    GitLabSelection,
+    TargetError,
+    load_target,
+)
 
 
 class GitProvider(StrEnum):
@@ -98,7 +103,7 @@ class ApiProviderAction(SkillAction):
     :param host: Explicit provider hostname, or ``None`` for target resolution.
     :param token_file: Token file override, or ``None`` for shared resolution.
     :param output: Selected JSON, YAML, or text representation.
-    :param gitlab_profile: Named target profile, valid only for the GitLab provider.
+    :param gitlab_selection: Caller's GitLab instance choice, valid only for GitLab.
 
     .. attribute :: provider
         :type: GitProvider
@@ -120,17 +125,17 @@ class ApiProviderAction(SkillAction):
 
         Selected JSON, YAML, or text representation.
 
-    .. attribute :: gitlab_profile
-        :type: Optional[str]
+    .. attribute :: gitlab_selection
+        :type: Optional[GitLabSelection]
 
-        Exact named GitLab selection; absent for the flat table.
+        Caller's GitLab instance choice; ``None`` reads the routing default.
     """
 
     provider: GitProvider
     host: Optional[str] = None
     token_file: Optional[Path] = None
     output: ApiOutput = ApiOutput.JSON
-    gitlab_profile: Optional[str] = None
+    gitlab_selection: Optional[GitLabSelection] = None
 
     @abstractmethod
     def validate(self) -> None:
@@ -140,7 +145,11 @@ class ApiProviderAction(SkillAction):
         """
         if not isinstance(self.provider, GitProvider):
             raise ReadToolError("invalid provider", ReadExit.USAGE)
-        if self.gitlab_profile is not None and self.provider != GitProvider.GITLAB:
+        if (
+            self.gitlab_selection is not None
+            and self.gitlab_selection.requested
+            and self.provider != GitProvider.GITLAB
+        ):
             raise ReadToolError(
                 "gitlab_profile_requires_gitlab_provider", ReadExit.USAGE
             )
@@ -239,7 +248,7 @@ class ApiReadAction(ApiProviderAction):
         lines: Optional[str] = None,
         paginate: bool = False,
         output: ApiOutput = ApiOutput.JSON,
-        gitlab_profile: Optional[str] = None,
+        gitlab_selection: Optional[GitLabSelection] = None,
     ):
         """Retain one immutable GET request with a required endpoint.
 
@@ -252,9 +261,9 @@ class ApiReadAction(ApiProviderAction):
         :param lines: Inclusive ``start:end`` range, or ``None`` for all text.
         :param paginate: Whether to collect array pages through the native CLI.
         :param output: Selected JSON, YAML, or text representation.
-        :param gitlab_profile: Exact named GitLab profile, or the flat default.
+        :param gitlab_selection: Caller's GitLab choice, or ``None`` for the default.
         """
-        super().__init__(provider, host, token_file, output, gitlab_profile)
+        super().__init__(provider, host, token_file, output, gitlab_selection)
         object.__setattr__(self, "endpoint", endpoint)
         object.__setattr__(self, "field", field)
         object.__setattr__(self, "decode_base64", decode_base64)
@@ -315,6 +324,8 @@ class ApiProviderSelection:
     :param host: Validated hostname from runtime configuration or the explicit option.
     :param token_file: Selected credential-file reference; absent uses shared native
         credential resolution when the binding callback runs.
+    :param route: Selected GitLab table and its pairing, or ``None`` when no
+        target file supplied the provider.
 
     .. attribute :: provider
         :type: GitProvider
@@ -331,11 +342,18 @@ class ApiProviderSelection:
 
         Selected credential-file reference; absent uses shared native credential resolution when
         the binding callback runs.
+
+    .. attribute :: route
+        :type: Optional[GitLabRoute]
+
+        Selected GitLab table and its pairing, or ``None`` when no target file
+        supplied the provider.
     """
 
     provider: GitProvider
     host: str
     token_file: Optional[Path] = None
+    route: Optional[GitLabRoute] = None
 
     @classmethod
     def from_action(cls, action: ApiProviderAction) -> ApiProviderSelection:
@@ -348,11 +366,13 @@ class ApiProviderSelection:
         :raises ReadToolError: If the provider hostname is missing or malformed.
         """
         host, token_file = action.host, action.token_file
+        selection = action.gitlab_selection or GitLabSelection()
+        route = None
         try:
             path, _source = resolve_target_file(None)
         except TargetError as exc:
             if (
-                action.gitlab_profile is not None
+                selection.requested
                 or os.getenv(SMOKE_ENV)
                 or not str(exc).startswith("target_missing:")
             ):
@@ -361,7 +381,8 @@ class ApiProviderSelection:
             target = load_target(
                 path,
                 required_surfaces=(action.provider.value,),
-                gitlab_profile=action.gitlab_profile,
+                gitlab=selection.selector,
+                gitlab_profile=selection.profile,
             )
             configured = (
                 target.github
@@ -371,7 +392,7 @@ class ApiProviderSelection:
             if configured is None:
                 raise TargetError("provider_target_missing")
             if (
-                action.gitlab_profile is not None
+                selection.requested
                 and host is not None
                 and host.lower() != configured.host
             ):
@@ -379,11 +400,12 @@ class ApiProviderSelection:
             if host is None or host.lower() == configured.host:
                 host = configured.host
                 token_file = token_file or configured.token_file
+                route = target.routing
         if host is None and action.provider == GitProvider.GITHUB:
             host = GITHUB_DOTCOM_HOST
         if not host or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", host):
             raise ReadToolError("select a provider host in target.toml", ReadExit.USAGE)
-        return cls(action.provider, host.lower(), token_file)
+        return cls(action.provider, host.lower(), token_file, route)
 
 
 @dataclass(frozen=True)

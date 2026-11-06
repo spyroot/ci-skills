@@ -26,7 +26,11 @@ from lib.python.core.json_types import JSONObject, json_string
 from lib.python.core.logging import log_event
 from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit
-from lib.python.core.target import TargetError, select_gitlab_reference
+from lib.python.core.target import (
+    GitLabSelection,
+    TargetError,
+    select_gitlab_reference,
+)
 from lib.python.sys.status import DRY_RUN, exit_code
 
 NEXT_STEPS: Final[Mapping[str, str]] = MappingProxyType(
@@ -117,7 +121,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.target,
                 args.binding,
                 dry_run=True,
-                gitlab_profile=getattr(args, "gitlab_profile", None),
+                gitlab_selection=GitLabSelection.from_args(args),
             )
             target_kind, reference = select_gitlab_reference(
                 target, project=args.project, group=args.group
@@ -135,7 +139,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 project=args.project,
                 group=args.group,
                 revision=args.revision,
-                gitlab_profile=args.gitlab_profile,
+                gitlab_selection=GitLabSelection.from_args(args),
             )
             source = "access"
         if args.receipt_out:

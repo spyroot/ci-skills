@@ -14,7 +14,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "$ref": "gitlab-runner-tag.schema.json#/properties/schema_version"
     },
     "kind": {
       "const": "gitlab_mirror"
@@ -39,6 +39,9 @@
     "target_source": {
       "type": "string",
       "minLength": 1
+    },
+    "routing": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/routing"
     },
     "filters": {
       "$ref": "../gitlab-mirror.schema.json"

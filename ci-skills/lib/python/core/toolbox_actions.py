@@ -21,12 +21,14 @@ from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import (
     COMMAND_BY_KIND,
     COMMANDS,
+    ROUTED_RESULT_SCHEMA_VERSION,
     describe,
     missing_required_options,
 )
 from lib.python.core.cli import parser
 from lib.python.core.cli_api import APIError
 from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.harbor.registry_mirror import (
     HarborCallback,
@@ -493,6 +495,11 @@ class WorkflowAction(SkillAction):
             plan_digest=self.digest,
         )
         output["summary"] = {"record_count": len(records), "error_count": len(errors)}
+        target = getattr(self, "target", None)
+        routing = target.routing if target is not None else None
+        if routing is not None:
+            output[ROUTING_RESULT_KEY] = routing.as_dict()
+            output["schema_version"] = ROUTED_RESULT_SCHEMA_VERSION
         if executed or self.context.results:
             output["cleanup"] = {
                 "status": BLOCKED if self.context.cleanup_failures else PASS,

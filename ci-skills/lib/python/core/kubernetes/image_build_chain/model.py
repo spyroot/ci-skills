@@ -45,6 +45,7 @@ from lib.python.core.runner_options import (
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
 from lib.python.core.target import (
     GitLabOperationTarget,
+    GitLabSelection,
     Target,
     TargetError,
     select_gitlab_reference,
@@ -344,7 +345,7 @@ class ImageBuildChainAction(SkillAction):
             self.args.binding,
             dry_run=mode == ProbeMode.DRY_RUN,
             required_surfaces=("gitlab", "kubernetes", "harbor"),
-            gitlab_profile=getattr(self.args, "gitlab_profile", None),
+            gitlab_selection=GitLabSelection.from_args(self.args),
         )
         if mode != ProbeMode.DRY_RUN:
             target = bind_sources(target, revision=self.args.revision)

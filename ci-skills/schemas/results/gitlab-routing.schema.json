@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-routing.schema.json",
+  "title": "GitLab routing",
+  "description": "The routing object of GitLab results. Its one definition is gitlab-runner-tag.schema.json#/$defs/routing.",
+  "$ref": "gitlab-runner-tag.schema.json#/$defs/routing"
+}

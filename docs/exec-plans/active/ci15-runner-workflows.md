@@ -116,8 +116,8 @@ replenishment. Do not introduce a new fleet mechanism or permission policy throu
 
 Use the approved project/cluster choice in D-003 and the phase's requested variants. Read back each actual runner,
 manager and consuming job, including selected tags and protection. Keep GitLab.com evidence separate from historical
-DCloud receipts and retain the exact ownership/cleanup boundary. Reuse implemented `--gitlab-profile com` and the
-existing target resolver; do not introduce another provider.
+DCloud receipts and retain the exact ownership/cleanup boundary. Reuse implemented `--gitlab public`
+(`[gitlab_public]`) and the existing target resolver; do not introduce another provider.
 Both shell and Kubernetes variants need their own GitLab.com job proof. Consumer jobs remain external acceptance
 actions, not extra callbacks in the production combo. Reuse the locked [asset inventory][assets].
 

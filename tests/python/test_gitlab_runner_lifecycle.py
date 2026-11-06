@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
 from conftest import import_script_module
-from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
@@ -26,6 +25,7 @@ GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 REPORT = import_script_module("lib.python.core.report")
+SCHEMA = import_script_module("lib.python.core.schema")
 RUNNER = import_script_module("gitlab_runner")
 ROOT = Path(__file__).parents[2]
 VERIFIED_SKILL = {
@@ -48,23 +48,15 @@ VERIFIED_TARGET = {
     "full_path": "team/repo",
     "web_url": "https://gitlab.example.test/team/repo",
 }
-READ_VALIDATOR = Draft202012Validator(
-    json.loads(
-        (ROOT / "ci-skills/schemas/results/gitlab-runner-read.schema.json").read_text()
-    )
+# Registry-backed validators: the runner schemas share `gitlab-runner-tag.schema.json`
+# definitions, so a sibling `$ref` resolves locally rather than over the network.
+READ_VALIDATOR = SCHEMA.specification_validator(
+    "results/gitlab-runner-read.schema.json"
 )
-DELETE_VALIDATOR = Draft202012Validator(
-    json.loads(
-        (
-            ROOT / "ci-skills/schemas/results/gitlab-runner-delete.schema.json"
-        ).read_text()
-    )
+DELETE_VALIDATOR = SCHEMA.specification_validator(
+    "results/gitlab-runner-delete.schema.json"
 )
-TAG_VALIDATOR = Draft202012Validator(
-    json.loads(
-        (ROOT / "ci-skills/schemas/results/gitlab-runner-tag.schema.json").read_text()
-    )
-)
+TAG_VALIDATOR = SCHEMA.specification_validator("results/gitlab-runner-tag.schema.json")
 
 
 if TYPE_CHECKING:

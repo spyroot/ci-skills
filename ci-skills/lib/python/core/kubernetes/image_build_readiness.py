@@ -53,7 +53,7 @@ from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit_result, report
 from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
 from lib.python.core.runtime import TRACE_TEXT_LIMIT, redact_tree, sanitize
-from lib.python.core.target import Target, TargetError
+from lib.python.core.target import GitLabSelection, Target, TargetError
 from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED
 
 
@@ -233,7 +233,7 @@ class ImageBuildReadiness:
             self.args.binding,
             dry_run=mode == ProbeMode.DRY_RUN,
             required_surfaces=("kubernetes",),
-            gitlab_profile=getattr(self.args, "gitlab_profile", None),
+            gitlab_selection=GitLabSelection.from_args(self.args),
         )
         if mode != ProbeMode.DRY_RUN:
             target = bind_sources(target, revision=self.args.revision)

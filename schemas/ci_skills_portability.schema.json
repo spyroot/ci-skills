@@ -25,9 +25,9 @@
           "source": {"type": "string", "minLength": 1},
           "line": {"type": "integer", "minimum": 0},
           "rule": {
-            "enum": ["fixed_selector", "source_budget_exceeded", "source_parse_error", "source_unreadable", "path_invalid"]
+            "enum": ["fixed_selector", "contract_literal", "source_budget_exceeded", "source_parse_error", "source_unreadable", "path_invalid"]
           },
-          "selector": {"enum": ["host", "repository", "project", "cluster", "credential", "registry", "source"]}
+          "selector": {"enum": ["host", "repository", "project", "cluster", "credential", "registry", "contract", "source"]}
         }
       }
     }
