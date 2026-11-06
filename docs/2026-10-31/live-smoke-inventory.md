@@ -140,6 +140,15 @@ empty. It was absent at `2026-11-06T01:19:57Z` (`ci-api get --gitlab public`, `R
 `01:20:18Z` with `POST /projects` (`visibility=private`, no README), and read back at `01:20:26Z` through the same
 installed `ci-api --gitlab public`. It is retained across phases; only run-owned resources in it are disposable.
 
+## Issue #133 smoke objects — 2026-11-06
+
+The issue #133 live smoke created one issue per GitLab instance with `gitlab_issue.py open-bug`, read each back
+independently, and repeated the confirmed apply as NO_OP. Both issues are retained as smoke records:
+
+- dcloud `hott/test` (project `123`): issue iid `38`, id `523`, opened `2026-11-06T02:00:09Z`.
+- GitLab.com `spyroot/test-self-runner` (project `88575800`): issue iid `1`, id `209352261`, opened
+  `2026-11-06T02:00:15Z`.
+
 ## Runner baseline support allocation
 
 The runner smoke's runtime ToolboxSpec defines build namespace and app `test-self-runner-toolbox`, and Harbor

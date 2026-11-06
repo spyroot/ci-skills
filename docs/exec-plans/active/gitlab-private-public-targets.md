@@ -68,6 +68,17 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   `tools/qualify_mirror.py` (GPP-10) instead of the scratch pair. PR #141 merges first; draft PR #138 rebases
   afterwards.
 - [x] (GPP-09) Legacy removal is tracked as TD-11 (`docs/exec-plans/tech-debt-tracker.md`).
+- [x] (GPP-11) Live AFTER evidence of the capability, from an isolated installed copy at `c76723a` (digest
+  `870a657e`), 2026-11-06T01:57:28Z to 02:00:43Z, with no ambient GitLab token, against the user target:
+  `--gitlab private` read `hott/test` (123) on gitlab.dcloud.run and `--gitlab public` read `spyroot/test-self-runner`
+  (88575800) on gitlab.com; the issue #133 shape blocked on `fb8b5ac` ("gitlab contains unsupported fields: com") and
+  is DRY_RUN on the candidate, from dcloud by default and from gitlab.com with `--gitlab public`; `gitlab_runner_manager.py
+  deploy --gitlab public --dry-run` is BLOCKED `target is missing required authority tables: harbor, kubernetes` and
+  `--gitlab private` routes to `kubernetes` + `harbor`; a wrong confirmation is BLOCKED with `mutated` false;
+  `gitlab_issue.py open-bug` APPLIED with verified read-back on both instances (dcloud `hott/test` issue iid 38, id 523;
+  GitLab.com `spyroot/test-self-runner` issue iid 1, id 209352261) after an empty before-read, and the confirmed repeat
+  is NO_OP. These are not the gate receipts of GPP-08. Evidence: `.internal/log/bug-133/smoke-claude-c76723a/` in the
+  primary checkout (`SUMMARY.md` lists each command and file).
 - [x] (GPP-10) The recorded answers replace the CONFLICT statuses (DEC-03, DEC-05, DEC-08, DEC-10, DEC-17) and the
   keys rule is DEC-19. `[gitlab_routing]` and its `default` are optional, `GITLAB_DEFAULT_INSTANCE` is
   `gitlab_private`, legacy `[gitlab.com]` answers `gitlab_public` by the key `GITLAB_LEGACY_PUBLIC_KEY`, and
@@ -826,6 +837,23 @@ BEFORE, the same on an install at `925b898`:
 
     {"status": "DRY_RUN", "phase": "OFFLINE_PLAN", "origin": "<[gitlab] url>",
      "target_source": "env:CI_SKILLS_TARGET;argv:--project"}
+
+AFTER, the same shape and command on an installed copy at `c76723a` (GPP-11): `DRY_RUN`, `origin`
+`https://gitlab.dcloud.run`, `routing` `{"gitlab": "gitlab", "kubernetes": null, "harbor": null, "selected_by":
+"legacy"}` and one `gitlab_target_deprecated` event; with `--gitlab public`, `origin` `https://gitlab.com` and
+`selected_by` `argv:--gitlab=public`.
+
+Live scenarios per instance (GPP-11):
+
+| Scenario | Instance (`--gitlab`) | Fixture, native ID | Result |
+| --- | --- | --- | --- |
+| project read | private | dcloud `hott/test` 123 | read from gitlab.dcloud.run |
+| project read | public | GitLab.com `spyroot/test-self-runner` 88575800 | read from gitlab.com |
+| issue #133 shape | no option / public | same two projects | DRY_RUN from each host |
+| runner deploy, empty public row | public | user target | BLOCKED, no provider call |
+| runner deploy, paired row | private | user target | DRY_RUN, routed to `kubernetes` + `harbor` |
+| `open-bug` apply and repeat | private | `hott/test` issue 523 | APPLIED, then NO_OP |
+| `open-bug` apply and repeat | public | `spyroot/test-self-runner` issue 209352261 | APPLIED, then NO_OP |
 
 ## Interfaces and Dependencies
 
