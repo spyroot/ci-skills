@@ -132,6 +132,17 @@ recorded cleanup"; the user says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE R
 decides. Evidence is kept outside the repository with the run
 log of issue #133.
 
+### Mirror qualification read-back — 2026-11-06
+
+Candidate `931b188` (installed copy digest `78c36437`) ran the one bounded qualification for issue #133 with
+`tools/qualify_mirror.py --apply`. It created private GitHub repository `1447750315` and GitLab mirror `17` for
+retained source `261`, `hott/test-mirror-push`; both seed refs (`main`, `smoke-seed` at `aafe5d50`) matched, a wrong
+confirmation was BLOCKED without mutation, and the confirmed repeat was NO_OP. Cleanup deleted mirror `17` and
+repository `1447750315` (HTTP 204 each), read both absent by name and by ID, and repeated once with no further
+DELETE (`2026-11-06T02:40:25Z`). An independent read at `02:40:34Z` returned `RESOURCE_NOT_FOUND` by name and by ID
+and no remote mirror on `261`. Selected receipts are in `tests/acceptance/candidate/`; the `bcf7d59` receipts moved
+to `tests/acceptance/historical/pre-gitlab-private-public/`.
+
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
 The `1f2b6f5` qualification remains in the merged CI-14 history. The prior `ae47632` originals remain unchanged under
 `tests/acceptance/historical/pre-ci15-build-retention/`. The renewed `bcf7d59` run verifies the corrected runner
