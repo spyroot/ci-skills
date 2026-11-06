@@ -528,11 +528,15 @@ inventory permits when candidate evidence requires renewal:
         --project hott/test-mirror-push --destination spyroot/test-mirror-push --source-id 261 \
         --seed-ref branches:main:<sha> --seed-ref tags:smoke-seed:<sha> --run-id <id>
 
-The tool runs the installed `gitlab_mirror.py sync`: `--live-plan`, a wrong-digest rejection, `--apply
---confirm-plan <digest> --receipt-out <file>` for `APPLIED`, the same for `NO_OP`, then deletes only the run-created
-mirror and GitHub repository by native ID, proves both absent, repeats cleanup once, and writes
-`mirror-noop-with-cleanup-receipt.json`. It stops before any write if the destination or a mirror already exists or
-the source ID differs. Then run
+Run it from the directory whose target the receipts must name (the same `./.ci-skills/target.toml` or
+`CI_SKILLS_TARGET` resolution applies to both halves). The tool binds the installed lib first, then runs the installed
+`gitlab_mirror.py sync`: `--live-plan`, an in-process live plan whose `target_source` must match, a seed-ref
+baseline, a wrong-digest rejection, `--apply --confirm-plan <digest> --receipt-out <file>` for `APPLIED`, the same for
+`NO_OP`. It then deletes only the run-created mirror and GitHub repository, each after an ID match, proves both absent,
+repeats cleanup once, and writes `mirror-noop-with-cleanup-receipt.json`. It stops before any write if the
+destination or a mirror already exists, the source ID or a seed ref differs, or the two target sources differ.
+`--plan-only` stops after the rejection and writes no ledger. `--reconcile` reads a pending ledger and removes only
+the IDs it records as created. Then run
 `python tools/check_live_acceptance.py --root . --no-aggregate --receipts tests/acceptance/candidate --json`.
 Acceptance: the checker reports `PASS`, and `ci-skills/required` and the `live-acceptance` deployment are green on the
 PR head.

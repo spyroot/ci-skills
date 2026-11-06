@@ -30,6 +30,7 @@ import json
 import re
 import runpy
 import subprocess
+import sys
 import tarfile
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
@@ -45,6 +46,7 @@ from jsonschema.exceptions import SchemaError, ValidationError
 
 SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.catalog import SCHEMA_VERSION as RESULT_SCHEMA_VERSION
@@ -71,8 +73,7 @@ from lib.python.core.kubernetes.podman_evidence import (
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
-
-MIRROR_SMOKE_CLEANUP_KIND: Final = "gitlab_mirror_smoke_cleanup"
+from skillkit.mirror_qualification import CLEANUP_KIND as MIRROR_SMOKE_CLEANUP_KIND
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
