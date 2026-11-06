@@ -51,6 +51,8 @@ GITLAB_PRIVATE_TABLE: Final = "gitlab_private"
 GITLAB_PUBLIC_TABLE: Final = "gitlab_public"
 GITLAB_PRIVATE_SELECTOR: Final = "private"
 GITLAB_PUBLIC_SELECTOR: Final = "public"
+# The command option that takes one GITLAB_SELECTORS key.
+GITLAB_TARGET_OPTION: Final = "--gitlab"
 GITLAB_SELECTORS: Final = MappingProxyType(
     {
         GITLAB_PRIVATE_SELECTOR: GITLAB_PRIVATE_TABLE,

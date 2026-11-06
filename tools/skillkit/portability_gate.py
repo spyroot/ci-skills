@@ -29,7 +29,7 @@ from types import MappingProxyType, ModuleType
 from typing import Final, Optional
 from urllib.parse import urlsplit
 
-from lib.python.core import catalog, endpoints
+from lib.python.core import endpoints
 from lib.python.core.endpoints import TARGET_CONTRACT, Role
 
 RUNTIME: Final = "__portability_runtime__"
@@ -1168,7 +1168,8 @@ def contract_literals() -> Mapping[str, str]:
 
     The values are read from the defining modules, so this gate holds no copy:
     the GitLab instance and routing table names, the selection and routing
-    reason tokens, the deprecation event, and the ``--gitlab`` option.
+    reason tokens, the deprecation event, and the ``--gitlab`` option, all
+    defined in ``core/endpoints.py``.
 
     :returns: Literal mapped to the repository path allowed to contain it.
     """
@@ -1198,9 +1199,9 @@ def contract_literals() -> Mapping[str, str]:
         *instance_required,
         *pairing_unknown,
     )
-    literals = dict.fromkeys(owned, _owner(endpoints))
-    literals[catalog.GITLAB_TARGET_OPTION] = _owner(catalog)
-    return MappingProxyType(literals)
+    return MappingProxyType(
+        dict.fromkeys((*owned, endpoints.GITLAB_TARGET_OPTION), _owner(endpoints))
+    )
 
 
 def _docstrings(tree: ast.AST) -> frozenset[int]:

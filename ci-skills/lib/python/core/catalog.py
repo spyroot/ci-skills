@@ -45,6 +45,7 @@ from lib.python.core.endpoints import (
     GITLAB_ROUTING_DEFAULT_KEY,
     GITLAB_ROUTING_TABLE,
     GITLAB_SELECTORS,
+    GITLAB_TARGET_OPTION,
     TARGET_CONTRACT,
 )
 from lib.python.core.json_types import (
@@ -62,7 +63,6 @@ SKILL_NAME = "ci-skills"
 GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
 # `--gitlab private|public` selects one GitLab instance table. The deprecated
 # `--gitlab-profile NAME` selects a legacy [gitlab.NAME] table (TD-11).
-GITLAB_TARGET_OPTION: Final = "--gitlab"
 GITLAB_TARGET_HELP: Final = (
     f"GitLab instance: {' or '.join(GITLAB_SELECTORS)} reads "
     + " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())

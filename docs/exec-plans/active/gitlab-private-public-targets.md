@@ -564,6 +564,7 @@ it.
     GITLAB_LEGACY_PUBLIC_KEY: Final = "com"
     GITHUB_AUTHORITY, HARBOR_AUTHORITY, KUBERNETES_AUTHORITY          # authority table names
     GITLAB_PRIVATE_SELECTOR: Final = "private"; GITLAB_PUBLIC_SELECTOR: Final = "public"
+    GITLAB_TARGET_OPTION: Final = "--gitlab"                          # imported by core/catalog.py
     ROUTING_RESULT_KEY: Final = "routing"; ROUTING_SELECTED_BY_KEY: Final = "selected_by"
     ROUTING_SELECTED_BY_DEFAULT, ROUTING_SELECTED_BY_LEGACY, ROUTING_ARGV_PREFIX
     GITLAB_INSTANCE_REQUIRED: Final = "{table}_target_required"
@@ -659,8 +660,9 @@ that `validate_specification` uses, so tests resolve sibling `$ref`s locally.
 MODIFIED `tools/skillkit/endpoint_gate.py` (the `undocumented` rule folds instance paths through `canonical_path`),
 `tools/skillkit/portability_gate.py` (headers from `TargetContract.tables`; `[gitlab_routing]` values are not hosts;
 rule `contract_literal`: a GitLab instance or routing table name, a selection or routing reason token, the
-deprecation event or `--gitlab` as a string literal in any selected Python source outside `core/endpoints.py` or, for
-the option, `core/catalog.py`; docstrings are exempt; `schemas/ci_skills_portability.schema.json` gains the rule and
+deprecation event or `--gitlab` as a string literal in any selected Python source outside `core/endpoints.py`, which
+defines all of them (`catalog.GITLAB_TARGET_OPTION` is imported from there); docstrings are exempt;
+`schemas/ci_skills_portability.schema.json` gains the rule and
 the selector `contract`)
 and `tools/check_live_acceptance.py` (`RECEIPT_SCHEMA_VERSIONS` from the catalog constants).
 
@@ -671,7 +673,7 @@ Fixture identity (`--project`, `--destination`, `--source-id`, `--seed-ref`) is 
 
 MODIFIED `ci-skills/lib/python/core/catalog.py`:
 
-- `GITLAB_TARGET_OPTION: Final = "--gitlab"` with `choices=tuple(GITLAB_SELECTORS)`;
+- `GITLAB_TARGET_OPTION`, imported from `core/endpoints.py`, with `choices=tuple(GITLAB_SELECTORS)`;
 - `GITLAB_PROFILE_OPTION` stays as the deprecated alias;
 - `supports_gitlab_profile` becomes `supports_gitlab_selection` and gates both options;
 - the help text states the default comes from `[gitlab_routing]`, else `gitlab_private`.
