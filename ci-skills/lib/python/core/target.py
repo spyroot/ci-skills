@@ -287,7 +287,7 @@ class GitLabRoute:
         :param authority: One of ``GITLAB_ROUTED_AUTHORITIES``.
         :returns: Paired table name, or ``None`` when the row omits it.
         :raises KeyError: ``authority`` is not a routed authority.
-        """
+        """  # noqa: DOC502 - The mapping lookup raises KeyError.
         return {"kubernetes": self.kubernetes, "harbor": self.harbor}[authority]
 
     def as_dict(self) -> JSONObject:
