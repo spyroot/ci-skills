@@ -26,20 +26,22 @@ import re
 import subprocess
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from pathlib import Path
-from typing import NotRequired, Optional, TypedDict
+from typing import Final, NotRequired, Optional, TypedDict
 
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.git.remote import GIT_EXECUTABLE
+from lib.python.sys.status import PASS
 
 SHA_PATTERN = re.compile(r"\A[0-9a-fA-F]{40}\Z")
 DIGEST_ALGORITHM = "sha256-tree-v1"
 # Keys of the tree digest object that ``_digest_entries`` returns.
-DIGEST_ALGORITHM_KEY = "algorithm"
-DIGEST_VALUE_KEY = "digest"
-DIGEST_FILE_COUNT_KEY = "file_count"
+DIGEST_ALGORITHM_KEY: Final = "algorithm"
+DIGEST_VALUE_KEY: Final = "digest"
+DIGEST_FILE_COUNT_KEY: Final = "file_count"
 INSTALLATION_IDENTITY_NAME = "INSTALLATION.json"
 INSTALLATION_IDENTITY_SCHEMA_VERSION = "1.0"
 INSTALLATION_IDENTITY_KIND = "skill_install"
-INSTALLATION_IDENTITY_STATUS = "PASS"
+INSTALLATION_IDENTITY_STATUS = PASS
 FUNCTIONAL_ROOTS = ("bin", "lib", "schemas")
 FUNCTIONAL_EXCLUDED_DIRECTORIES = ("docs", "references", "tests")
 FUNCTIONAL_EXCLUDED_SUFFIXES = (".md",)
@@ -323,7 +325,7 @@ def _git(root: Path, *args: str) -> Optional[str]:
     """
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), *args],
+            [GIT_EXECUTABLE, "-C", str(root), *args],
             capture_output=True,
             text=True,
             check=False,

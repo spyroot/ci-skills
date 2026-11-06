@@ -53,6 +53,7 @@ from lib.python.core.catalog import SCHEMA_VERSION as RESULT_SCHEMA_VERSION
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.endpoints import GITLAB_AUTHORITY, KUBERNETES_AUTHORITY
 from lib.python.core.git.mirroring import MirrorField
+from lib.python.core.git.remote import GIT_EXECUTABLE
 from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
 from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
 from lib.python.core.gitlab.mirror.constants import Field as MirrorReceiptField
@@ -75,23 +76,29 @@ from lib.python.core.kubernetes.podman_evidence import (
     parse_probe_markers,
 )
 from lib.python.core.logging import add_log_arguments, log_event
+from lib.python.core.provenance import DIGEST_VALUE_KEY
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, exit_code
 from skillkit.mirror_qualification import (
     AFTER_FIELD,
     BEFORE_FIELD,
+    CAPTURED_AT_FIELD,
     DELETE_FIELD,
     DESTINATION_FIELD,
     DESTINATION_HTTP_STATUS_FIELD,
     DESTINATION_ID_HTTP_STATUS_FIELD,
+    EXECUTION_HOST_FIELD,
     KIND_FIELD,
     MIRROR_ABSENT_FIELD,
     MIRROR_HTTP_STATUS_FIELD,
     MIRROR_ID_FIELD,
     MUTATED_FIELD,
     REPEAT_FIELD,
+    SKILL_DIGEST_FIELD,
     SMOKE_CLEANUP_FIELD,
     SOURCE_FIELD,
+    STATUS_FIELD,
+    TESTED_REVISION_FIELD,
 )
 from skillkit.mirror_qualification import CLEANUP_KIND as MIRROR_SMOKE_CLEANUP_KIND
 
@@ -529,7 +536,7 @@ def _source_functional_digest(skill_root: Path, revision: str) -> Optional[str]:
     try:
         archive = subprocess.run(
             [
-                "git",
+                GIT_EXECUTABLE,
                 "-C",
                 str(skill_root.parent),
                 "archive",
@@ -614,7 +621,7 @@ def _check_common(
     if receipt.get("status") != PASS:
         problems.append(f"{name}:status_not_pass")
     skill = _mapping(receipt.get("skill"))
-    if not skill.get("digest"):
+    if not skill.get(DIGEST_VALUE_KEY):
         problems.append(f"{name}:skill_digest_absent")
     reported = skill.get("functional_digest")
     if not reported:
@@ -1191,17 +1198,18 @@ def _smoke_cleanup_matches_execution(
     :returns: Whether cleanup belongs to this execution and follows it within the window.
     :raises TypeError: Datetime comparisons reject mixed timezone awareness.
     """
-    captured = _parse_time(cleanup.get("captured_at"))
+    captured = _parse_time(cleanup.get(CAPTURED_AT_FIELD))
     executed = _parse_time(receipt.get("captured_at"))
-    revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
+    skill = _mapping(receipt.get("skill"))
+    revision = _mapping(skill.get("revision"))
     return (
-        cleanup.get("status") == PASS
-        and cleanup.get("execution_host") == receipt.get("execution_host")
-        and cleanup.get("skill_digest") == _mapping(receipt.get("skill")).get("digest")
+        cleanup.get(STATUS_FIELD) == PASS
+        and cleanup.get(EXECUTION_HOST_FIELD) == receipt.get("execution_host")
+        and cleanup.get(SKILL_DIGEST_FIELD) == skill.get(DIGEST_VALUE_KEY)
         and revision.get("verified") is True
         and isinstance(revision.get("value"), str)
         and bool(revision["value"])
-        and cleanup.get("tested_revision") == revision["value"]
+        and cleanup.get(TESTED_REVISION_FIELD) == revision["value"]
         and captured is not None
         and executed is not None
         and executed <= captured <= now
@@ -1375,7 +1383,7 @@ class AcceptanceReview:
         self.skill_root = skill_root
         self.now = now
         self.max_age_days = max_age_days
-        self.digest = tree_digest(skill_root)["digest"]
+        self.digest = tree_digest(skill_root)[DIGEST_VALUE_KEY]
         self.functional_digest = functional_digest(skill_root)
         self.problems: MutableSequence[str] = []
         self.accepted: MutableSequence[str] = []

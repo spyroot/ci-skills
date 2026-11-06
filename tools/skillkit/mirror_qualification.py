@@ -176,6 +176,14 @@ DESTINATION_IDENTITY_CHANGED: Final = "destination_identity_changed"
 MIRROR_IDENTITY_CHANGED: Final = "mirror_identity_changed"
 SEED_REF_BASELINE_DIFFERS: Final = "seed_ref_baseline_differs"
 SEED_REF_MOVED: Final = "seed_ref_moved"
+# ``installed_bindings`` formats ``name`` with the missing attribute name;
+# ``_installed_module`` formats it with the dotted module name.
+INSTALLED_LIB_INCOMPATIBLE: Final = "installed_lib_incompatible:{name}"
+INSTALLED_LIB_UNAVAILABLE: Final = "installed_lib_unavailable:{name}"
+INSTALLED_LIB_SHADOWED: Final = "installed_lib_shadowed:{name}"
+# ``mirror_targets`` reports this reason when the installed ``repository_url_key``
+# raises ``ValueError`` on the mirror URL or the destination clone URL.
+REPOSITORY_URL_MALFORMED: Final = "repository_url_malformed"
 
 SOURCE_READ: Final = "source_read"
 REF_READ: Final = "ref_read"
@@ -820,7 +828,9 @@ def installed_bindings(skill: Path) -> InstalledBindings:
             ),
         )
     except AttributeError as exc:
-        raise QualificationError(f"installed_lib_incompatible:{exc.name}") from exc
+        raise QualificationError(
+            INSTALLED_LIB_INCOMPATIBLE.format(name=exc.name)
+        ) from exc
 
 
 @contextlib.contextmanager
@@ -1662,8 +1672,9 @@ class NativeMirrorProvider(MirrorProvider):
         :returns: ``None`` when the provider finds no mirror with ``mirror_id``;
             True when the mirror pushes to the destination clone URL; False
             otherwise.
-        :raises QualificationError: A read fails with other than not-found.
-        """  # noqa: DOC502 - _provider_errors converts the provider failure.
+        :raises QualificationError: A read fails with other than not-found, or the
+            installed ``repository_url_key`` rejects the mirror URL or the clone URL.
+        """
         with self._errors(MIRROR_READ):
             mirror = self._unless_not_found(
                 self._bindings.mirror_not_found,
@@ -1672,8 +1683,13 @@ class NativeMirrorProvider(MirrorProvider):
             if mirror is None:
                 return None
             repository = self._destination.repository(destination)
+        if repository is None:
+            return False
         key = self._bindings.repository_url_key
-        return repository is not None and key(mirror.url) == key(repository.clone_url)
+        try:
+            return key(mirror.url) == key(repository.clone_url)
+        except ValueError as exc:
+            raise QualificationError(REPOSITORY_URL_MALFORMED) from exc
 
     def delete_mirror(self, mirror_id: int, destination: str) -> int:
         """Delete one mirror by native ID under the installed pending-write guard.
@@ -1825,10 +1841,10 @@ def _installed_module(skill: Path, name: str) -> ModuleType:
     try:
         module = import_module(name)
     except ImportError as exc:
-        raise QualificationError(f"installed_lib_unavailable:{name}") from exc
+        raise QualificationError(INSTALLED_LIB_UNAVAILABLE.format(name=name)) from exc
     location = Path(module.__file__ or "").resolve()
     if not location.is_relative_to(skill.resolve()):
-        raise QualificationError(f"installed_lib_shadowed:{name}")
+        raise QualificationError(INSTALLED_LIB_SHADOWED.format(name=name))
     return module
 
 

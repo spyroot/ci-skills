@@ -21,7 +21,7 @@ import sys
 from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from datetime import datetime, timedelta
 from enum import StrEnum
-from http import HTTPMethod
+from http import HTTPMethod, HTTPStatus
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import ClassVar, Final, NoReturn, Optional
@@ -101,6 +101,8 @@ MIRROR_URL_WITHOUT_SUFFIX: Final[str] = (
 MIRROR_URL_WITH_SLASH: Final[str] = (
     "https://github.example.test/unit/mirror-destination.git/"
 )
+# A mirror URL whose unclosed IPv6 host makes urlsplit raise ValueError.
+MALFORMED_MIRROR_URL: Final[str] = "https://[::1/x"
 MIRROR_ID: Final[int] = 15
 EXECUTION_HOST: Final[str] = "unit-host"
 SKILL_DIGEST: Final[str] = "unit-digest"
@@ -340,7 +342,7 @@ class FakeProvider(QUALIFY.MirrorProvider):
         self.mirror_reads_after_delete = 0
         self.deletes: MutableSequence[str] = []
         self.labels: MutableSequence[str] = []
-        self.mirror_delete_status = 204
+        self.mirror_delete_status = HTTPStatus.NO_CONTENT
         self.keep_mirror = False
         self.mirror_matches = True
         self.destination_override: Optional[dict[str, object]] = None
@@ -461,7 +463,7 @@ class FakeProvider(QUALIFY.MirrorProvider):
         self.deletes.append(f"destination:{path}:{repository_id}")
         self.destination_present = False
         self.destination_deleted = True
-        return 204
+        return HTTPStatus.NO_CONTENT
 
 
 def _planned(
@@ -725,8 +727,8 @@ def test_qualification_removes_only_created_objects_and_records_cleanup(
         QUALIFY.MIRROR_ID_FIELD: mirror_id,
     }
     assert cleanup[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
     assert cleanup[QUALIFY.REPEAT_FIELD][QUALIFY.MUTATED_FIELD] is False
     assert QUALIFY.RECONCILED_FIELD not in cleanup
@@ -1236,7 +1238,7 @@ def test_interrupt_at_the_apply_records_the_ledger_and_deletes_nothing(
             FakeProvider,
             [],
             [MIRROR_DELETED, DESTINATION_DELETED],
-            204,
+            HTTPStatus.NO_CONTENT,
         ),
         (
             AFTER_DELETE,
@@ -1288,7 +1290,7 @@ def test_interrupt_at_the_mirror_delete_leaves_the_ledger_for_reconcile(
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
         QUALIFY.MIRROR_HTTP_STATUS_FIELD: mirror_status,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
 
 
@@ -1607,8 +1609,8 @@ def test_reconcile_removes_the_recorded_ids_after_a_failed_cleanup(
     assert record[QUALIFY.RECONCILED_FIELD] is True
     assert record[QUALIFY.TESTED_REVISION_FIELD] == CANDIDATE
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
     assert record[QUALIFY.REPEAT_FIELD][QUALIFY.MUTATED_FIELD] is False
 
@@ -1636,7 +1638,7 @@ def test_reconcile_deletes_only_the_objects_the_run_created(inputs: object) -> N
     assert provider.destination_present is True
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
         QUALIFY.DESTINATION_HTTP_STATUS_FIELD: None,
     }
     assert record[QUALIFY.AFTER_FIELD][QUALIFY.DESTINATION_HTTP_STATUS_FIELD] is None
@@ -2179,11 +2181,9 @@ def test_installed_bindings_refuse_a_lib_from_another_directory(
     :returns: None; assertions verify the reason.
     """
     monkeypatch.setattr(sys, "path", list(sys.path))
+    reason = QUALIFY.INSTALLED_LIB_SHADOWED.format(name=QUALIFY.CATALOG_MODULE)
 
-    with pytest.raises(
-        QUALIFY.QualificationError,
-        match=f"^installed_lib_shadowed:{QUALIFY.CATALOG_MODULE}$",
-    ):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
         QUALIFY.installed_bindings(tmp_path)
 
 
@@ -2200,11 +2200,10 @@ def test_installed_bindings_refuse_a_lib_without_a_bound_name(
     monkeypatch.setattr(
         QUALIFY, "_installed_module", lambda skill, name: SimpleNamespace()
     )
+    # Attribute name that installed_bindings reads first from installed catalog.
+    reason = QUALIFY.INSTALLED_LIB_INCOMPATIBLE.format(name="GITLAB_TARGET_OPTION")
 
-    with pytest.raises(
-        QUALIFY.QualificationError,
-        match="^installed_lib_incompatible:GITLAB_TARGET_OPTION$",
-    ):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
         QUALIFY.installed_bindings(tmp_path)
 
 
@@ -2212,6 +2211,7 @@ def test_installed_bindings_refuse_a_lib_without_a_bound_name(
     ("module", "name"),
     (
         (QUALIFY.REMOTE_MODULE, REMOTE.repository_url_key.__name__),
+        # Attribute name that InstalledFields.bind reads from installed provenance.
         (QUALIFY.PROVENANCE_MODULE, "DIGEST_VALUE_KEY"),
     ),
     ids=("remote-without-repository-url-key", "provenance-without-digest-key"),
@@ -2235,10 +2235,9 @@ def test_installed_bindings_refuse_an_older_lib_without_a_newer_name(
             )
         },
     )
+    reason = QUALIFY.INSTALLED_LIB_INCOMPATIBLE.format(name=name)
 
-    with pytest.raises(
-        QUALIFY.QualificationError, match=f"^installed_lib_incompatible:{name}$"
-    ):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
         QUALIFY.installed_bindings(SKILL_ROOT)
 
 
@@ -2315,6 +2314,30 @@ def test_native_provider_matches_the_mirror_url_by_the_installed_key(
 
     assert matched.mirror_targets(MIRROR_ID, DESTINATION_PATH) is True
     assert kept.mirror_targets(MIRROR_ID, DESTINATION_PATH) is False
+
+
+def test_native_provider_stops_on_a_malformed_mirror_url(
+    inputs: object, bindings: object
+) -> None:
+    """Stop with a named reason when the installed URL key rejects the mirror URL.
+
+    ``mirror_targets`` converts the ``ValueError`` of ``repository_url_key`` into
+    ``QualificationError``, which ``qualify_mirror.main`` reports as BLOCKED.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :returns: None; assertions verify the reason and the original ``ValueError``.
+    """
+    provider = _native(
+        inputs, bindings, FakeMirrorSource(FakeApi(), mirror_url=MALFORMED_MIRROR_URL)
+    )
+
+    with pytest.raises(
+        QUALIFY.QualificationError, match=f"^{QUALIFY.REPOSITORY_URL_MALFORMED}$"
+    ) as stopped:
+        provider.mirror_targets(MIRROR_ID, DESTINATION_PATH)
+
+    assert isinstance(stopped.value.__cause__, ValueError)
 
 
 def _ref_responses() -> dict[str, object]:
@@ -2423,8 +2446,8 @@ def test_run_cleanup_completes_when_gitlab_reports_another_url_form(
     assert services.deletes == NATIVE_DELETES
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
 
 
@@ -2455,8 +2478,8 @@ def test_reconcile_completes_when_gitlab_reports_another_url_form(
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.RECONCILED_FIELD] is True
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
 
 
@@ -2477,7 +2500,7 @@ def test_native_provider_deletes_the_mirror_inside_the_installed_guard(
 
     status = provider.delete_mirror(MIRROR_ID, DESTINATION_PATH)
 
-    assert status == 204
+    assert status == HTTPStatus.NO_CONTENT
     assert guard.args == (
         SOURCE_HOST,
         MIRROR_PROVIDER.PROJECT_SCOPE,
@@ -2538,7 +2561,7 @@ def test_native_provider_deletes_the_destination_after_an_id_match(
 
     status = provider.delete_destination(DESTINATION_PATH, REPOSITORY_ID)
 
-    assert status == 204
+    assert status == HTTPStatus.NO_CONTENT
     assert api.calls == [
         ("DELETE", REPOSITORY.REPOSITORY_ENDPOINT.format(reference=DESTINATION_PATH))
     ]
@@ -3199,7 +3222,7 @@ def test_main_reports_an_unavailable_installed_copy(
     :param capsys: Captured output.
     :returns: None; assertions verify exit code and output against each module.
     """
-    reason = f"installed_lib_unavailable:{QUALIFY.CATALOG_MODULE}"
+    reason = QUALIFY.INSTALLED_LIB_UNAVAILABLE.format(name=QUALIFY.CATALOG_MODULE)
 
     def unavailable(skill: Path) -> NoReturn:
         """Fail like a missing installed module.

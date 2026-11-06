@@ -36,6 +36,7 @@ from lib.python.core.endpoints import (
     GITLAB_AUTHORITY,
     KUBERNETES_AUTHORITY,
 )
+from lib.python.core.provenance import DIGEST_VALUE_KEY
 from test_gitlab_actions import _plan, _tag_output
 from test_gitlab_mirror import (
     MIRROR_APPLIED_FILE,
@@ -74,7 +75,7 @@ def _digest() -> str:
     """
     from lib.python.core.provenance import tree_digest
 
-    return tree_digest(SKILL_ROOT)["digest"]
+    return tree_digest(SKILL_ROOT)[DIGEST_VALUE_KEY]
 
 
 def _functional_digest() -> str:
@@ -106,7 +107,7 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "tested_revision": "a" * 40,
         "skill": {
-            "digest": _digest(),
+            DIGEST_VALUE_KEY: _digest(),
             "functional_digest": _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
@@ -181,7 +182,7 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "origin": "https://gitlab.runtime.example.test",
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "skill": {
-            "digest": _digest(),
+            DIGEST_VALUE_KEY: _digest(),
             "functional_digest": _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
@@ -230,7 +231,7 @@ def _base_operation(
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "tested_revision": revision["value"],
         "skill": {
-            "digest": _digest(),
+            DIGEST_VALUE_KEY: _digest(),
             "functional_digest": _functional_digest(),
             "revision": revision,
         },
@@ -349,7 +350,10 @@ def _podman_receipt(setup: Mapping[str, JSONObject]) -> JSONObject:
     )
     identity = setup["access.json"]["skill"]
     receipt["skill"].update(
-        digest=identity["digest"], functional_digest=identity["functional_digest"]
+        {
+            DIGEST_VALUE_KEY: identity[DIGEST_VALUE_KEY],
+            "functional_digest": identity["functional_digest"],
+        }
     )
     receipt["skill"]["revision"].update(identity["revision"])
     return receipt
@@ -381,8 +385,10 @@ def _candidate_delivery_receipts(
         receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
         receipt["tested_revision"] = identity["tested_revision"]
         receipt["skill"].update(
-            digest=identity["skill"]["digest"],
-            functional_digest=identity["skill"]["functional_digest"],
+            {
+                DIGEST_VALUE_KEY: identity["skill"][DIGEST_VALUE_KEY],
+                "functional_digest": identity["skill"]["functional_digest"],
+            }
         )
         receipt["skill"]["revision"].update(identity["skill"]["revision"])
         if receipt["operation"] == "chain":
@@ -461,7 +467,9 @@ def _consumer_action_receipt(
         f"{gitlab['origin']}/{gitlab['target']['full_path']}"
     )
     receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
-    receipt["skill"].update(digest=_digest(), functional_digest=_functional_digest())
+    receipt["skill"].update(
+        {DIGEST_VALUE_KEY: _digest(), "functional_digest": _functional_digest()}
+    )
     return PORTABLE.portable(receipt)
 
 
@@ -481,7 +489,7 @@ def _mirror_receipts(
         receipt["captured_at"] = (captured + timedelta(seconds=offset)).isoformat()
         receipt["execution_host"] = access["execution_host"]
         receipt["tested_revision"] = access["tested_revision"]
-        for key in ("digest", "functional_digest"):
+        for key in (DIGEST_VALUE_KEY, "functional_digest"):
             receipt["skill"][key] = access["skill"][key]
         receipt["skill"]["revision"].update(access["skill"]["revision"])
     applied_record = receipts[MIRROR_APPLIED_FILE]["records"][0]
@@ -497,7 +505,7 @@ def _mirror_receipts(
         "status": STATUS.PASS,
         "captured_at": (captured + timedelta(seconds=len(receipts))).isoformat(),
         "execution_host": noop["execution_host"],
-        "skill_digest": noop["skill"]["digest"],
+        "skill_digest": noop["skill"][DIGEST_VALUE_KEY],
         "tested_revision": noop["tested_revision"],
         "before": {
             "source": deepcopy(applied_record["source"]),
@@ -1002,7 +1010,7 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
         mutated=True,
         result_action=STATUS.APPLIED,
         skill={
-            "digest": _digest(),
+            DIGEST_VALUE_KEY: _digest(),
             "functional_digest": _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
@@ -1780,8 +1788,10 @@ def test_targeted_iso_verification_requires_matching_readbacks_and_reader_cleanu
     receipt["captured_at"] = identity["captured_at"]
     receipt["tested_revision"] = identity["tested_revision"]
     receipt["skill"].update(
-        digest=identity["skill"]["digest"],
-        functional_digest=identity["skill"]["functional_digest"],
+        {
+            DIGEST_VALUE_KEY: identity["skill"][DIGEST_VALUE_KEY],
+            "functional_digest": identity["skill"]["functional_digest"],
+        }
     )
     receipt["skill"]["revision"].update(identity["skill"]["revision"])
     name = "iso-verify.json"
