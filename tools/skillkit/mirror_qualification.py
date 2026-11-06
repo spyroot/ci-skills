@@ -78,7 +78,10 @@ from typing import Any, Final, Optional, TypeVar
 from urllib.parse import quote
 
 from skillkit.smoke_cleanup import (
+    AFTER_FIELD,
+    BEFORE_FIELD,
     CAPTURED_AT_FIELD,
+    DELETE_FIELD,
     EXECUTION_HOST_FIELD,
     KIND_FIELD,
     MIRROR_CLEANUP_KIND,
@@ -124,9 +127,8 @@ LEDGER_CREATED_FIELD: Final = "created"
 LEDGER_STATE_FIELD: Final = "cleanup"
 
 # Mirror cleanup record fields; tools/check_live_acceptance.py imports them.
-BEFORE_FIELD: Final = "before"
-DELETE_FIELD: Final = "delete"
-AFTER_FIELD: Final = "after"
+# tools/skillkit/smoke_cleanup.py defines BEFORE_FIELD, DELETE_FIELD and AFTER_FIELD,
+# which the runner cleanup record also uses.
 REPEAT_FIELD: Final = "repeat"
 SOURCE_FIELD: Final = "source"
 DESTINATION_FIELD: Final = "destination"

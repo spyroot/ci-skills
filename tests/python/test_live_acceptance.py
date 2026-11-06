@@ -63,6 +63,8 @@ MIRROR_REQUIRED_OPERATIONS: Final = (
 )
 MIRROR_PAIR_PREFIX: Final[str] = "gitlab_mirror:sync:"
 MIRROR_CLEANUP_REASON: Final[str] = "smoke_cleanup_unverified"
+# Committed runner creation receipt in one of the policy's receipt directories.
+RUNNER_CREATE_RECEIPT: Final[str] = "runner-create-applied.json"
 
 
 if TYPE_CHECKING:
@@ -777,6 +779,28 @@ def test_policy_selected_directories_load_the_successful_podman_receipt() -> Non
         and receipt.get("status") == STATUS.PASS
         for receipt in receipts.values()
     )
+
+
+def test_committed_runner_receipt_records_the_runner_cleanup_kind() -> None:
+    """Compare the runner cleanup kind with the committed runner creation receipt.
+
+    The expected value is the ``smoke_cleanup`` kind that the committed receipt
+    holds, so a change to ``RUNNER_CLEANUP_KIND`` in
+    `tools/skillkit/smoke_cleanup.py` fails against recorded output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    paths = [
+        REPO_ROOT / directory / RUNNER_CREATE_RECEIPT
+        for directory in POLICY["receipt_directories"]
+        if (REPO_ROOT / directory / RUNNER_CREATE_RECEIPT).is_file()
+    ]
+    assert len(paths) == 1, paths
+    receipt = json.loads(paths[0].read_text(encoding="utf-8"))
+
+    cleanup = receipt[ACCEPTANCE.SMOKE_CLEANUP_FIELD]
+
+    assert cleanup[ACCEPTANCE.KIND_FIELD] == ACCEPTANCE.RUNNER_CLEANUP_KIND
 
 
 def test_operation_identity_must_match_the_initial_synthetic_setup() -> None:

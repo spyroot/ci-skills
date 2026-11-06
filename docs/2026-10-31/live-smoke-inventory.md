@@ -141,10 +141,33 @@ names, at the team's request for shared use: repository `1447753892`, private, c
 `main` and tag `smoke-seed` at `aafe5d50bbe4a1884b7b4f86668651e9ddbd5222` pushed from GitLab `261`. Both refs were
 read back at `02:43:56Z`. The access receipt in `tests/acceptance/candidate/access.json` was captured with it present.
 
-Open conflict for the next renewal: the restored `spyroot/test-mirror-push` (`1447753892`) makes the next bounded
+Open conflict for the next renewal: the restored `spyroot/test-mirror-push` (now `1447898875`) makes the next bounded
 qualification stop with `destination_present`. This inventory says "The disposable mirror destination is expected
 absent only after its recorded cleanup"; the team answer is "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO", so
 the repository stays present for shared use. The conflict stays open until the team decides.
+
+### Mirror qualification read-back — 2026-11-06, PR #142 head `fa7063c`
+
+At the team's request we deleted the restored repository `1447753892` so the bounded qualification could run on the
+head of the follow-up pull request #142. A read at `2026-11-06T06:05:43Z` showed it private, created
+`2026-11-06T02:43:05Z`, with `main` and `smoke-seed` at `aafe5d50`; `DELETE repos/spyroot/test-mirror-push` returned
+204; at `06:05:59Z` both `repos/spyroot/test-mirror-push` and `repositories/1447753892` returned 404, and a second
+read at `06:06:18Z` returned `RESOURCE_NOT_FOUND` by name and by ID with no remote mirror on `261`.
+
+Candidate `fa7063c` (installed copy digest `63bdb745`) then ran `tools/qualify_mirror.py --apply`, run
+`bug133-mirror-20261106-fa7063c`. It created private GitHub repository `1447896555` and GitLab mirror `18` for
+retained source `261`; both seed refs matched; a wrong confirmation returned BLOCKED `mirror_plan_mismatch` without
+mutation; the confirmed repeat was NO_OP. Cleanup deleted mirror `18` and repository `1447896555` (HTTP 204 each),
+read both absent by name and by ID, and repeated once with no further DELETE (`2026-11-06T06:10:00Z`). An independent
+read at `06:10:07Z` returned `RESOURCE_NOT_FOUND` by name and by ID and no remote mirror on `261`. The `931b188`
+receipts moved to `tests/acceptance/historical/pre-gitlab-private-public-followup/`.
+
+After that cleanup, we restored `spyroot/test-mirror-push` again at the team's request for shared use: repository
+`1447898875`, private, created `2026-11-06T06:10:37Z`, with `main` and tag `smoke-seed` at `aafe5d50` pushed from
+GitLab `261`. Both refs read back at `06:11:10Z` and again at `06:11:31Z`. The `fa7063c` install then captured the
+access receipt with the repository present (PASS on GitHub, GitLab and Kubernetes and on five live checks), and
+`tools/check_live_acceptance.py --root . --no-aggregate --receipts tests/acceptance/candidate` returned PASS with
+functional digest `5e988fb7` and `problems: []`.
 
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
 The `1f2b6f5` qualification remains in the merged CI-14 history. The prior `ae47632` originals remain unchanged under

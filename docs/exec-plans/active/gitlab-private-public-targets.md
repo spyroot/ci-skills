@@ -65,9 +65,12 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - [x] (GPP-10) Team answers replace the CONFLICT statuses of DEC-03, DEC-05, DEC-08, DEC-10 and DEC-17, and DEC-19
   adds the keys rule. `tools/qualify_mirror.py`, built on `tools/skillkit/mirror_qualification.py` and tested by
   `tests/python/test_mirror_qualification.py`, produces the mirror qualification.
-- [ ] (GPP-12) Renew the candidate receipts and the GPP-07b install evidence on the final head of PR #141 (DEC-20).
-  The PR #138 fold `a476185` and every later change under `ci-skills/lib`, starting with `7b1b0cc` and `356a29e`,
-  invalidate the `931b188` receipts.
+- [x] (GPP-12) We renewed the candidate receipts and the install evidence on head `fa7063c` of the follow-up PR #142
+  (DEC-20), because the PR #138 fold `a476185` and the later changes under `ci-skills/lib` invalidated the `931b188`
+  receipts. Both installs read back `fa7063c` (digest `63bdb745`); one bounded mirror qualification and the access
+  receipt ran from that install (native IDs in `docs/2026-10-31/live-smoke-inventory.md`, section "Mirror
+  qualification read-back — 2026-11-06, PR #142 head `fa7063c`"); `tools/check_live_acceptance.py --root .
+  --no-aggregate --receipts tests/acceptance/candidate` returned PASS with functional digest `5e988fb7`.
 
 ## Surprises & Discoveries
 
@@ -115,7 +118,7 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - Observation: `ci-api` prints fixed wire-format objects (`PlanAPICheck`, `PlanAPI`, `ApiIdentitySelector`).
   Evidence: `core/api_read.py`. `ci-api` takes host and token file from the selected instance and keeps the route on
   `ApiProviderSelection.route`; its printed output is unchanged.
-- Observation: the restored `spyroot/test-mirror-push` (`1447753892`) makes the next `tools/qualify_mirror.py` run
+- Observation: the restored `spyroot/test-mirror-push` (`1447898875`) makes the next `tools/qualify_mirror.py` run
   stop with `destination_present`. The inventory rule and the team's request to keep the repository conflict; the
   tool stays unchanged until the team decides.
   Evidence: `docs/2026-10-31/live-smoke-inventory.md`, section "Mirror qualification read-back — 2026-11-06";
@@ -624,6 +627,11 @@ defines all of them (`catalog.GITLAB_TARGET_OPTION` is imported from there); doc
 `schemas/ci_skills_portability.schema.json` gains the rule and
 the selector `contract`)
 and `tools/check_live_acceptance.py` (`RECEIPT_SCHEMA_VERSIONS` from the catalog constants).
+
+INTRODUCED `tools/skillkit/smoke_cleanup.py`: the keys and kinds of the mirror and runner cleanup records, and the
+receipt keys `skill` and `revision` that only `tools/` reads. They stay in `tools/` rather than `ci-skills/lib`: no
+lib module owns them, and moving them into `ci-skills/lib` would change the functional digest of the skill and
+invalidate the committed receipts.
 
 INTRODUCED `tools/skillkit/mirror_qualification.py` and its thin adapter `tools/qualify_mirror.py`, with
 `tests/python/test_mirror_qualification.py`. `MirrorQualification.run()` drives the installed `gitlab_mirror.py`

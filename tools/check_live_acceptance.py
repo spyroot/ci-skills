@@ -80,9 +80,6 @@ from lib.python.core.provenance import DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, exit_code
 from skillkit.mirror_qualification import (
-    AFTER_FIELD,
-    BEFORE_FIELD,
-    DELETE_FIELD,
     DESTINATION_FIELD,
     DESTINATION_HTTP_STATUS_FIELD,
     DESTINATION_ID_HTTP_STATUS_FIELD,
@@ -94,7 +91,10 @@ from skillkit.mirror_qualification import (
     SOURCE_FIELD,
 )
 from skillkit.smoke_cleanup import (
+    AFTER_FIELD,
+    BEFORE_FIELD,
     CAPTURED_AT_FIELD,
+    DELETE_FIELD,
     EXECUTION_HOST_FIELD,
     KIND_FIELD,
     MIRROR_CLEANUP_KIND,
@@ -289,7 +289,7 @@ def _operation_key(receipt: JSONObject) -> Optional[OperationKey]:
     :param receipt: Selected receipt whose shape will be independently validated.
     :returns: Comparable operation key, or None for malformed key fields.
     """
-    kind = receipt.get("kind")
+    kind = receipt.get(KIND_FIELD)
     operation = receipt.get("operation")
     action = receipt.get("result_action")
     if kind == MIRROR_KIND:
@@ -491,10 +491,10 @@ def _check_source_revision(receipt: JSONObject) -> Sequence[str]:
     :param receipt: Live receipt retaining its original tested source revision.
     :returns: Stable reasons when the revision is unverified or inconsistent.
     """
-    skill = _mapping(receipt.get("skill"))
-    source = _mapping(skill.get("revision"))
-    revision = receipt.get("tested_revision")
-    if receipt.get("kind") == "gitlab_access" and revision is None:
+    skill = _mapping(receipt.get(SKILL_FIELD))
+    source = _mapping(skill.get(REVISION_FIELD))
+    revision = receipt.get(TESTED_REVISION_FIELD)
+    if receipt.get(KIND_FIELD) == "gitlab_access" and revision is None:
         # Access receipts carry the same verified source under skill.revision.
         revision = source.get("value")
     if (
@@ -523,7 +523,7 @@ def check_candidate_identity(receipt: JSONObject, skill_root: Path) -> Sequence[
         current = functional_digest(skill_root)
     except (ImportError, OSError, ValueError):
         return ["candidate_digest_unavailable"]
-    if _mapping(receipt.get("skill")).get(FUNCTIONAL_DIGEST_KEY) != current:
+    if _mapping(receipt.get(SKILL_FIELD)).get(FUNCTIONAL_DIGEST_KEY) != current:
         return ["candidate_functional_digest_mismatch"]
     return []
 
@@ -577,8 +577,8 @@ def check_recorded_identity(receipt: JSONObject, skill_root: Path) -> Sequence[s
         return problems
     if not check_candidate_identity(receipt, skill_root):
         return []
-    skill = _mapping(receipt.get("skill"))
-    revision = _mapping(skill.get("revision"))["value"]
+    skill = _mapping(receipt.get(SKILL_FIELD))
+    revision = _mapping(skill.get(REVISION_FIELD))["value"]
     original = _source_functional_digest(skill_root, json_string(revision))
     if original is None:
         return ["recorded_source_unavailable"]
@@ -623,9 +623,9 @@ def _check_common(
     problems: MutableSequence[str] = []
     if receipt.get("schema_version") not in RECEIPT_SCHEMA_VERSIONS:
         problems.append(f"{name}:schema_version_unexpected")
-    if receipt.get("status") != PASS:
+    if receipt.get(STATUS_FIELD) != PASS:
         problems.append(f"{name}:status_not_pass")
-    skill = _mapping(receipt.get("skill"))
+    skill = _mapping(receipt.get(SKILL_FIELD))
     if not skill.get(DIGEST_VALUE_KEY):
         problems.append(f"{name}:skill_digest_absent")
     reported = skill.get(FUNCTIONAL_DIGEST_KEY)
@@ -633,7 +633,7 @@ def _check_common(
         problems.append(f"{name}:functional_digest_absent")
     elif reported != digest:
         problems.append(f"{name}:functional_digest_mismatch")
-    captured = _parse_time(receipt.get("captured_at"))
+    captured = _parse_time(receipt.get(CAPTURED_AT_FIELD))
     if captured is None:
         problems.append(f"{name}:captured_at_unreadable")
     elif captured > now:
@@ -896,10 +896,10 @@ def _check_receipt(
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
     """  # noqa: DOC502 - Shared validators propagate failures.
     problems = _check_common(name, receipt, digest, now, max_age_days)
-    if receipt.get("kind") != RECEIPT_KIND:
+    if receipt.get(KIND_FIELD) != RECEIPT_KIND:
         problems.append(f"{name}:kind_unexpected")
-    revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
-    tested_revision = receipt.get("tested_revision")
+    revision = _mapping(_mapping(receipt.get(SKILL_FIELD)).get(REVISION_FIELD))
+    tested_revision = receipt.get(TESTED_REVISION_FIELD)
     if (
         not isinstance(revision, dict)
         or revision.get("verified") is not True
@@ -908,7 +908,7 @@ def _check_receipt(
         or revision.get("value") != tested_revision
     ):
         problems.append(f"{name}:tested_revision_unverified")
-    if not receipt.get("execution_host"):
+    if not receipt.get(EXECUTION_HOST_FIELD):
         problems.append(f"{name}:execution_host_missing")
     surfaces = _mapping(receipt.get("surfaces"))
     sources = _mapping(receipt.get("credential_sources"))
@@ -978,7 +978,7 @@ def _gitlab_context(receipt: JSONObject) -> JSONObject:
     target = _mapping(receipt.get("target"))
     identity = _mapping(receipt.get("identity"))
     return {
-        "execution_host": receipt.get("execution_host"),
+        EXECUTION_HOST_FIELD: receipt.get(EXECUTION_HOST_FIELD),
         "origin": receipt.get("origin"),
         "username": identity.get("username"),
         "identity_id": identity.get("id"),
@@ -999,7 +999,7 @@ def _matches_context(receipt: JSONObject, context: JSONObject) -> bool:
     """
     target = _mapping(receipt.get("verified_target"))
     return (
-        receipt.get("execution_host") == context.get("execution_host")
+        receipt.get(EXECUTION_HOST_FIELD) == context.get(EXECUTION_HOST_FIELD)
         and receipt.get("origin") == context.get("origin")
         and target.get("kind") == context.get("target_kind")
         and target.get("id") == context.get("target_id")
@@ -1030,10 +1030,10 @@ def _check_gitlab_receipt(
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
     """  # noqa: DOC502 - Context indexing and shared validators propagate failures.
     problems = _check_common(name, receipt, digest, now, max_age_days)
-    kind = required["kind"]
-    if kind not in GITLAB_RECEIPT_KINDS or receipt.get("kind") != kind:
+    kind = required[KIND_FIELD]
+    if kind not in GITLAB_RECEIPT_KINDS or receipt.get(KIND_FIELD) != kind:
         problems.append(f"{name}:kind_unexpected")
-    for field in ("execution_host", "origin"):
+    for field in (EXECUTION_HOST_FIELD, "origin"):
         if receipt.get(field) != required.get(field):
             problems.append(f"{name}:{field}_mismatch")
     identity = _mapping(receipt.get("identity"))
@@ -1111,7 +1111,7 @@ def _check_gitlab_read_receipt(
     records = receipt.get("records")
     readback = receipt.get("readback")
     if (
-        receipt.get("status") != PASS
+        receipt.get(STATUS_FIELD) != PASS
         or receipt.get("phase") != "READ"
         or receipt.get("mutated") is not False
         or receipt.get("operation") != required.get("operation")
@@ -1293,9 +1293,9 @@ def _runner_smoke_cleanup_verified(
     if not isinstance(cleanup, dict):
         return False
     runner_id = _mapping(receipt.get("readback")).get("id")
-    before = cleanup.get("before")
-    deletion = cleanup.get("delete")
-    after = cleanup.get("after")
+    before = cleanup.get(BEFORE_FIELD)
+    deletion = cleanup.get(DELETE_FIELD)
+    after = cleanup.get(AFTER_FIELD)
     if (
         cleanup.get("schema_version") != SCHEMA_VERSION
         or cleanup.get(KIND_FIELD) != RUNNER_CLEANUP_KIND
@@ -1405,7 +1405,7 @@ class AcceptanceReview:
         :raises RecursionError: If receipt containers exceed recursive redaction limits.
         """  # noqa: DOC502 - Receipt helpers propagate recursion failures.
         for name, receipt in self.setup.items():
-            kind = receipt.get("kind")
+            kind = receipt.get(KIND_FIELD)
             try:
                 if kind == RECEIPT_KIND:
                     found = _check_receipt(
@@ -1415,7 +1415,7 @@ class AcceptanceReview:
                         self.now,
                         self.max_age_days,
                     )
-                    host = receipt.get("execution_host")
+                    host = receipt.get(EXECUTION_HOST_FIELD)
                     if not isinstance(host, str):
                         found.append(f"{name}:receipt_invalid_shape")
                     elif host in self.access_hosts:
@@ -1427,7 +1427,7 @@ class AcceptanceReview:
                     found = _check_gitlab_receipt(
                         name,
                         receipt,
-                        {**context, "kind": kind},
+                        {**context, KIND_FIELD: kind},
                         self.functional_digest,
                         self.now,
                         self.max_age_days,
@@ -1455,7 +1455,7 @@ class AcceptanceReview:
                     self.contexts.append(context)
                     self.observed_operations.add((kind, None, None))
         if not any(
-            self.setup[name].get("kind") == RECEIPT_KIND for name in self.accepted
+            self.setup[name].get(KIND_FIELD) == RECEIPT_KIND for name in self.accepted
         ):
             self.problems.append("access_check:setup_missing")
 
@@ -1507,7 +1507,7 @@ class AcceptanceReview:
                 continue
             required = {
                 **candidates[0],
-                "kind": kind,
+                KIND_FIELD: kind,
                 "operation": operation,
                 "result_action": result_action,
             }
@@ -1520,7 +1520,7 @@ class AcceptanceReview:
                 if (kind, operation) in REPEATABLE_GITLAB_OPERATIONS:
                     try:
                         pair = (
-                            json_string(required["execution_host"]),
+                            json_string(required[EXECUTION_HOST_FIELD]),
                             json_string(required["origin"]),
                             kind,
                             json_string(operation),
@@ -1575,7 +1575,8 @@ class AcceptanceReview:
         selected = [
             self.receipts[name]
             for name in self.accepted
-            if name in self.receipts and self.receipts[name].get("kind") == MIRROR_KIND
+            if name in self.receipts
+            and self.receipts[name].get(KIND_FIELD) == MIRROR_KIND
         ]
         if not selected:
             return
@@ -1601,8 +1602,8 @@ class AcceptanceReview:
             applied, noop, self.now, self.max_age_days
         ):
             self.problems.append(prefix + "smoke_cleanup_unverified")
-        applied_time = _parse_time(applied.get("captured_at"))
-        noop_time = _parse_time(noop.get("captured_at"))
+        applied_time = _parse_time(applied.get(CAPTURED_AT_FIELD))
+        noop_time = _parse_time(noop.get(CAPTURED_AT_FIELD))
         if applied_time is None or noop_time is None or applied_time >= noop_time:
             self.problems.append(prefix + "repeat_readback_order_invalid")
         try:
@@ -1650,8 +1651,8 @@ class AcceptanceReview:
         """
         return {
             "schema_version": SCHEMA_VERSION,
-            "kind": "live_acceptance",
-            "status": PASS if not self.problems else BLOCKED,
+            KIND_FIELD: "live_acceptance",
+            STATUS_FIELD: PASS if not self.problems else BLOCKED,
             SKILL_DIGEST_FIELD: self.digest,
             FUNCTIONAL_DIGEST_KEY: self.functional_digest,
             "accepted": sorted(self.accepted),
@@ -1672,7 +1673,7 @@ def _check_chain_runner_readback(
     reads = [
         (read_name, item)
         for read_name, item in review.receipts.items()
-        if item.get("kind") == "gitlab_runner" and item.get("operation") == "get"
+        if item.get(KIND_FIELD) == "gitlab_runner" and item.get("operation") == "get"
     ]
     if not reads:
         return [f"{name}:runner_get_receipt_missing"]
@@ -1688,8 +1689,8 @@ def _check_chain_runner_readback(
         or runner_id <= 0
         or any(not value for value in context.values())
         or _check_source_revision(access)
-        or _mapping(_mapping(access.get("skill")).get("revision")).get("value")
-        != receipt.get("tested_revision")
+        or _mapping(_mapping(access.get(SKILL_FIELD)).get(REVISION_FIELD)).get("value")
+        != receipt.get(TESTED_REVISION_FIELD)
     ):
         return [f"{name}:runner_get_readback_mismatch"]
     matching = 0
@@ -1697,7 +1698,7 @@ def _check_chain_runner_readback(
         found = _check_gitlab_receipt(
             read_name,
             item,
-            {**context, "kind": "gitlab_runner", "operation": "get"},
+            {**context, KIND_FIELD: "gitlab_runner", "operation": "get"},
             review.functional_digest,
             review.now,
             review.max_age_days,
@@ -1715,7 +1716,7 @@ def _check_chain_runner_readback(
             and _mapping(item.get("plan")).get("resource_id") == runner_id
             and record.get("online") is True
             and record.get("status") == "online"
-            and item.get("tested_revision") == receipt.get("tested_revision")
+            and item.get(TESTED_REVISION_FIELD) == receipt.get(TESTED_REVISION_FIELD)
         ):
             matching += 1
     return [] if matching == 1 else [f"{name}:runner_get_readback_mismatch"]
@@ -1824,7 +1825,7 @@ def _check_targeted_receipt(
     :param required: Aggregate setup context, or None for a selected receipt.
     :returns: Provenance, schema, execution, read-back or cleanup failures.
     """
-    kind = receipt.get("kind")
+    kind = receipt.get(KIND_FIELD)
     operation = receipt.get("operation")
     arguments = (
         name,
@@ -1889,7 +1890,7 @@ def _check_targeted_receipt(
                     required
                     or {
                         **context,
-                        "kind": kind,
+                        KIND_FIELD: kind,
                         "operation": operation,
                         "result_action": receipt.get("result_action"),
                     },
@@ -1977,16 +1978,18 @@ def evaluate(
         revision
         for receipt in receipts.values()
         if isinstance(
-            revision := _mapping(_mapping(receipt.get("skill")).get("revision")).get(
-                "value"
-            ),
+            revision := _mapping(
+                _mapping(receipt.get(SKILL_FIELD)).get(REVISION_FIELD)
+            ).get("value"),
             str,
         )
     }
-    result["tested_revision"] = next(iter(revisions)) if len(revisions) == 1 else None
+    result[TESTED_REVISION_FIELD] = (
+        next(iter(revisions)) if len(revisions) == 1 else None
+    )
     if len(revisions) > 1:
         result["problems"] = sorted([*result["problems"], "mixed_tested_revisions"])
-        result["status"] = BLOCKED
+        result[STATUS_FIELD] = BLOCKED
     return result
 
 
@@ -2057,16 +2060,16 @@ def main() -> int:
         setup = {
             name: receipt
             for name, receipt in receipts.items()
-            if receipt.get("kind") in SETUP_RECEIPT_KINDS
+            if receipt.get(KIND_FIELD) in SETUP_RECEIPT_KINDS
         }
         if args.dry_run:
             data = {
                 "schema_version": SCHEMA_VERSION,
-                "kind": "live_acceptance",
-                "status": DRY_RUN,
+                KIND_FIELD: "live_acceptance",
+                STATUS_FIELD: DRY_RUN,
                 "policy": dict(policy),
                 "mode": "aggregate" if args.aggregate else "targeted",
-                "tested_revision": None,
+                TESTED_REVISION_FIELD: None,
                 "receipts": sorted(receipts),
                 "accepted": [],
                 "problems": [],
@@ -2083,10 +2086,10 @@ def main() -> int:
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {
             "schema_version": SCHEMA_VERSION,
-            "kind": "live_acceptance",
-            "status": BLOCKED,
+            KIND_FIELD: "live_acceptance",
+            STATUS_FIELD: BLOCKED,
             "mode": "aggregate" if args.aggregate else "targeted",
-            "tested_revision": None,
+            TESTED_REVISION_FIELD: None,
             "accepted": [],
             "problems": [str(exc)],
         }
@@ -2098,9 +2101,9 @@ def main() -> int:
 
         print(yaml.safe_dump(data, sort_keys=True), end="")
     else:
-        print(f"Live acceptance: {data['status']} ({data['mode']})")
-        print(f"  tested revision {data['tested_revision'] or 'unavailable'}")
-        if data["status"] == DRY_RUN:
+        print(f"Live acceptance: {data[STATUS_FIELD]} ({data['mode']})")
+        print(f"  tested revision {data[TESTED_REVISION_FIELD] or 'unavailable'}")
+        if data[STATUS_FIELD] == DRY_RUN:
             policy = data["policy"]
             print(f"  window    {policy['max_receipt_age_days']} days")
             for directory in policy["receipt_directories"]:
@@ -2111,7 +2114,7 @@ def main() -> int:
             print(f"  accepted {name}")
         for problem in data["problems"]:
             print(f"  problem  {problem}")
-    status = json_string(data["status"])
+    status = json_string(data[STATUS_FIELD])
     log_event(args, "live_acceptance", "result", status, persist=not args.dry_run)
     return exit_code(status)
 

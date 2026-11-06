@@ -6,7 +6,8 @@ carries the ``gitlab_runner_smoke_cleanup`` record under the same key.
 `tools/check_live_acceptance.py` verifies both records; its
 ``_smoke_cleanup_matches_execution`` compares the keys below with the receipt that
 carries the record and reads that receipt's skill identity through ``skill`` and
-``revision``.
+``revision``. Both records hold the pre-delete state under ``before``, the delete
+calls under ``delete`` and the absence read-back under ``after``.
 
 This module imports nothing from ``lib``: `tools/skillkit/mirror_qualification.py`
 imports it before ``installed_bindings`` puts the installed copy's ``lib`` package
@@ -34,6 +35,11 @@ SKILL_DIGEST_FIELD: Final = "skill_digest"
 # Receipt keys of the skill identity and of the revision record inside it.
 SKILL_FIELD: Final = "skill"
 REVISION_FIELD: Final = "revision"
+# Keys of the pre-delete state, the delete calls and the absence read-back in both
+# cleanup records.
+BEFORE_FIELD: Final = "before"
+DELETE_FIELD: Final = "delete"
+AFTER_FIELD: Final = "after"
 
 # Values of KIND_FIELD in the two cleanup records.
 MIRROR_CLEANUP_KIND: Final = "gitlab_mirror_smoke_cleanup"
