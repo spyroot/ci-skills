@@ -39,7 +39,9 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from importlib import util
 from pathlib import Path
+from types import ModuleType
 from typing import Final, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -49,6 +51,7 @@ from skillkit.mirror_qualification import (
     DEFAULT_TIMEOUT_SECONDS,
     RECONCILE_OPTION,
     STATUS_FIELD,
+    STATUS_MODULE,
     InstalledMirrorCommand,
     InstalledStatus,
     MirrorQualification,
@@ -69,10 +72,14 @@ PLAN_ONLY_OPTION: Final = "--plan-only"
 APPLY_MODE_OPTION: Final = "--apply"
 # Shown by --help, which runs before the installed catalog is imported.
 GITLAB_OPTION_PLACEHOLDER: Final = "--<GITLAB_TARGET_OPTION>"
-# _blocked() runs when the installed copy could not be bound, so the installed
-# lib.python.sys.status is unavailable and these two values are local copies.
-PRE_BINDING_BLOCKED: Final = "BLOCKED"
-PRE_BINDING_EXIT: Final = 2
+# _blocked() runs when the installed copy could not be bound. It reads BLOCKED and
+# exit_code from this repository's copy of the status module, loaded by file path
+# under REPOSITORY_STATUS_NAME so that ``lib`` stays the installed package.
+REPOSITORY_SKILL: Final = Path(__file__).resolve().parents[1] / "ci-skills"
+REPOSITORY_STATUS_FILE: Final = REPOSITORY_SKILL.joinpath(
+    *STATUS_MODULE.split(".")
+).with_suffix(".py")
+REPOSITORY_STATUS_NAME: Final = "_qualify_mirror_repository_status"
 REASON_FIELD: Final = "reason"
 PLAN_FIELD: Final = "plan"
 LEDGER_FIELD: Final = "ledger"
@@ -156,14 +163,31 @@ def build_parser(gitlab_option: str) -> argparse.ArgumentParser:
     return parser
 
 
+def repository_status() -> ModuleType:
+    """Load ``REPOSITORY_STATUS_FILE`` as ``REPOSITORY_STATUS_NAME``.
+
+    The module is not added to ``sys.modules``; ``status.py`` imports nothing.
+
+    :returns: The repository's status module.
+    :raises ImportError: The file cannot be loaded.
+    """
+    spec = util.spec_from_file_location(REPOSITORY_STATUS_NAME, REPOSITORY_STATUS_FILE)
+    if spec is None or spec.loader is None:
+        raise ImportError(str(REPOSITORY_STATUS_FILE), name=REPOSITORY_STATUS_NAME)
+    module = util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _blocked(reason: str) -> int:
     """Print a stopping reason found before the installed copy is bound.
 
     :param reason: Stopping reason.
-    :returns: ``PRE_BINDING_EXIT``.
+    :returns: Exit code of ``BLOCKED`` from the repository's status module.
     """
-    print(json.dumps({STATUS_FIELD: PRE_BINDING_BLOCKED, REASON_FIELD: reason}))
-    return PRE_BINDING_EXIT
+    status = repository_status()
+    print(json.dumps({STATUS_FIELD: status.BLOCKED, REASON_FIELD: reason}))
+    return status.exit_code(status.BLOCKED)
 
 
 def _report(status: InstalledStatus, token: str, field: str, value: object) -> int:
@@ -233,6 +257,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             InstalledMirrorCommand(inputs),
             lambda label: NativeMirrorProvider.bind(inputs, bindings, label),
             status,
+            bindings.fields,
         )
         with terminate_as_interrupt():
             if args.apply:

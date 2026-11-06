@@ -29,7 +29,8 @@ run left pending, for the native IDs that ledger recorded only. Provider calls s
 behind `MirrorProvider`; `NativeMirrorProvider` binds the installed skill's own
 GitLab and GitHub services. Status tokens, record actions and exit codes compared
 with the installed command's output are bound from the installed copy
-(`InstalledStatus`), not copied here.
+(`InstalledStatus`), and so are the keys it is read with (`InstalledFields`); the
+keys defined here name only what this module writes.
 
 The cleanup record has ``kind``, ``status``, ``captured_at``, ``execution_host``,
 ``skill_digest``, ``tested_revision``, ``before`` (``source``, ``destination``,
@@ -180,6 +181,9 @@ DESTINATION_DELETE: Final = "destination_delete"
 PROVIDER_FAILURE: Final = "provider_error:{step}:{reason}"
 # Attribute of the installed APIError holding its classified reason.
 REASON_ATTRIBUTE: Final = "reason"
+# Key of the digest in the receipt's skill identity; core/provenance.py writes it
+# without a constant.
+SKILL_DIGEST_KEY: Final = "digest"
 # Neither route has a constant in the installed lib.
 REF_ENDPOINT: Final = "projects/{project}/repository/{kind}/{name}"
 REPOSITORY_ID_ENDPOINT: Final = "repositories/{repository_id}"
@@ -189,6 +193,7 @@ CLI_API_MODULE: Final = "lib.python.core.cli_api"
 GITLAB_API_MODULE: Final = "lib.python.core.gitlab.gitlab_api"
 MIRROR_CLI_MODULE: Final = "lib.python.core.gitlab.mirror.cli"
 MIRROR_CONSTANTS_MODULE: Final = "lib.python.core.gitlab.mirror.constants"
+MIRRORING_MODULE: Final = "lib.python.core.git.mirroring"
 MIRROR_PROVIDER_MODULE: Final = "lib.python.core.gitlab.mirror.provider"
 REPOSITORY_MODULE: Final = "lib.python.core.github.repository"
 STATUS_MODULE: Final = "lib.python.sys.status"
@@ -450,6 +455,179 @@ class InstalledStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class InstalledFields:
+    """Keys of the installed mirror command's result and receipt that this tool reads.
+
+    :param status: ``Field.STATUS`` from ``core/gitlab/mirror/constants.py``.
+    :param records: ``Field.RECORDS`` from the same module.
+    :param action: ``Field.ACTION`` from the same module.
+    :param created: ``Field.CREATED`` from the same module.
+    :param mirror: ``Field.MIRROR`` from the same module.
+    :param repository: ``Field.REPOSITORY`` from the same module.
+    :param source: ``Field.SOURCE`` from the same module.
+    :param destination: ``Field.DESTINATION`` from the same module.
+    :param source_refs: ``Field.SOURCE_REFS`` from the same module.
+    :param destination_refs: ``Field.DESTINATION_REFS`` from the same module.
+    :param plan_digest: ``Field.PLAN_DIGEST`` from the same module.
+    :param mutated: ``Field.MUTATED`` from the same module.
+    :param tested_revision: ``Field.TESTED_REVISION`` from the same module.
+    :param target_source: ``Field.TARGET_SOURCE`` from the same module.
+    :param skill: ``Field.SKILL`` from the same module.
+    :param execution_host: ``EnvelopeField.EXECUTION_HOST`` from
+        ``core/gitlab/mirror/cli.py``.
+    :param id: ``MirrorField.ID`` from ``core/git/mirroring.py``.
+    :param host: ``MirrorField.HOST`` from the same module.
+    :param path: ``MirrorField.PATH`` from the same module.
+
+    .. attribute :: status
+        :type: str
+
+        Result status.
+
+    .. attribute :: records
+        :type: str
+
+        Result records.
+
+    .. attribute :: action
+        :type: str
+
+        Record action.
+
+    .. attribute :: created
+        :type: str
+
+        Record ownership flags, and the ledger copy of them.
+
+    .. attribute :: mirror
+        :type: str
+
+        Mirror evidence of a record, and the mirror flag in ``created``.
+
+    .. attribute :: repository
+        :type: str
+
+        Repository flag in ``created``.
+
+    .. attribute :: source
+        :type: str
+
+        Source evidence of a record.
+
+    .. attribute :: destination
+        :type: str
+
+        Destination evidence of a record.
+
+    .. attribute :: source_refs
+        :type: str
+
+        Source ref fingerprint of a record.
+
+    .. attribute :: destination_refs
+        :type: str
+
+        Destination ref fingerprint of a record.
+
+    .. attribute :: plan_digest
+        :type: str
+
+        Live-plan confirmation digest.
+
+    .. attribute :: mutated
+        :type: str
+
+        Whether the result wrote.
+
+    .. attribute :: tested_revision
+        :type: str
+
+        Receipt candidate revision.
+
+    .. attribute :: target_source
+        :type: str
+
+        Target file the command resolved.
+
+    .. attribute :: skill
+        :type: str
+
+        Receipt skill identity.
+
+    .. attribute :: execution_host
+        :type: str
+
+        Receipt execution host.
+
+    .. attribute :: id
+        :type: str
+
+        Native ID in source, destination and mirror evidence.
+
+    .. attribute :: host
+        :type: str
+
+        Host in source and destination evidence.
+
+    .. attribute :: path
+        :type: str
+
+        Path in source and destination evidence.
+    """
+
+    status: str
+    records: str
+    action: str
+    created: str
+    mirror: str
+    repository: str
+    source: str
+    destination: str
+    source_refs: str
+    destination_refs: str
+    plan_digest: str
+    mutated: str
+    tested_revision: str
+    target_source: str
+    skill: str
+    execution_host: str
+    id: str
+    host: str
+    path: str
+
+    @classmethod
+    def bind(cls, field: Any, envelope: Any, evidence: Any) -> InstalledFields:
+        """Read the keys from the installed mirror and evidence enumerations.
+
+        :param field: Installed ``Field`` of ``core/gitlab/mirror/constants.py``.
+        :param envelope: Installed ``EnvelopeField`` of ``core/gitlab/mirror/cli.py``.
+        :param evidence: Installed ``MirrorField`` of ``core/git/mirroring.py``.
+        :returns: Bound keys.
+        """
+        return cls(
+            status=field.STATUS,
+            records=field.RECORDS,
+            action=field.ACTION,
+            created=field.CREATED,
+            mirror=field.MIRROR,
+            repository=field.REPOSITORY,
+            source=field.SOURCE,
+            destination=field.DESTINATION,
+            source_refs=field.SOURCE_REFS,
+            destination_refs=field.DESTINATION_REFS,
+            plan_digest=field.PLAN_DIGEST,
+            mutated=field.MUTATED,
+            tested_revision=field.TESTED_REVISION,
+            target_source=field.TARGET_SOURCE,
+            skill=field.SKILL,
+            execution_host=envelope.EXECUTION_HOST,
+            id=evidence.ID,
+            host=evidence.HOST,
+            path=evidence.PATH,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class InstalledBindings:
     """Names bound at run time from the installed copy's ``lib`` package.
 
@@ -468,6 +646,8 @@ class InstalledBindings:
     :param repository_not_found: ``NOT_FOUND`` from the same module.
     :param path_separator: ``PATH_SEPARATOR`` from the same module.
     :param status: Tokens from ``sys/status.py`` and mirror ``Outcome``.
+    :param fields: Result and receipt keys from mirror ``Field``, ``EnvelopeField``
+        and ``MirrorField``.
 
     .. attribute :: gitlab_option
         :type: str
@@ -533,6 +713,12 @@ class InstalledBindings:
         :type: InstalledStatus
 
         Tokens from ``sys/status.py`` and mirror ``Outcome``.
+
+    .. attribute :: fields
+        :type: InstalledFields
+
+        Result and receipt keys from mirror ``Field``, ``EnvelopeField`` and
+        ``MirrorField``.
     """
 
     gitlab_option: str
@@ -548,6 +734,7 @@ class InstalledBindings:
     repository_not_found: str
     path_separator: str
     status: InstalledStatus
+    fields: InstalledFields
 
 
 def installed_bindings(skill: Path) -> InstalledBindings:
@@ -569,6 +756,7 @@ def installed_bindings(skill: Path) -> InstalledBindings:
     gitlab_api = _installed_module(skill, GITLAB_API_MODULE)
     mirror_cli = _installed_module(skill, MIRROR_CLI_MODULE)
     mirror_constants = _installed_module(skill, MIRROR_CONSTANTS_MODULE)
+    mirroring = _installed_module(skill, MIRRORING_MODULE)
     mirror_provider = _installed_module(skill, MIRROR_PROVIDER_MODULE)
     repository = _installed_module(skill, REPOSITORY_MODULE)
     status = _installed_module(skill, STATUS_MODULE)
@@ -587,6 +775,11 @@ def installed_bindings(skill: Path) -> InstalledBindings:
             repository_not_found=repository.NOT_FOUND,
             path_separator=repository.PATH_SEPARATOR,
             status=InstalledStatus.bind(status, mirror_constants.Outcome),
+            fields=InstalledFields.bind(
+                mirror_constants.Field,
+                mirror_cli.EnvelopeField,
+                mirroring.MirrorField,
+            ),
         )
     except AttributeError as exc:
         raise QualificationError(f"installed_lib_incompatible:{exc.name}") from exc
@@ -782,15 +975,17 @@ class MirrorQualification:
         runner: CommandRunner,
         provider: Callable[[str], MirrorProvider],
         status: InstalledStatus,
+        fields: InstalledFields,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
-        """Bind the run inputs, command runner, provider factory and status tokens.
+        """Bind the run inputs, command runner, provider factory, tokens and keys.
 
         :param inputs: Fixture identity and run controls.
         :param runner: Installed mirror command runner.
         :param provider: Provider factory; its argument is the output file stem.
         :param status: Tokens and exit mapping bound from the installed copy.
+        :param fields: Result and receipt keys bound from the installed copy.
         :param sleep: Pause function.
         :param clock: Current UTC time.
         """
@@ -798,6 +993,7 @@ class MirrorQualification:
         self.runner = runner
         self.provider = provider
         self.status = status
+        self.fields = fields
         self.sleep = sleep
         self.clock = clock
         self.ledger: MutableMapping[str, object] = {}
@@ -869,6 +1065,7 @@ class MirrorQualification:
         """
         inputs = self.inputs
         status = self.status
+        fields = self.fields
         plan, summary = self._preflight()
         self._allocate(**summary, mirror=None, created=None, cleanup=APPLY_PENDING)
         code, applied = self.runner.run(
@@ -876,11 +1073,12 @@ class MirrorQualification:
         )
         self._record_created(applied)
         self._require(APPLIED_STEP, code, applied, status.passed)
-        created = _record(applied)
+        created = _record(applied, fields)
         if (
-            created.get("action") != status.applied
-            or created.get("created") != {"mirror": True, "repository": True}
-            or created.get("source_refs") != created.get("destination_refs")
+            created.get(fields.action) != status.applied
+            or created.get(fields.created)
+            != {fields.mirror: True, fields.repository: True}
+            or created.get(fields.source_refs) != created.get(fields.destination_refs)
         ):
             raise QualificationError("applied_result_unexpected")
         self.sleep(inputs.settle_seconds)
@@ -888,22 +1086,22 @@ class MirrorQualification:
         noop = self._expect(
             NOOP_STEP, self._apply(repeat_plan, NOOP_RECEIPT), status.passed
         )
-        repeated = _record(noop)
+        repeated = _record(noop, fields)
         if (
-            repeated.get("action") != status.no_op
-            or noop.get(MUTATED_FIELD) is not False
-            or repeated.get(DESTINATION_FIELD) != created.get(DESTINATION_FIELD)
-            or _object(repeated.get("mirror")).get("id")
-            != _object(created.get("mirror")).get("id")
+            repeated.get(fields.action) != status.no_op
+            or noop.get(fields.mutated) is not False
+            or repeated.get(fields.destination) != created.get(fields.destination)
+            or _object(repeated.get(fields.mirror)).get(fields.id)
+            != _object(created.get(fields.mirror)).get(fields.id)
         ):
             raise QualificationError("noop_result_unexpected")
         receipt = _read(inputs.work_dir / NOOP_RECEIPT)
-        if receipt.get(TESTED_REVISION_FIELD) != summary["candidate"]:
+        if receipt.get(fields.tested_revision) != summary["candidate"]:
             raise QualificationError("receipt_candidate_mismatch")
-        source = _object(created.get(SOURCE_FIELD))
-        destination = _object(created.get(DESTINATION_FIELD))
-        mirror_id = _object(created.get("mirror")).get("id")
-        repository_id = destination.get("id")
+        source = _object(created.get(fields.source))
+        destination = _object(created.get(fields.destination))
+        mirror_id = _object(created.get(fields.mirror)).get(fields.id)
+        repository_id = destination.get(fields.id)
         if type(mirror_id) is not int or type(repository_id) is not int:
             raise QualificationError("created_ids_missing")
         provider = self._bind(CLEANUP_PLAN_STEP, summary[TARGET_SOURCE_FIELD], source)
@@ -930,6 +1128,7 @@ class MirrorQualification:
             or no created ID, or an identity, deletion or read-back fails.
         """
         inputs = self.inputs
+        fields = self.fields
         path = inputs.work_dir / ALLOCATION_FILE
         if not path.exists():
             raise QualificationError(NOTHING_TO_RECONCILE)
@@ -942,18 +1141,23 @@ class MirrorQualification:
         source = _object(self.ledger.get(SOURCE_FIELD))
         destination = _object(self.ledger.get(DESTINATION_FIELD))
         if (
-            source.get("id") != inputs.source_id
-            or str(destination.get("path")).casefold() != inputs.destination.casefold()
+            source.get(fields.id) != inputs.source_id
+            or str(destination.get(fields.path)).casefold()
+            != inputs.destination.casefold()
         ):
             raise QualificationError("ledger_fixture_mismatch")
         missing = MANUAL_READ_BACK.format(
             reason=LEDGER_IDS_MISSING,
-            destination=_location(destination),
-            source=_location(source),
+            destination=_location(destination, fields),
+            source=_location(source, fields),
         )
         created = _object(self.ledger.get("created"))
-        mirror_id = _owned_id(created, "mirror", self.ledger.get("mirror"), missing)
-        repository_id = _owned_id(created, "repository", destination, missing)
+        mirror_id = _owned_id(
+            created, fields.mirror, self.ledger.get("mirror"), fields.id, missing
+        )
+        repository_id = _owned_id(
+            created, fields.repository, destination, fields.id, missing
+        )
         if mirror_id is None and repository_id is None:
             raise QualificationError(missing)
         provider = self._bind(
@@ -962,7 +1166,7 @@ class MirrorQualification:
         self._seed_refs(provider, SEED_REF_BASELINE_DIFFERS)
         receipt = {
             **self._existing_receipt(),
-            TESTED_REVISION_FIELD: self.ledger.get("candidate"),
+            fields.tested_revision: self.ledger.get("candidate"),
         }
         cleanup = self._cleanup(
             provider, source, destination, mirror_id, repository_id, receipt, True
@@ -979,19 +1183,20 @@ class MirrorQualification:
             source, a seed ref or the rejection differs from what the run requires.
         """
         inputs = self.inputs
+        fields = self.fields
         if (inputs.work_dir / ALLOCATION_FILE).exists():
             raise QualificationError(ALLOCATION_EXISTS)
         candidate = inputs.candidate()
         plan = self._expect(LIVE_PLAN_STEP, [LIVE_PLAN_OPTION], self.status.planned)
-        record = _record(plan)
-        source = _object(record.get(SOURCE_FIELD))
-        if source.get("id") != inputs.source_id:
+        record = _record(plan, fields)
+        source = _object(record.get(fields.source))
+        if source.get(fields.id) != inputs.source_id:
             raise QualificationError("source_id_mismatch")
-        if _object(record.get(DESTINATION_FIELD)).get("id") is not None:
+        if _object(record.get(fields.destination)).get(fields.id) is not None:
             raise QualificationError("destination_present")
-        if record.get("mirror") is not None:
+        if record.get(fields.mirror) is not None:
             raise QualificationError("mirror_present")
-        target_source = plan.get(TARGET_SOURCE_FIELD)
+        target_source = plan.get(fields.target_source)
         provider = self._bind(BASELINE_PLAN_STEP, target_source, source)
         seed_refs = self._seed_refs(provider, SEED_REF_BASELINE_DIFFERS)
         rejection = self._expect(
@@ -999,15 +1204,15 @@ class MirrorQualification:
             [APPLY_OPTION, CONFIRM_OPTION, WRONG_DIGEST],
             self.status.blocked,
         )
-        if rejection.get(MUTATED_FIELD) is not False:
+        if rejection.get(fields.mutated) is not False:
             raise QualificationError("rejection_mutated")
         summary = {
             "run": inputs.run_id,
             "candidate": candidate,
             TARGET_SOURCE_FIELD: target_source,
             SOURCE_FIELD: source,
-            DESTINATION_FIELD: record.get(DESTINATION_FIELD),
-            "plan_digest": plan.get("plan_digest"),
+            DESTINATION_FIELD: record.get(fields.destination),
+            "plan_digest": plan.get(fields.plan_digest),
             "seed_refs": seed_refs,
         }
         return plan, summary
@@ -1058,7 +1263,7 @@ class MirrorQualification:
         :returns: Apply, confirmation and receipt options.
         :raises QualificationError: The plan carries no digest.
         """
-        digest = plan.get("plan_digest")
+        digest = plan.get(self.fields.plan_digest)
         if not isinstance(digest, str) or not digest:
             raise QualificationError("plan_digest_missing")
         return [
@@ -1090,7 +1295,7 @@ class MirrorQualification:
         :param status: Required result status, a bound installed token.
         :raises QualificationError: Exit code or status differs.
         """
-        observed = data.get(STATUS_FIELD)
+        observed = data.get(self.fields.status)
         if code != self.status.exit_code(status) or observed != status:
             raise QualificationError(f"{label}_unexpected:{code}:{observed}")
 
@@ -1102,15 +1307,16 @@ class MirrorQualification:
 
         :param result: Apply result, whatever its status.
         """
-        records = result.get("records")
+        fields = self.fields
+        records = result.get(fields.records)
         if not isinstance(records, list) or len(records) != 1:
             return
         record = _object(records[0])
-        if isinstance(record.get("created"), dict):
+        if isinstance(record.get(fields.created), dict):
             self._save(
-                destination=record.get("destination"),
-                mirror=record.get("mirror"),
-                created=record.get("created"),
+                destination=record.get(fields.destination),
+                mirror=record.get(fields.mirror),
+                created=record.get(fields.created),
                 cleanup=CLEANUP_PENDING,
             )
 
@@ -1187,14 +1393,15 @@ class MirrorQualification:
             **self._observe(provider, source, mirror_id, repository_id),
             MUTATED_FIELD: False,
         }
-        skill = _object(receipt.get("skill"))
+        fields = self.fields
+        skill = _object(receipt.get(fields.skill))
         return {
             KIND_FIELD: CLEANUP_KIND,
             STATUS_FIELD: self.status.passed,
             CAPTURED_AT_FIELD: self.clock().isoformat(),
-            EXECUTION_HOST_FIELD: receipt.get(EXECUTION_HOST_FIELD),
-            SKILL_DIGEST_FIELD: skill.get("digest"),
-            TESTED_REVISION_FIELD: receipt.get(TESTED_REVISION_FIELD),
+            EXECUTION_HOST_FIELD: receipt.get(fields.execution_host),
+            SKILL_DIGEST_FIELD: skill.get(SKILL_DIGEST_KEY),
+            TESTED_REVISION_FIELD: receipt.get(fields.tested_revision),
             BEFORE_FIELD: {
                 SOURCE_FIELD: source,
                 DESTINATION_FIELD: destination,
@@ -1560,33 +1767,35 @@ def _installed_module(skill: Path, name: str) -> ModuleType:
 
 
 def _owned_id(
-    created: JSONMap, key: str, evidence: object, missing: str
+    created: JSONMap, key: str, evidence: object, id_key: str, missing: str
 ) -> Optional[int]:
     """Read a recorded native ID the run created.
 
-    :param created: Ledger ``created`` flags.
-    :param key: ``mirror`` or ``repository``.
+    :param created: Ledger ``created`` flags, as the installed command wrote them.
+    :param key: Installed mirror or repository key of ``created``.
     :param evidence: Ledger evidence holding the ID.
+    :param id_key: Installed ID key of ``evidence``.
     :param missing: Stopping reason when the ID is not recorded.
     :returns: The ID, or ``None`` when the run did not create the object.
     :raises QualificationError: The object was created but its ID is not recorded.
     """
     if created.get(key) is not True:
         return None
-    identity = _object(evidence).get("id")
+    identity = _object(evidence).get(id_key)
     if type(identity) is not int:
         raise QualificationError(missing)
     return identity
 
 
-def _location(evidence: JSONMap) -> str:
+def _location(evidence: JSONMap, fields: InstalledFields) -> str:
     """Name a recorded repository as ``HOST/PATH`` for a manual read-back.
 
     :param evidence: Ledger ``source`` or ``destination`` evidence.
+    :param fields: Installed keys of the evidence.
     :returns: ``HOST/PATH``.
     """
     return EVIDENCE_LOCATION.format(
-        host=evidence.get("host"), path=evidence.get("path")
+        host=evidence.get(fields.host), path=evidence.get(fields.path)
     )
 
 
@@ -1599,14 +1808,15 @@ def _status(status: Optional[int]) -> Optional[int]:
     return None if status is None else int(status)
 
 
-def _record(result: JSONMap) -> JSONMap:
+def _record(result: JSONMap, fields: InstalledFields) -> JSONMap:
     """Read the single record of a mirror result.
 
     :param result: Mirror command result.
+    :param fields: Installed keys of the result.
     :returns: Its one record.
     :raises QualificationError: The result does not carry exactly one record.
     """
-    records = result.get("records")
+    records = result.get(fields.records)
     if not isinstance(records, list) or len(records) != 1:
         raise QualificationError("result_records_unexpected")
     return _object(records[0])

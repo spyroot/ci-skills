@@ -166,8 +166,8 @@ Each load of a target that holds `[gitlab]`, and each use of `--gitlab-profile`,
 below; a dry run does not write it to `--log-file`. `[gitlab_routing]` may sit beside the legacy tables; its row for
 an instance pairs the tables of whichever table answers that instance. Without `[gitlab_routing]`, a legacy route
 reports `kubernetes` and `harbor` as `null`. A command that requires them then reads `[kubernetes]` and `[harbor]`
-directly only when the caller gives no `--gitlab` and the legacy table read does not answer `gitlab_public`; with
-`--gitlab private`, `--gitlab public`, or `--gitlab-profile com` on the issue #133 shape, it blocks with the
+directly only when the caller gives no `--gitlab` and the legacy table read neither answers `gitlab_public` nor is
+`[gitlab.com]`; with `--gitlab private`, `--gitlab public`, or `--gitlab-profile com`, it blocks with the
 missing-tables reason, as on the new shape. The event's
 `table` names the legacy table, `gitlab` or `gitlab.NAME`. To migrate, rename `[gitlab]` to `[gitlab_private]` and
 `[gitlab.com]` to `[gitlab_public]`, and add a `[gitlab_routing]` row that pairs `kubernetes` and `harbor` with the

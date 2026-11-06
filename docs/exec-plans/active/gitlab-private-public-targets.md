@@ -72,7 +72,9 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   surfaces and five live checks, after `spyroot/test-mirror-push` was restored as `1447753892`.
   `tools/check_live_acceptance.py --root . --no-aggregate --receipts tests/acceptance/candidate` returned PASS with
   functional digest `571967cc` at `2026-11-06T02:45:29Z`. The `bcf7d59` receipts are under
-  `tests/acceptance/historical/pre-gitlab-private-public/`.
+  `tests/acceptance/historical/pre-gitlab-private-public/`. `validate`, including the live-acceptance step, passed on
+  head `46df1c6` in run [42152606599](https://github.com/spyroot/ci-skills/actions/runs/42152606599), with
+  `ci-skills/required` SUCCESS.
 - [x] (GPP-09) Legacy removal is tracked as TD-11 (`docs/exec-plans/tech-debt-tracker.md`).
 - [x] (GPP-11) Live AFTER evidence of the capability, from an isolated installed copy at `c76723a` (digest
   `870a657e`), 2026-11-06T01:57:28Z to 02:00:43Z, with no ambient GitLab token, against the user target:
@@ -83,8 +85,8 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   `--gitlab private` routes to `kubernetes` + `harbor`; a wrong confirmation is BLOCKED with `mutated` false;
   `gitlab_issue.py open-bug` APPLIED with verified read-back on both instances (dcloud `hott/test` issue iid 38, id 523;
   GitLab.com `spyroot/test-self-runner` issue iid 1, id 209352261) after an empty before-read, and the confirmed repeat
-  is NO_OP. These are not the gate receipts of GPP-08. Evidence: `.internal/log/bug-133/smoke-claude-c76723a/` in the
-  primary checkout (`SUMMARY.md` lists each command and file).
+  is NO_OP. These are not the gate receipts of GPP-08. Evidence: the issue #133 run log under `.internal/log/` in the
+  primary checkout, smoke at `c76723a` (its `SUMMARY.md` lists each command and file).
 - [x] (GPP-10) The recorded answers replace the CONFLICT statuses (DEC-03, DEC-05, DEC-08, DEC-10, DEC-17) and the
   keys rule is DEC-19. `[gitlab_routing]` and its `default` are optional, `GITLAB_DEFAULT_INSTANCE` is
   `gitlab_private`, legacy `[gitlab.com]` answers `gitlab_public` by the key `GITLAB_LEGACY_PUBLIC_KEY`, and
@@ -141,13 +143,13 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
 - Observation, open conflict for the next mirror renewal: after this renewal the target's `[github]` repository
   `spyroot/test-mirror-push` is restored, but `tools/qualify_mirror.py` stops with `destination_present` when it
   exists. The inventory says "The disposable mirror destination is expected absent only after its recorded cleanup";
-  the user says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". Open until the user decides; the tool is
+  the team says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". Open until the team decides; the tool is
   unchanged.
   Evidence: `docs/2026-10-31/live-smoke-inventory.md` Reusable pairs; `tools/skillkit/mirror_qualification.py`
   preflight.
 - Observation: the mirror NO_OP candidate receipt must carry a `smoke_cleanup` record of kind
   `gitlab_mirror_smoke_cleanup`. Until GPP-10 no tracked tool produced that record; the producer was the scratch
-  pair `qualify-executed.py` and `mirror-owned-cleanup.py` under `.internal/scratch/codex/ci14-ci15-closure/`.
+  pair `qualify-executed.py` and `mirror-owned-cleanup.py` in the CI14/CI15 closure scratch under `.internal/scratch/`.
   Evidence: `tools/check_live_acceptance.py` `_mirror_smoke_cleanup_verified`. `tools/qualify_mirror.py` now runs
   the same native calls and its test checks the record with that function.
 
@@ -243,9 +245,10 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   `--gitlab public` reads `[gitlab.com]`; `routing.gitlab` names the table read (`gitlab`, `gitlab.com`). The match is
   by the table key `com`, the constant `GITLAB_LEGACY_PUBLIC_KEY` in `core/endpoints.py`; no URL is inspected.
   Without `[gitlab_routing]`, legacy routes report `kubernetes` and `harbor` as `null`. A command that requires them
-  reads `[kubernetes]` and `[harbor]` directly only when the caller gives no `--gitlab` and the legacy table read does
-  not answer `gitlab_public` (`core/target.py` `_legacy_compat`); with `--gitlab private|public`, or
-  `--gitlab-profile com` on the issue #133 shape, it blocks with the missing-tables reason, so the public instance is
+  reads `[kubernetes]` and `[harbor]` directly only when the caller gives no `--gitlab` and the legacy table read
+  neither answers `gitlab_public` nor is `[gitlab.com]` (`core/target.py` `_legacy_compat`); with
+  `--gitlab private|public`, or `--gitlab-profile com` on the issue #133 shape or a half-migrated target, it blocks
+  with the missing-tables reason, so the public instance is
   never paired with the person's cluster by default (DEC-02). Team decision: "block combined Kubernetes/Harbor
   commands, the same as `--gitlab public`", grounded in "user for example indicate his public github and private
   harbor < make no sense"; a legacy profile that answers no instance keeps the direct read. With
@@ -366,8 +369,10 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   event, the tracked mirror qualification tool, and the documents.
 - Delivered: GPP-07b and GPP-08 at `931b188`, with live AFTER evidence per instance (GPP-11).
 - Not delivered: DEC-14 (GitLab Agent routing and KAS reachability check) and DEC-16 (one `token_file` per
-  instance) stay PROPOSED. Open for the next renewal: the restored `spyroot/test-mirror-push` against the disposable
-  destination rule (Surprises).
+  instance) stay PROPOSED.
+- Fixed after the final review: on a half-migrated target that holds `[gitlab_public]` and the legacy `[gitlab.com]`,
+  with no `[gitlab_routing]`, `--gitlab-profile com` blocks a combined command like `--gitlab public`
+  (`_legacy_compat` also keys on the legacy public table).
 - Lesson: three review cycles found literals and duplicated values that one constants module and a gate rule now
   catch; define a value once before the first test that uses it.
 - Lesson: the first implementation reported the pairing without using it; a test that asserts behavior for an

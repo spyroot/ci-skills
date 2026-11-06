@@ -1553,9 +1553,10 @@ def _legacy_compat(
     """Decide whether a legacy route reads Kubernetes and Harbor tables directly.
 
     That holds only on a target without ``[gitlab_routing]``, for a caller that
-    gave no ``--gitlab``, and for a legacy table that does not answer
-    ``gitlab_public``: the public instance is never paired with the person's
-    tables by default, whichever option selected it.
+    gave no ``--gitlab``, and for a legacy table that neither answers
+    ``gitlab_public`` nor is the legacy public table under
+    ``GITLAB_LEGACY_PUBLIC_KEY``: the public instance is never paired with the
+    person's tables by default, whichever option or table selected it.
 
     :param data: Complete parsed target file.
     :param selection: Caller's selection.
@@ -1566,8 +1567,11 @@ def _legacy_compat(
         return False
     if gitlab_target is None:
         return True
-    public = _declared_instances(data).get(GITLAB_PUBLIC_TABLE)
-    return gitlab_target.route.gitlab != public
+    public = {
+        _declared_instances(data).get(GITLAB_PUBLIC_TABLE),
+        TARGET_CONTRACT.dotted_path((GITLAB_AUTHORITY, GITLAB_LEGACY_PUBLIC_KEY)),
+    }
+    return gitlab_target.route.gitlab not in public
 
 
 def _routed_tables(

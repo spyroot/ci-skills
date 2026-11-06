@@ -51,8 +51,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.catalog import SCHEMA_VERSION as RESULT_SCHEMA_VERSION
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.git.mirroring import MirrorField
 from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
 from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
+from lib.python.core.gitlab.mirror.constants import Field as MirrorReceiptField
+from lib.python.core.gitlab.mirror.constants import Outcome as MirrorOutcome
 from lib.python.core.gitlab.mirror.evidence import (
     check_mirror_pair,
     check_mirror_receipt,
@@ -246,7 +249,8 @@ IMAGE_BUILD_READINESS_KEY: Final[OperationKey] = (
     None,
 )
 MIRROR_OPERATIONS: Final[frozenset[OperationKey]] = frozenset(
-    (MIRROR_KIND, MIRROR_OPERATION, action) for action in ("APPLIED", "NO_OP")
+    (MIRROR_KIND, MIRROR_OPERATION, action)
+    for action in (MirrorOutcome.APPLIED, MirrorOutcome.NO_OP)
 )
 REQUIRED_CAPABILITY_OPERATIONS: Final = frozenset(
     {
@@ -276,14 +280,14 @@ def _operation_key(receipt: JSONObject) -> Optional[OperationKey]:
     operation = receipt.get("operation")
     action = receipt.get("result_action")
     if kind == MIRROR_KIND:
-        records = receipt.get("records")
+        records = receipt.get(MirrorReceiptField.RECORDS)
         if (
             not isinstance(records, list)
             or len(records) != 1
             or not isinstance(records[0], dict)
         ):
             return None
-        action = records[0].get("action")
+        action = records[0].get(MirrorReceiptField.ACTION)
     if (
         not isinstance(kind, str)
         or not (operation is None or isinstance(operation, str))
@@ -1220,30 +1224,32 @@ def _mirror_smoke_cleanup_verified(
     :raises TypeError: Datetime comparisons reject mixed timezone awareness.
     """
     cleanup = _mapping(noop.get(SMOKE_CLEANUP_FIELD))
-    records = applied.get("records")
+    records = applied.get(MirrorReceiptField.RECORDS)
     if not isinstance(records, list) or len(records) != 1:
         return False
     record = _mapping(records[0])
-    created = _mapping(record.get("created"))
+    created = _mapping(record.get(MirrorReceiptField.CREATED))
+    mirror = _mapping(record.get(MirrorReceiptField.MIRROR))
+    record_before = _mapping(record.get(MirrorReceiptField.BEFORE))
     before = _mapping(cleanup.get(BEFORE_FIELD))
     deletion = _mapping(cleanup.get(DELETE_FIELD))
     if (
         cleanup.get(KIND_FIELD) != MIRROR_SMOKE_CLEANUP_KIND
         or not _smoke_cleanup_matches_execution(noop, cleanup, now, max_age_days)
-        or created.get("repository") is not True
-        or created.get("mirror") is not True
-        or _mapping(record.get("before")).get("mirror") is not None
-        or record.get("replacement_required") is not False
-        or before.get(SOURCE_FIELD) != record.get("source")
-        or before.get(DESTINATION_FIELD) != record.get("destination")
-        or before.get(MIRROR_ID_FIELD) != _mapping(record.get("mirror")).get("id")
+        or created.get(MirrorReceiptField.REPOSITORY) is not True
+        or created.get(MirrorReceiptField.MIRROR) is not True
+        or record_before.get(MirrorReceiptField.MIRROR) is not None
+        or record.get(MirrorReceiptField.REPLACEMENT_REQUIRED) is not False
+        or before.get(SOURCE_FIELD) != record.get(MirrorReceiptField.SOURCE)
+        or before.get(DESTINATION_FIELD) != record.get(MirrorReceiptField.DESTINATION)
+        or before.get(MIRROR_ID_FIELD) != mirror.get(MirrorField.ID)
         or deletion.get(MIRROR_HTTP_STATUS_FIELD) != HTTPStatus.NO_CONTENT
         or deletion.get(DESTINATION_HTTP_STATUS_FIELD) != HTTPStatus.NO_CONTENT
         or _mapping(cleanup.get(REPEAT_FIELD)).get(MUTATED_FIELD) is not False
     ):
         return False
     return all(
-        observed.get(SOURCE_FIELD) == record.get("source")
+        observed.get(SOURCE_FIELD) == record.get(MirrorReceiptField.SOURCE)
         and observed.get(MIRROR_ABSENT_FIELD) is True
         and observed.get(DESTINATION_HTTP_STATUS_FIELD) == HTTPStatus.NOT_FOUND
         and observed.get(DESTINATION_ID_HTTP_STATUS_FIELD) == HTTPStatus.NOT_FOUND
@@ -1566,14 +1572,16 @@ class AcceptanceReview:
                 for receipt in selected
                 if _operation_key(receipt) == (MIRROR_KIND, MIRROR_OPERATION, action)
             ]
-            for action in ("APPLIED", "NO_OP")
+            for action in (MirrorOutcome.APPLIED, MirrorOutcome.NO_OP)
         }
         if len(selected) != 2 or any(len(items) != 1 for items in actions.values()):
             self.problems.append(prefix + "repeat_readback_missing")
             return
-        applied, noop = actions["APPLIED"][0], actions["NO_OP"][0]
-        record = _mapping(applied["records"][0])
-        if _mapping(record.get("created")).get("repository") is not True:
+        applied = actions[MirrorOutcome.APPLIED][0]
+        noop = actions[MirrorOutcome.NO_OP][0]
+        record = _mapping(applied[MirrorReceiptField.RECORDS][0])
+        created = _mapping(record.get(MirrorReceiptField.CREATED))
+        if created.get(MirrorReceiptField.REPOSITORY) is not True:
             self.problems.append(prefix + "create_if_absent_unproven")
         if not _mirror_smoke_cleanup_verified(
             applied, noop, self.now, self.max_age_days

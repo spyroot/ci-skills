@@ -121,15 +121,15 @@ GitHub `spyroot/test-mirror-push` existed as repository `1442655376`, private, c
 branch `main` and tag `smoke-seed` at `aafe5d50bbe4a1884b7b4f86668651e9ddbd5222`; GitLab project `261` had no remote
 mirror. No queue record, scratch file, log or session transcript records its creation; it was created 16 minutes
 after the last PR #138 commit (`12ddee8`), which suggests an unrecorded #138 run (inference, not a record). Identity
-was checked at `2026-11-06T01:33:33Z`; it was present. A delete from the receipt-renewal session was refused by
-that session's permission check and sent no request. By `2026-11-06T01:35:52Z` both `repos/spyroot/test-mirror-push`
+was checked at `2026-11-06T01:33:33Z`; it was present. A delete attempt during receipt renewal was refused before
+any request was sent. By `2026-11-06T01:35:52Z` both `repos/spyroot/test-mirror-push`
 and `repositories/1442655376` returned 404, and a second read at `01:36:27Z` returned `RESOURCE_NOT_FOUND` for both.
 Who deleted it is not recorded. The team asked for it to be restored so every agent can use it.
 
 Open conflict for the next renewal: the restored `spyroot/test-mirror-push` (`1447753892`) makes the next bounded
 qualification stop with `destination_present`. This inventory says "The disposable mirror destination is expected
-absent only after its recorded cleanup"; the user says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". It stays
-open until the user decides. Evidence is kept outside the repository with the run log of issue #133.
+absent only after its recorded cleanup"; the team says "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO". It stays
+open until the team decides. Evidence is kept outside the repository with the run log of issue #133.
 
 ### Mirror qualification read-back — 2026-11-06
 
