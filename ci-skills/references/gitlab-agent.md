@@ -1,12 +1,13 @@
 # GitLab Agent for Kubernetes: connectivity and attach
 
-Status: no command uses this yet. `gitlab_agent.py` is planned in CI14-M2 and is not implemented; its name and flags
-are PROPOSED under CI14 D3. This page tells an AI agent, without going online, when a person's cluster can be
-attached to a GitLab project, what each side needs, and which target value each input comes from. ci-skills itself is
-never attached to a cluster: the person's project is attached to the person's cluster.
+Status: no command uses this yet. `gitlab_agent.py` is planned and not implemented; its name and flags are not
+settled. This page tells the caller of this skill, without network access, when a cluster can attach to a GitLab
+project, what each side needs, and which target value each input comes from. No command attaches ci-skills itself
+to a cluster; the attach connects the project owner's GitLab project to the project owner's cluster.
 
-Words used here: "person" is the human who owns the GitLab project and the cluster; "AI agent" is the consumer of
-this skill; "GitLab Agent" is the GitLab feature, and "agentk" is its program running in the cluster.
+Words used here: "caller" is the program that runs this skill's commands; "project owner" is the team that owns the
+GitLab project and the cluster; "GitLab Agent" is the GitLab feature, and "agentk" is its program running in the
+cluster.
 
 ## Who opens the connection
 
@@ -80,32 +81,32 @@ Authorized projects must share the configuration project's top-level group unles
 enabled; `ci_access.projects` and `ci_access.groups` hold up to 500 entries each. Whether GitLab.com allows
 instance-level authorization is not verified here. Source: `user/clusters/agent/ci_cd_workflow`.
 
-## Attach flow (planned, CI14-M2)
+## Attach flow (planned)
 
 The flow follows the existing confirmed-action pattern: `--describe`, `--live-plan`, then `--apply --confirm-plan`.
 
 ```mermaid
 sequenceDiagram
-    participant Person
-    participant AI as AI agent
+    participant Owner as Project owner
+    participant Caller
     participant Skill as gitlab_agent.py (planned)
     participant Target as ~/.ci-skills/target.toml
     participant GL as GitLab (instance chosen by --gitlab)
     participant K8s as Kubernetes (table named by the routing row)
-    Person->>AI: attach group/app to my lab cluster
-    AI->>Skill: --describe (flags, modes, result schema; no credentials)
-    AI->>Skill: attach --gitlab private --project group/app --agent-name lab --live-plan
+    Owner->>Caller: attach group/app to the lab cluster
+    Caller->>Skill: --describe (flags, modes, result schema; no credentials)
+    Caller->>Skill: attach --gitlab private --project group/app --agent-name lab --live-plan
     Skill->>Target: [gitlab_routing] row -> instance table + kubernetes table
     Skill->>GL: read KAS address, existing agents (read only)
     Skill->>K8s: preflight: can the cluster reach that KAS address (read only)
-    Skill-->>AI: plan + digest, or BLOCKED <missing prerequisite>
-    AI->>Person: show plan; Person confirms
-    AI->>Skill: same command --apply --confirm-plan <digest>
+    Skill-->>Caller: plan + digest, or BLOCKED <missing prerequisite>
+    Caller->>Owner: show plan; Owner confirms
+    Caller->>Skill: same command --apply --confirm-plan <digest>
     Skill->>GL: POST /projects/:id/cluster_agents {"name":"lab"} -> token
     Skill->>GL: commit .gitlab/agents/lab/config.yaml (ci_access.projects)
     Skill->>K8s: helm upgrade --install gitlab/gitlab-agent (config.token, config.kasAddress)
     Skill->>GL: read back: agent connected; context group/app:lab visible to authorized CI
-    Skill-->>AI: one result: PASS | BLOCKED <reason> | PARTIAL <what exists> + routing + agent context
+    Skill-->>Caller: one result: PASS | BLOCKED <reason> | PARTIAL <what exists> + routing + agent context
 ```
 
 Where each value comes from:
@@ -120,22 +121,18 @@ Where each value comes from:
 | KAS address | read live from the selected GitLab | `grpcs://kas.gitlab.com` | `config.kasAddress` |
 | CI context | derived | `group/app:lab` | `$KUBECONFIG` context in authorized jobs |
 
-The project to attach is the configuration project.
+## When a `[gitlab_routing]` row names a cluster
 
-## Pairing a GitLab with a cluster in `[gitlab_routing]`
+Whether a `[gitlab_routing]` row ([access reference](access.md#gitlab-private-and-public-targets)) should name a
+cluster and a registry for a GitLab depends on where the work runs:
 
-A `[gitlab_routing]` row is the person's own declaration of which cluster and registry belong to a GitLab
-([access reference](access.md#gitlab-private-and-public-targets)). No key, host or code rule decides it; it depends on
-where the work runs:
-
-- A GitLab.com project plus a cluster in the person's lab works for a GitLab Agent, or for a self-managed runner in
-  that cluster, when the cluster has egress to GitLab.com.
-- GitLab.com hosted runners cannot pull from a Harbor behind the person's DMZ, so pairing that Harbor with GitLab.com
-  makes no sense for them.
-- An empty row, `gitlab_public = {}` in the template, means that GitLab has no cluster and no registry of the person's.
-  A command that needs Kubernetes or Harbor then returns BLOCKED `target is missing required authority tables: ...`
-  before any provider call, and its `--dry-run` shows the same result. Fill the row only for the first case above.
+- A GitLab.com project plus a lab cluster works for a GitLab Agent, or for a self-managed runner in that cluster,
+  when the cluster has egress to GitLab.com.
+- GitLab.com hosted runners cannot pull from a Harbor behind a private DMZ, so the template leaves
+  `gitlab_public = {}` for that case.
+- An empty row, `gitlab_public = {}` in the template, names no cluster and no registry; a command that needs them
+  returns BLOCKED `target is missing required authority tables` (access reference). Fill the row only for the first
+  case above.
 
 Whether the cluster reaches KAS is an infrastructure fact. The planned command checks it live before any
-registration and returns BLOCKED naming the missing egress. That check is proposed as DEC-14 in the issue #133
-ExecPlan and is not implemented.
+registration and returns BLOCKED naming the missing egress.

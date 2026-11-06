@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Final, Optional, Union
 import pytest
 from conftest import import_script_module
 from lib.python.core.catalog import GITLAB_PROFILE_OPTION, GITLAB_TARGET_OPTION
-from lib.python.core.endpoints import GITLAB_PUBLIC_SELECTOR
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    GITLAB_PUBLIC_SELECTOR,
+    KUBERNETES_AUTHORITY,
+)
 
 ACCESS = import_script_module("lib.python.access.gitlab")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
@@ -26,6 +31,7 @@ GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 TARGET = import_script_module("lib.python.core.target")
 SCRIPT = import_script_module("gitlab_access")
 PROJECT_BINDING = import_script_module("lib.python.core.project_binding")
+STATUS = import_script_module("lib.python.sys.status")
 
 REVISION: Final = "a" * 40
 
@@ -56,7 +62,7 @@ def _target(
     path = tmp_path / filename
     token = f'token_file = "{token_file}"\n' if token_file else ""
     path.write_text(
-        f'[gitlab]\nurl = "{url}"\n{token}{body}',
+        f'[{GITLAB_AUTHORITY}]\nurl = "{url}"\n{token}{body}',
         encoding="utf-8",
     )
     return path
@@ -157,7 +163,7 @@ def test_shared_setup_resolves_binds_and_reads_access_once(
     )
     api = API.GlabAPIClient()
     receipt: JSONObject = {
-        "status": "PASS",
+        "status": STATUS.PASS,
         "identity": {"id": 17, "username": "operator"},
         "target": {"id": 42, "full_path": "team/repo"},
     }
@@ -304,7 +310,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
         environment={},
     )
     receipt: JSONObject = {
-        "status": "PASS",
+        "status": STATUS.PASS,
         "identity": {"id": 17, "username": "operator"},
         "target": {"id": 42, "full_path": "team/repo"},
         "errors": [],
@@ -363,7 +369,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
     )
     data = json.loads(capsys.readouterr().out)
 
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.PASS)
     assert data == receipt
     assert observed == [
         (
@@ -436,9 +442,9 @@ def test_full_target_can_supply_project_without_changing_diagnostic_gate(
     """
     path = tmp_path / "full.toml"
     path.write_text(
-        '[github]\nhost = "github.example.test"\nrepository = "unit/repo"\n'
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n'
-        '[kubernetes]\ncontext = "unit"\n'
+        f'[{GITHUB_AUTHORITY}]\nhost = "github.example.test"\nrepository = "unit/repo"\n'
+        f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n'
+        f'[{KUBERNETES_AUTHORITY}]\ncontext = "unit"\n'
         'server = "https://api.cluster.example.test:6443"\n',
         encoding="utf-8",
     )
@@ -457,9 +463,9 @@ def test_gitlab_access_ignores_unavailable_unrelated_kubernetes_settings(
     """
     path = tmp_path / "mixed.toml"
     path.write_text(
-        '[github]\nhost = "github.example.test"\nrepository = "unit/repo"\n'
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n'
-        '[kubernetes]\ncontext = "unavailable-here"\n'
+        f'[{GITHUB_AUTHORITY}]\nhost = "github.example.test"\nrepository = "unit/repo"\n'
+        f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n'
+        f'[{KUBERNETES_AUTHORITY}]\ncontext = "unavailable-here"\n'
         'server = "https://api.cluster.example.test:6443"\n'
         'kubeconfigs = ["missing-on-this-host"]\n',
         encoding="utf-8",
@@ -555,7 +561,7 @@ def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
         }
     )
     receipt = ACCESS.check_gitlab_operation_access(session, api_client=api)
-    assert receipt["status"] == "PASS"
+    assert receipt["status"] == STATUS.PASS
     assert receipt["identity"]["id"] == 17
     assert receipt["target"]["id"] == 42
     assert [endpoint for _, endpoint in api.calls] == [
@@ -611,7 +617,7 @@ def test_wrong_project_or_host_blocks_with_sanitized_evidence(
         }
     )
     receipt = ACCESS.check_gitlab_operation_access(session, api_client=api)
-    assert receipt["status"] == "BLOCKED"
+    assert receipt["status"] == STATUS.BLOCKED
     assert receipt["target"] is None
     assert receipt["errors"] == [{"source": "target", "reason": reason}]
     assert "selected-token" not in json.dumps(receipt)
@@ -690,14 +696,16 @@ def test_bound_session_records_effective_source_and_exact_target(
         target,
         target_kind=kind,
         target_reference=reference,
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.group",
+        target_source=f"env:CI_SKILLS_TARGET;target:{GITLAB_AUTHORITY}.group",
     )
     assert session.credential_source == "env:GITLAB_ACCESS_TOKEN"
     assert session.origin == "https://gitlab.example.test"
     assert session.host == "gitlab.example.test"
     assert session.target_kind == "group"
     assert session.target_reference == "platform/team"
-    assert session.target_source == "env:CI_SKILLS_TARGET;target:gitlab.group"
+    assert (
+        session.target_source == f"env:CI_SKILLS_TARGET;target:{GITLAB_AUTHORITY}.group"
+    )
     assert session.target_file == target_file.resolve()
     assert session.environment["GITLAB_TOKEN"] == "selected-token"
     assert session.environment["GITLAB_ACCESS_TOKEN"] is None
@@ -743,7 +751,7 @@ def test_group_id_readback_requires_the_selected_numeric_id(
         }
     )
     receipt = ACCESS.check_gitlab_operation_access(session, api_client=api)
-    assert receipt["status"] == "BLOCKED"
+    assert receipt["status"] == STATUS.BLOCKED
     assert receipt["errors"] == [{"source": "target", "reason": "target_id_mismatch"}]
 
 
@@ -766,7 +774,7 @@ def test_malformed_user_response_blocks_with_structured_safe_reason(
             }
         ),
     )
-    assert receipt["status"] == "BLOCKED"
+    assert receipt["status"] == STATUS.BLOCKED
     assert receipt["identity"] is None
     assert receipt["target"] is None
     assert receipt["observed_capability"] == []
@@ -798,7 +806,7 @@ def test_malformed_target_response_blocks_after_identity_read(
             }
         ),
     )
-    assert receipt["status"] == "BLOCKED"
+    assert receipt["status"] == STATUS.BLOCKED
     assert receipt["identity"]["username"] == "operator"
     assert receipt["target"] is None
     assert receipt["observed_capability"] == ["identity_read"]
@@ -828,8 +836,8 @@ def test_cli_dry_run_never_binds_credentials_or_calls_api(
     )
     result = SCRIPT.main(["check", "--dry-run", "--json"])
     data = json.loads(capsys.readouterr().out)
-    assert result == 0
-    assert data["status"] == "DRY_RUN"
+    assert result == STATUS.exit_code(STATUS.DRY_RUN)
+    assert data["status"] == STATUS.DRY_RUN
     assert data["target"] == {"kind": "project", "reference": "team/repo"}
     assert data["credential_source"] is None
 
@@ -856,8 +864,8 @@ def test_cli_names_the_next_step_when_no_project_or_group_is_selected(
     result = SCRIPT.main(["check", "--json", *(["--dry-run"] if dry_run else [])])
     data = json.loads(capsys.readouterr().out)
 
-    assert result == 2
-    assert data["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert data["status"] == STATUS.BLOCKED
     assert data["errors"] == [
         {"source": "target", "reason": "select_exactly_one_gitlab_project_or_group"}
     ]
@@ -883,7 +891,7 @@ def test_cli_human_block_prints_the_next_step_line(
     result = SCRIPT.main(["check", "--dry-run", "--human"])
     captured = capsys.readouterr()
 
-    assert result == 2
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
     assert captured.out == ""
     assert captured.err.splitlines()[-2:] == [
         "BLOCKED: select_exactly_one_gitlab_project_or_group",
@@ -999,14 +1007,14 @@ def test_smoke_environment_switches_filename_without_fallback_or_provider_drift(
     data = json.loads(capsys.readouterr().out)
 
     if smoke:
-        assert result == 2
-        assert data["status"] == "BLOCKED"
+        assert result == STATUS.exit_code(STATUS.BLOCKED)
+        assert data["status"] == STATUS.BLOCKED
         assert data["errors"] == [
             {"source": "credential", "reason": "credential_file_unavailable"}
         ]
     else:
-        assert result == 0
-        assert data["status"] == "PASS"
+        assert result == STATUS.exit_code(STATUS.PASS)
+        assert data["status"] == STATUS.PASS
         assert data["target_source"] == "project"
         assert data["target_file"] == str(layout["selected"].resolve())
         assert data["identity"]["id"] == layout["identity"]["id"]
@@ -1036,7 +1044,7 @@ def test_access_check_uses_user_gitlab_target_without_selector(
     selected = home / ".ci-skills" / "target.toml"
     selected.parent.mkdir(parents=True)
     selected.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
+        f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(home))
@@ -1051,7 +1059,7 @@ def test_access_check_uses_user_gitlab_target_without_selector(
     result = SCRIPT.main(["check", "--dry-run", "--json"])
     data = json.loads(capsys.readouterr().out)
 
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.DRY_RUN)
     assert data["target_source"] == "user"
     assert data["target"] == {"kind": "project", "reference": "unit/repo"}
     assert data["credential_source"] is None
@@ -1108,9 +1116,9 @@ def test_live_receipt_is_portable_redacted_and_parseable(
     )
     displayed = json.loads(capsys.readouterr().out)
     portable_receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
-    assert result == 0
-    assert displayed["status"] == "PASS"
-    assert portable_receipt["status"] == "PASS"
+    assert result == STATUS.exit_code(STATUS.PASS)
+    assert displayed["status"] == STATUS.PASS
+    assert portable_receipt["status"] == STATUS.PASS
     assert portable_receipt["target"]["id"] == 42
     assert portable_receipt["target_file"].startswith("path:")
     assert portable_receipt["credential_source"].startswith("file:path:")

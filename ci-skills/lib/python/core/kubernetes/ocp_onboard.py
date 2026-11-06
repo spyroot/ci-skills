@@ -14,6 +14,7 @@ from typing import Optional
 from lib.python.access.credentials import bind_sources
 from lib.python.core.action_modes import ActionMode
 from lib.python.core.catalog import describe
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.kubernetes.ocp_build_workflow import (
@@ -194,7 +195,7 @@ class NodeInvocation:
             args.target,
             args.binding,
             dry_run=mode == ActionMode.OFFLINE,
-            required_surfaces=("kubernetes",),
+            required_surfaces=(KUBERNETES_AUTHORITY,),
         )
         if mode != ActionMode.OFFLINE:
             target = bind_sources(target, revision=args.revision)

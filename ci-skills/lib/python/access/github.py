@@ -14,6 +14,7 @@ from lib.python.access.shared import Surface, _blocked, _json, _token_file
 from lib.python.access.sources import Sources
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import github_variables
+from lib.python.core.endpoints import GITHUB_AUTHORITY
 from lib.python.core.json_types import (
     json_object,
     json_objects,
@@ -62,7 +63,7 @@ def github_access(target: Target) -> Surface:
         credential = github_env(target)
     except ValueError as exc:
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             f"{host}/{repo}",
             observed,
             str(exc),
@@ -74,7 +75,7 @@ def github_access(target: Target) -> Surface:
     auth = run_command(["gh", "auth", "status", "--hostname", host], env=credential)
     if auth.returncode:
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             f"{host}/{repo}",
             observed,
             error_class(auth),
@@ -100,7 +101,7 @@ def github_access(target: Target) -> Surface:
             raise ValueError("missing_identity")
     except (ValueError, TypeError) as exc:
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             f"{host}/{repo}",
             observed,
             str(exc),
@@ -109,7 +110,7 @@ def github_access(target: Target) -> Surface:
         )
     observed += ["identity_read", "repository_read"]
     return Surface(
-        "github",
+        GITHUB_AUTHORITY,
         PASS,
         login,
         f"{host}/{repo}",
@@ -159,7 +160,7 @@ def _publication_result(
     expected = set(required_checks)
     if not expected:
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             base.target,
             base.observed_capability,
             "required_checks_not_declared",
@@ -169,7 +170,7 @@ def _publication_result(
     missing = sorted(expected - set(names))
     if missing:
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             base.target,
             base.observed_capability,
             "required_checks_incomplete:" + ",".join(missing),
@@ -177,7 +178,7 @@ def _publication_result(
             base.credential_source,
         )
     return Surface(
-        "github",
+        GITHUB_AUTHORITY,
         PASS,
         base.identity,
         base.target,
@@ -232,7 +233,7 @@ def github_publication_access(target: Target) -> Surface:
     )
     if info.returncode or info.stdout.strip().lower() != "true":
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             base.target,
             base.observed_capability,
             "admin_required",
@@ -241,7 +242,7 @@ def github_publication_access(target: Target) -> Surface:
         )
     if result.returncode:
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             base.target,
             base.observed_capability,
             error_class(result),
@@ -252,7 +253,7 @@ def github_publication_access(target: Target) -> Surface:
         names = _required_check_names(result)
     except (KeyError, TypeError, ValueError):
         return _blocked(
-            "github",
+            GITHUB_AUTHORITY,
             base.target,
             base.observed_capability,
             "required_checks_missing",

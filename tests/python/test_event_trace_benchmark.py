@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING, Optional
 
 import pytest
 import yaml
-from conftest import REPO_ROOT, selected_test_paths
+from conftest import (
+    REPO_ROOT,
+    import_script_module,
+    selected_test_paths,
+)
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject, JSONValue
@@ -31,11 +35,13 @@ import event_trace_evidence as evidence
 import event_trace_worker as worker
 import source_identity as provenance
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
 DIGEST = "d" * 64
 IDENTITY = {"target_sha256": "t" * 64}
-ACCESS = {"profile": "base", "surface_status": {"kubernetes": "PASS"}}
+ACCESS = {"profile": "base", "surface_status": {ENDPOINTS.KUBERNETES_AUTHORITY: "PASS"}}
 HARNESS = {
     "algorithm": "sha256-tree-v1",
     "digest": "h" * 64,

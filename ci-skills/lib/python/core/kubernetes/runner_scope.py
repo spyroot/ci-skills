@@ -179,15 +179,22 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
             raise KubernetesError(NAMESPACE_READBACK_INVALID) from exc
         return False
 
-    def _owned_runner_names(self, namespace: str, operation: str) -> tuple[str, ...]:
+    def _owned_runners(
+        self, namespace: str, operation: str | None
+    ) -> tuple[tuple[str, str], ...]:
         """Resolve native workload names from exact operation labels and provider identity.
 
-        :param namespace: Native namespace selected by its ownership labels.
-        :param operation: Exact observed operation label, independent of workload name.
-        :returns: Valid owned names matching the selected repository, host, and explicit override.
+        :param namespace: Namespace in which ``_owned_runners`` lists Deployments.
+        :param operation: Operation label value of the namespace. When the value is
+            ``None`` (a borrowed namespace named with an explicit override),
+            ``_owned_runners`` selects Deployments by the manager label only and
+            accepts any nonempty operation label.
+        :returns: Owned operation/name pairs matching repository, host, and explicit override.
         :raises KubernetesError: Native Deployment objects or ownership observations are malformed.
         """  # noqa: DOC502 - Shared native access and ownership validation propagate errors.
-        resources = ResourceSet(self.kubernetes, namespace, operation)
+        selector = f"{MANAGER_LABEL}={MANAGER_VALUE}"
+        if operation is not None:
+            selector += f",{OPERATION_LABEL}={operation}"
         try:
             document = KubernetesObject(
                 json_object(
@@ -197,13 +204,17 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
                         NAMESPACE_OPTION,
                         namespace,
                         SELECTOR_OPTION,
-                        f"{MANAGER_LABEL}={MANAGER_VALUE},{OPERATION_LABEL}={operation}",
+                        selector,
                         *JSON_OPTIONS,
                     )
                 )
             )
             names = []
             for deployment in document.objects(ITEMS_FIELD):
+                native = deployment.metadata.object(LABELS_FIELD).text(OPERATION_LABEL)
+                if not native or (operation is not None and native != operation):
+                    continue
+                resources = ResourceSet(self.kubernetes, namespace, native)
                 if not resources.owns(
                     deployment.document
                 ) or not self._repository_matches(deployment):
@@ -220,7 +231,7 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
                     ).value
                 except ValueError:
                     continue
-                names.append(name)
+                names.append((native, name))
             return tuple(names)
         except TypeError as exc:
             raise KubernetesError(NAMESPACE_READBACK_INVALID) from exc
@@ -259,18 +270,19 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
                 name = workflow.runner.name
                 if not current.owns(item.document):
                     native = item.metadata.object(LABELS_FIELD).text(OPERATION_LABEL)
-                    if native is None:
+                    namespace_owned = native is not None and ResourceSet(
+                        self.kubernetes, "", native
+                    ).owns(item.document)
+                    if not namespace_owned and not explicit:
                         continue
-                    observed = ResourceSet(self.kubernetes, "", native)
-                    if not observed.owns(item.document):
-                        continue
-                    names = self._owned_runner_names(item.name, native)
-                    if len(names) > 1:
+                    runners = self._owned_runners(
+                        item.name, native if namespace_owned else None
+                    )
+                    if len(runners) > 1:
                         raise KubernetesError(NAMESPACE_AMBIGUOUS)
-                    if not names:
+                    if not runners:
                         continue
-                    operation = native
-                    name = names[0]
+                    operation, name = runners[0]
                 owned.append((item.name, operation, name))
             if len(owned) > 1:
                 raise KubernetesError(NAMESPACE_AMBIGUOUS)

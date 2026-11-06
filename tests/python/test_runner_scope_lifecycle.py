@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from dataclasses import replace
 from types import SimpleNamespace
@@ -573,3 +574,99 @@ def test_successful_build_namespace_cleanup_preserves_interleaved_consumer(
         else SCOPES.ScopeRetention.RETAINED
     )
     assert tuple(vars(selected_scope).items()) == baseline
+
+
+@pytest.mark.parametrize(
+    "changed",
+    (None, "repository", "host", "ownership"),
+    ids=("matching-legacy", "foreign-repository", "foreign-host", "unowned-workload"),
+)
+def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_identity(
+    selected_scope: Namespace, changed: str | None
+) -> None:
+    """Recover an owned legacy workload without taking ownership of its namespace.
+
+    :param selected_scope: One generated repository, native namespace and workload identity.
+    :param changed: One independently changed native identity invariant, if selected.
+    :returns: None after validating native selection and zero namespace mutations.
+    """
+    selected = selected_scope
+    cluster = MemoryCluster()
+    action = _action(cluster, selected)
+    action.args.kind = GITHUB_KIND
+    action.args.action = UPDATE_OPERATION
+    action.args.name = None
+    action.args.label = [selected.tag]
+    action.args.runner_root = RUNNER.RUNTIME_ROOT
+    action._workload()
+    planned_name = action.runner.name
+    namespace = _namespace(selected, owned=False)
+    cluster.objects[selected.namespace_key] = namespace
+    deployment: JSONObject = {
+        FIELD_KIND: NAMESPACES.DEPLOYMENT_KIND,
+        FIELD_METADATA: {FIELD_NAME: selected.legacy_name},
+        NAMESPACES.SPEC_FIELD: {
+            NAMESPACES.TEMPLATE_FIELD: {
+                NAMESPACES.SPEC_FIELD: {
+                    NAMESPACES.INIT_CONTAINERS_FIELD: [
+                        {
+                            NAMESPACES.ENVIRONMENT_FIELD: [
+                                {FIELD_NAME: name, NAMESPACES.ENV_VALUE_FIELD: value}
+                                for name, value in (
+                                    (
+                                        NAMESPACES.RUNNER_REPOSITORY_ENV,
+                                        selected.repository,
+                                    ),
+                                    (NAMESPACES.RUNNER_HOST_ENV, selected.host),
+                                )
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+    }
+    baseline = json.dumps(
+        RESOURCES.ResourceSet(
+            cluster, selected.namespace, selected.legacy_name
+        ).managed(deployment),
+        sort_keys=True,
+    )
+    observed = json.loads(baseline)
+    container = observed[NAMESPACES.SPEC_FIELD][NAMESPACES.TEMPLATE_FIELD][
+        NAMESPACES.SPEC_FIELD
+    ][NAMESPACES.INIT_CONTAINERS_FIELD][0]
+    if changed == "repository":
+        container[NAMESPACES.ENVIRONMENT_FIELD][0][NAMESPACES.ENV_VALUE_FIELD] = (
+            selected.alternate_repository
+        )
+    elif changed == "host":
+        container[NAMESPACES.ENVIRONMENT_FIELD][1][NAMESPACES.ENV_VALUE_FIELD] = (
+            selected.host + HOST_SUFFIX
+        )
+    elif changed == "ownership":
+        del observed[FIELD_METADATA][FIELD_LABELS][RESOURCES.OPERATION_LABEL]
+    cluster.objects[
+        (
+            NAMESPACES.DEPLOYMENT_KIND.casefold(),
+            selected.namespace,
+            selected.legacy_name,
+        )
+    ] = observed
+    callback = NAMESPACES.ObserveGitHubNamespace(action)
+    callback.bind(action.context)
+
+    if changed is None:
+        callback.run()
+        assert action.runner.name == selected.legacy_name
+        assert action.runner.operation == selected.legacy_name
+        assert action.resolved_runner_name.source == IDENTITY.NameSource.PROVIDER
+        scope = next(iter(action.context.runner_scopes.values()))
+        assert scope.uid == selected.uid
+        assert scope.ownership == SCOPES.ScopeOwnership.BORROWED
+    else:
+        with pytest.raises(KUBERNETES.KubernetesError, match=UPDATE_IDENTITY_MISSING):
+            callback.run()
+        assert action.runner.name == planned_name
+    assert cluster.objects[selected.namespace_key] == namespace
+    assert cluster.applied == cluster.deleted == []

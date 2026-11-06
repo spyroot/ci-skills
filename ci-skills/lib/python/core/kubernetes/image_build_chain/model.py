@@ -15,6 +15,11 @@ from typing import Final, Optional
 
 from lib.python.access.credentials import bind_sources
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
 from lib.python.core.gitlab.gitlab_actions import ActionPlan
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabService
 from lib.python.core.gitlab.runner_manager import (
@@ -344,7 +349,11 @@ class ImageBuildChainAction(SkillAction):
             self.args.target,
             self.args.binding,
             dry_run=mode == ProbeMode.DRY_RUN,
-            required_surfaces=("gitlab", "kubernetes", "harbor"),
+            required_surfaces=(
+                GITLAB_AUTHORITY,
+                KUBERNETES_AUTHORITY,
+                HARBOR_AUTHORITY,
+            ),
             gitlab_selection=GitLabSelection.from_args(self.args),
         )
         if mode != ProbeMode.DRY_RUN:

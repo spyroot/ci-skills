@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import MutableMapping, Sequence
 from typing import Optional
 
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json, json_object
 from lib.python.core.kubernetes.tool_pod_models import ToolPodState
 from lib.python.core.report import plan_digest, report
@@ -82,7 +83,9 @@ def workflow_result(
     :raises TypeError: Callback or provenance evidence contains non-JSON values.
     """  # noqa: DOC502 - shared JSON conversion rejects malformed evidence.
     selected = target.kubernetes if target is not None else None
-    label = f"{selected.context}@{selected.server}" if selected else "kubernetes"
+    label = (
+        f"{selected.context}@{selected.server}" if selected else KUBERNETES_AUTHORITY
+    )
     output = report(kind, label, {}, result_records(state), errors)
     output.update(operation=operation, status=status, plan=plan)
     if target is not None:

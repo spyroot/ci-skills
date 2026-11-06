@@ -32,6 +32,7 @@ from lib.python.access.kubernetes import kubectl_argv, kubernetes_env, oc_argv
 from lib.python.access.sources import Sources
 from lib.python.core.cli import _failure, output_mode
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit, report
@@ -835,7 +836,7 @@ def run(args: Namespace) -> int:
     stage = "target"
     try:
         target = resolve_target(
-            args.target, args.binding, required_surfaces=("kubernetes",)
+            args.target, args.binding, required_surfaces=(KUBERNETES_AUTHORITY,)
         )
         stage = "credential_source"
         target = bind_sources(target, revision=args.revision)

@@ -34,6 +34,7 @@ REPORT: ModuleType = import_script_module("lib.python.core.report")
 RUNTIME: ModuleType = import_script_module("lib.python.core.runtime")
 STATUS: ModuleType = import_script_module("lib.python.sys.status")
 TARGET: ModuleType = import_script_module("lib.python.core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 SECRET = "boundary-secret-value"
 
@@ -62,7 +63,7 @@ def _kubernetes_target() -> Target:
             server="https://api.cluster.example.test:6443",
             kubeconfig=None,
         ),
-        active_surfaces=("kubernetes",),
+        active_surfaces=(ENDPOINTS.KUBERNETES_AUTHORITY,),
     )
 
 
@@ -489,7 +490,15 @@ def test_log_settings_binding_is_scoped_and_restorable() -> None:
     token = LOGGING.bind_log_settings(first)
     assert LOGGING.bound_log_settings() is first
     parsed = READ_CLI.build_api_parser().parse_args(
-        ["check", "--provider", "gitlab", "--log-format", "json", "--run-id", "unit"]
+        [
+            "check",
+            "--provider",
+            ENDPOINTS.GITLAB_AUTHORITY,
+            "--log-format",
+            "json",
+            "--run-id",
+            "unit",
+        ]
     )
     assert LOGGING.bound_log_settings() is parsed
     assert LOGGING.bound_log_settings().run_id == "unit"
@@ -528,10 +537,12 @@ def test_load_target_reports_malformed_https_authority(tmp_path: Path) -> None:
     :returns: None; assertions validate the public target error boundary.
     """
     target_file = tmp_path / "target.toml"
-    target_file.write_text('[gitlab]\nurl = "https://["\n', encoding="utf-8")
+    target_file.write_text(
+        f'[{ENDPOINTS.GITLAB_AUTHORITY}]\nurl = "https://["\n', encoding="utf-8"
+    )
 
     with pytest.raises(TARGET.TargetError, match="invalid authority"):
-        TARGET.load_target(target_file, required_surfaces=("gitlab",))
+        TARGET.load_target(target_file, required_surfaces=(ENDPOINTS.GITLAB_AUTHORITY,))
 
 
 @pytest.mark.parametrize(

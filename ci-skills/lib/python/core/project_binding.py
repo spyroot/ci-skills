@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Final, Optional, TypeAlias, Union
 
 from lib.python.core.catalog import DEFAULT_AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.runtime import error_class, run_command_tail
 from lib.python.core.target import GitLabSelection, Target, TargetError, load_target
 
@@ -270,9 +271,12 @@ def _source_path(
 def _gitlab_keywords(
     selection: Optional[GitLabSelection],
 ) -> dict[str, Optional[str]]:
-    """Translate the caller's GitLab selection into the target loader keywords.
+    """Translate ``--gitlab`` and ``--gitlab-profile`` into ``load_target`` keywords.
 
-    :param selection: Caller selection, or ``None`` for the routing default.
+    :param selection: ``--gitlab`` and ``--gitlab-profile`` values. When the value
+        is ``None``, ``_gitlab_keywords`` returns ``None`` for both keywords, and
+        ``load_target`` reads ``[gitlab_routing].default``, else
+        ``gitlab_private``.
     :returns: ``gitlab`` and ``gitlab_profile`` keywords of ``load_target``.
     """
     chosen = selection or GitLabSelection()
@@ -294,8 +298,10 @@ def load_project_binding(
     :param required_surfaces: Authority tables required from the target named by
         the binding; Kubernetes source selection is skipped if absent.
     :param optional_surfaces: Supported authorities selected when configured in the target.
-    :param gitlab_selection: Caller's ``--gitlab`` or ``--gitlab-profile`` choice;
-        ``None`` reads the routing default.
+    :param gitlab_selection: The caller sets this value with
+        ``--gitlab private|public`` or ``--gitlab-profile NAME``. When the value is
+        ``None``, ``load_target`` reads ``[gitlab_routing].default`` and uses
+        ``gitlab_private`` if the target sets no default.
     :returns: Target with binding provenance and the selected Kubernetes source
         when Kubernetes is selected.
     :raises TargetError: The binding, target, or source is invalid, conflicting,
@@ -308,11 +314,11 @@ def load_project_binding(
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise TargetError(f"binding_unavailable_or_invalid:{binding}") from exc
     if (
-        set(data) != {"schema_version", "target", "kubernetes"}
+        set(data) != {"schema_version", "target", KUBERNETES_AUTHORITY}
         or data.get("schema_version") != "1.0"
     ):
         raise TargetError("binding_shape_invalid")
-    kube = data["kubernetes"]
+    kube = data[KUBERNETES_AUTHORITY]
     if not isinstance(kube, dict) or set(kube) != {"sources"}:
         raise TargetError("binding_kubernetes_invalid")
     sources = kube["sources"]
@@ -325,7 +331,7 @@ def load_project_binding(
         optional_surfaces=optional_surfaces,
         **_gitlab_keywords(gitlab_selection),
     )
-    if "kubernetes" not in target.active_surfaces:
+    if KUBERNETES_AUTHORITY not in target.active_surfaces:
         return replace(
             target,
             target_reference=target.selection_source(f"binding:{binding}"),
@@ -386,8 +392,10 @@ def resolve_target(
     :param dry_run: Suppress execution of a binding command source when true.
     :param required_surfaces: Authority tables the selected target must provide.
     :param optional_surfaces: Additional supported authorities selected when configured.
-    :param gitlab_selection: Caller's ``--gitlab`` or ``--gitlab-profile`` choice;
-        ``None`` reads the routing default.
+    :param gitlab_selection: The caller sets this value with
+        ``--gitlab private|public`` or ``--gitlab-profile NAME``. When the value is
+        ``None``, ``load_target`` reads ``[gitlab_routing].default`` and uses
+        ``gitlab_private`` if the target sets no default.
     :returns: Validated target with its selection source and binding provenance.
     :raises TargetError: Selectors conflict or the selected target, binding, or
         required authority cannot be loaded.

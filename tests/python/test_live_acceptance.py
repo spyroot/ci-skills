@@ -31,6 +31,13 @@ from conftest import (
 )
 from jsonschema import Draft202012Validator
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION, SCHEMA_VERSION
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
+from lib.python.core.git.remote import GIT_EXECUTABLE
+from lib.python.core.provenance import DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY
 from test_gitlab_actions import _plan, _tag_output
 from test_gitlab_mirror import (
     MIRROR_APPLIED_FILE,
@@ -43,6 +50,7 @@ ACCEPTANCE: Final = load_module(
     "proposed_check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
 )
 PORTABLE: Final = import_script_module("lib.python.core.portable")
+STATUS: Final = import_script_module("lib.python.sys.status")
 SKILL_ROOT: Final = SCRIPT_ROOT.parent
 NOW: Final = datetime(2026, 6, 1, tzinfo=UTC)
 POLICY_FILE: Final = REPO_ROOT / ACCEPTANCE.POLICY_FILE
@@ -50,11 +58,13 @@ POLICY_SCHEMA: Final = REPO_ROOT / ACCEPTANCE.POLICY_SCHEMA_FILE
 POLICY: Final = ACCEPTANCE.load_policy(POLICY_FILE, POLICY_SCHEMA)
 MAX_AGE_DAYS: Final = POLICY["max_receipt_age_days"]
 MIRROR_REQUIRED_OPERATIONS: Final = (
-    ("gitlab_mirror", "sync", "APPLIED"),
-    ("gitlab_mirror", "sync", "NO_OP"),
+    ("gitlab_mirror", "sync", STATUS.APPLIED),
+    ("gitlab_mirror", "sync", STATUS.NO_OP),
 )
 MIRROR_PAIR_PREFIX: Final[str] = "gitlab_mirror:sync:"
 MIRROR_CLEANUP_REASON: Final[str] = "smoke_cleanup_unverified"
+# Committed runner creation receipt in one of the policy's receipt directories.
+RUNNER_CREATE_RECEIPT: Final[str] = "runner-create-applied.json"
 
 
 if TYPE_CHECKING:
@@ -68,7 +78,7 @@ def _digest() -> str:
     """
     from lib.python.core.provenance import tree_digest
 
-    return tree_digest(SKILL_ROOT)["digest"]
+    return tree_digest(SKILL_ROOT)[DIGEST_VALUE_KEY]
 
 
 def _functional_digest() -> str:
@@ -95,44 +105,44 @@ def _access_setup() -> Mapping[str, JSONObject]:
     access = {
         "schema_version": "1.0",
         "kind": "access_check",
-        "status": "PASS",
+        "status": STATUS.PASS,
         "execution_host": execution_host,
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "tested_revision": "a" * 40,
         "skill": {
-            "digest": _digest(),
-            "functional_digest": _functional_digest(),
+            DIGEST_VALUE_KEY: _digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         "targets": {
-            "github": "github.example.test/runtime/repo",
-            "gitlab": "https://gitlab.runtime.example.test",
-            "kubernetes": {
+            GITHUB_AUTHORITY: "github.example.test/runtime/repo",
+            GITLAB_AUTHORITY: "https://gitlab.runtime.example.test",
+            KUBERNETES_AUTHORITY: {
                 "context": "runtime-context",
                 "server": "https://api.runtime.example.test:6443",
             },
         },
         "credential_sources": {
-            "github": "gh-credential-store:github.example.test",
-            "gitlab": "file:path:runtime",
-            "kubernetes": "env:KUBECONFIG",
+            GITHUB_AUTHORITY: "gh-credential-store:github.example.test",
+            GITLAB_AUTHORITY: "file:path:runtime",
+            KUBERNETES_AUTHORITY: "env:KUBECONFIG",
         },
         "surfaces": {
-            "github": {
+            GITHUB_AUTHORITY: {
                 "identity": "runtime-gh",
-                "status": "PASS",
+                "status": STATUS.PASS,
                 "target": "github.example.test/runtime/repo",
                 "credential_source": "gh-credential-store:github.example.test",
             },
-            "gitlab": {
+            GITLAB_AUTHORITY: {
                 "identity": "runtime-gl",
-                "status": "PASS",
+                "status": STATUS.PASS,
                 "target": "https://gitlab.runtime.example.test",
                 "credential_source": "file:path:runtime",
             },
-            "kubernetes": {
+            KUBERNETES_AUTHORITY: {
                 "identity": "runtime-k8s",
-                "status": "PASS",
+                "status": STATUS.PASS,
                 "target": "runtime-context -> https://api.runtime.example.test:6443",
                 "credential_source": "env:KUBECONFIG",
             },
@@ -140,20 +150,20 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "live_checks": {
             **{
                 name: {
-                    "status": "PASS",
+                    "status": STATUS.PASS,
                     "access_proven": True,
                     "readback_sha256": "f" * 64,
                 }
                 for name in ACCEPTANCE.REQUIRED_LIVE_CHECKS
             },
             "ceph_cluster": {
-                "status": "PASS",
+                "status": STATUS.PASS,
                 "access_proven": True,
                 "readback_sha256": "f" * 64,
                 "namespace": "runtime-ceph",
             },
             "gitlab_job": {
-                "status": "PASS",
+                "status": STATUS.PASS,
                 "access_proven": True,
                 "readback_sha256": "e" * 64,
                 "job_url": "https://gitlab.runtime.example.test/runtime/team-repo/-/jobs/42",
@@ -170,13 +180,13 @@ def _access_setup() -> Mapping[str, JSONObject]:
     gitlab = {
         "schema_version": "1.0",
         "kind": "gitlab_access",
-        "status": "PASS",
+        "status": STATUS.PASS,
         "execution_host": execution_host,
         "origin": "https://gitlab.runtime.example.test",
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "skill": {
-            "digest": _digest(),
-            "functional_digest": _functional_digest(),
+            DIGEST_VALUE_KEY: _digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         "identity": {"username": "runtime-gl", "id": 31},
@@ -218,14 +228,14 @@ def _base_operation(
     receipt = {
         "schema_version": "1.0",
         "kind": kind,
-        "status": "PASS",
+        "status": STATUS.PASS,
         "execution_host": context["execution_host"],
         "origin": context["origin"],
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "tested_revision": revision["value"],
         "skill": {
-            "digest": _digest(),
-            "functional_digest": _functional_digest(),
+            DIGEST_VALUE_KEY: _digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": revision,
         },
         "identity": {"username": context["username"], "id": context["identity_id"]},
@@ -251,7 +261,7 @@ def _base_operation(
         return receipt
     receipt.update(
         phase="APPLY",
-        mutated=action == "APPLIED",
+        mutated=action == STATUS.APPLIED,
         result_action=action,
         plan_digest=f"digest:{kind}:{operation}",
         readback={"id": 7, "action": action, "verified": True},
@@ -265,13 +275,13 @@ def _runner_create(setup: Mapping[str, JSONObject]) -> MutableMapping[str, JSONV
     :param setup: Fixture setup receipts supplying host and project identity.
     :returns: Applied runner creation receipt with delete and absence read-back.
     """
-    receipt = _base_operation(setup, "gitlab_runner", "create", "APPLIED")
+    receipt = _base_operation(setup, "gitlab_runner", "create", STATUS.APPLIED)
     context = _context(setup)
     runner_id = receipt["readback"]["id"]
     receipt["smoke_cleanup"] = {
         "schema_version": "1.0",
-        "kind": "gitlab_runner_smoke_cleanup",
-        "status": "PASS",
+        "kind": ACCEPTANCE.RUNNER_CLEANUP_KIND,
+        "status": STATUS.PASS,
         "captured_at": receipt["captured_at"],
         "execution_host": context["execution_host"],
         "origin": context["origin"],
@@ -305,7 +315,7 @@ def _runner_delete(
     """
     receipt = _base_operation(setup, "gitlab_runner", "delete", action)
     runner_id = receipt["readback"]["id"]
-    mutated = action == "APPLIED"
+    mutated = action == STATUS.APPLIED
     record = {
         "id": runner_id,
         "action": action,
@@ -343,7 +353,10 @@ def _podman_receipt(setup: Mapping[str, JSONObject]) -> JSONObject:
     )
     identity = setup["access.json"]["skill"]
     receipt["skill"].update(
-        digest=identity["digest"], functional_digest=identity["functional_digest"]
+        {
+            DIGEST_VALUE_KEY: identity[DIGEST_VALUE_KEY],
+            FUNCTIONAL_DIGEST_KEY: identity[FUNCTIONAL_DIGEST_KEY],
+        }
     )
     receipt["skill"]["revision"].update(identity["revision"])
     return receipt
@@ -375,8 +388,10 @@ def _candidate_delivery_receipts(
         receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
         receipt["tested_revision"] = identity["tested_revision"]
         receipt["skill"].update(
-            digest=identity["skill"]["digest"],
-            functional_digest=identity["skill"]["functional_digest"],
+            {
+                DIGEST_VALUE_KEY: identity["skill"][DIGEST_VALUE_KEY],
+                FUNCTIONAL_DIGEST_KEY: identity["skill"][FUNCTIONAL_DIGEST_KEY],
+            }
         )
         receipt["skill"]["revision"].update(identity["skill"]["revision"])
         if receipt["operation"] == "chain":
@@ -415,7 +430,7 @@ def _consumer_action_receipt(
     gitlab = setup["gitlab-access.json"]
     if kind == "gitlab_repository":
         record = {
-            "action": "APPLIED",
+            "action": STATUS.APPLIED,
             "verified": True,
             "mutated": True,
             "branch": "consumer",
@@ -424,7 +439,7 @@ def _consumer_action_receipt(
         }
     else:
         record = {
-            "action": "APPLIED",
+            "action": STATUS.APPLIED,
             "verified": True,
             "mutated": True,
             "id": 81,
@@ -455,7 +470,9 @@ def _consumer_action_receipt(
         f"{gitlab['origin']}/{gitlab['target']['full_path']}"
     )
     receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
-    receipt["skill"].update(digest=_digest(), functional_digest=_functional_digest())
+    receipt["skill"].update(
+        {DIGEST_VALUE_KEY: _digest(), FUNCTIONAL_DIGEST_KEY: _functional_digest()}
+    )
     return PORTABLE.portable(receipt)
 
 
@@ -475,7 +492,7 @@ def _mirror_receipts(
         receipt["captured_at"] = (captured + timedelta(seconds=offset)).isoformat()
         receipt["execution_host"] = access["execution_host"]
         receipt["tested_revision"] = access["tested_revision"]
-        for key in ("digest", "functional_digest"):
+        for key in (DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY):
             receipt["skill"][key] = access["skill"][key]
         receipt["skill"]["revision"].update(access["skill"]["revision"])
     applied_record = receipts[MIRROR_APPLIED_FILE]["records"][0]
@@ -487,11 +504,11 @@ def _mirror_receipts(
         "destination_id_http_status": HTTPStatus.NOT_FOUND,
     }
     noop["smoke_cleanup"] = {
-        "kind": "gitlab_mirror_smoke_cleanup",
-        "status": "PASS",
+        "kind": ACCEPTANCE.MIRROR_CLEANUP_KIND,
+        "status": STATUS.PASS,
         "captured_at": (captured + timedelta(seconds=len(receipts))).isoformat(),
         "execution_host": noop["execution_host"],
-        "skill_digest": noop["skill"]["digest"],
+        "skill_digest": noop["skill"][DIGEST_VALUE_KEY],
         "tested_revision": noop["tested_revision"],
         "before": {
             "source": deepcopy(applied_record["source"]),
@@ -600,7 +617,7 @@ def test_full_required_operation_set_is_bound_to_initial_runtime_setup() -> None
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "PASS", result["problems"]
+    assert result["status"] == STATUS.PASS, result["problems"]
     assert set(result["accepted"]) == set(receipts)
     assert {
         (receipt.get("kind"), receipt.get("operation"), receipt.get("result_action"))
@@ -630,14 +647,14 @@ def test_required_podman_runtime_receipt_cannot_be_missing() -> None:
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert "image_build_readiness:probe:check:receipt_missing" in result["problems"]
 
 
 @pytest.mark.parametrize(
     ("field", "value", "reason"),
     (
-        ("functional_digest", "b" * 64, "functional_digest_mismatch"),
+        (FUNCTIONAL_DIGEST_KEY, "b" * 64, "functional_digest_mismatch"),
         ("nested_runtime_ready", False, "runtime_readback_unproven"),
         ("exit_code", 7, "runtime_readback_unproven"),
         ("rows", [], "runtime_checks_incomplete"),
@@ -658,7 +675,7 @@ def test_podman_receipt_requires_current_runtime_and_cleanup_proof(
     setup = _access_setup()
     receipts = _complete_receipts(setup)
     baseline = _evaluate(setup, receipts)
-    assert baseline["status"] == "PASS", baseline["problems"]
+    assert baseline["status"] == STATUS.PASS, baseline["problems"]
     assert "podman-probe.json" in baseline["accepted"]
     receipt = receipts["podman-probe.json"]
     probe = next(
@@ -667,7 +684,7 @@ def test_podman_receipt_requires_current_runtime_and_cleanup_proof(
         if record["callback"] == "RunPodmanProbe"
     )
     targets = {
-        "functional_digest": receipt["skill"],
+        FUNCTIONAL_DIGEST_KEY: receipt["skill"],
         "nested_runtime_ready": probe,
         "exit_code": probe["pod"],
         "rows": probe,
@@ -678,7 +695,7 @@ def test_podman_receipt_requires_current_runtime_and_cleanup_proof(
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert f"podman-probe.json:{reason}" in result["problems"]
     assert "podman-probe.json" not in result["accepted"]
 
@@ -697,7 +714,7 @@ def test_podman_cleanup_requires_each_owned_resource_identity(
     setup = _access_setup()
     receipts = _complete_receipts(setup)
     baseline = _evaluate(setup, receipts)
-    assert baseline["status"] == "PASS", baseline["problems"]
+    assert baseline["status"] == STATUS.PASS, baseline["problems"]
     cleanup = receipts["podman-probe.json"]["cleanup"]
     if change == "missing":
         cleanup["resources"] = [
@@ -709,7 +726,7 @@ def test_podman_cleanup_requires_each_owned_resource_identity(
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert "podman-probe.json:cleanup_unproven" in result["problems"]
     assert "podman-probe.json" not in result["accepted"]
 
@@ -743,7 +760,7 @@ def test_podman_cleanup_preserves_caller_owned_resources(
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "PASS", result["problems"]
+    assert result["status"] == STATUS.PASS, result["problems"]
     assert "podman-probe.json" in result["accepted"]
 
 
@@ -759,9 +776,31 @@ def test_policy_selected_directories_load_the_successful_podman_receipt() -> Non
     assert any(
         receipt.get("kind") == "image_build_readiness"
         and receipt.get("operation") == "probe"
-        and receipt.get("status") == "PASS"
+        and receipt.get("status") == STATUS.PASS
         for receipt in receipts.values()
     )
+
+
+def test_committed_runner_receipt_records_the_runner_cleanup_kind() -> None:
+    """Compare the runner cleanup kind with the committed runner creation receipt.
+
+    The expected value is the ``smoke_cleanup`` kind that the committed receipt
+    holds, so a change to ``RUNNER_CLEANUP_KIND`` in
+    `tools/skillkit/smoke_cleanup.py` fails against recorded output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    paths = [
+        REPO_ROOT / directory / RUNNER_CREATE_RECEIPT
+        for directory in POLICY["receipt_directories"]
+        if (REPO_ROOT / directory / RUNNER_CREATE_RECEIPT).is_file()
+    ]
+    assert len(paths) == 1, paths
+    receipt = json.loads(paths[0].read_text(encoding="utf-8"))
+
+    cleanup = receipt[ACCEPTANCE.SMOKE_CLEANUP_FIELD]
+
+    assert cleanup[ACCEPTANCE.KIND_FIELD] == ACCEPTANCE.RUNNER_CLEANUP_KIND
 
 
 def test_operation_identity_must_match_the_initial_synthetic_setup() -> None:
@@ -775,7 +814,7 @@ def test_operation_identity_must_match_the_initial_synthetic_setup() -> None:
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert "gitlab_issue-open-bug-APPLIED.json:identity_mismatch" in result["problems"]
 
 
@@ -794,7 +833,7 @@ def test_operation_target_cannot_switch_away_from_initial_synthetic_setup() -> N
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert (
         "gitlab_issue-open-bug-APPLIED.json:setup_context_missing_or_ambiguous"
         in result["problems"]
@@ -805,7 +844,7 @@ def test_operation_target_cannot_switch_away_from_initial_synthetic_setup() -> N
     ("mutate", "reason"),
     (
         (
-            lambda setup: setup["access.json"].update(status="BLOCKED"),
+            lambda setup: setup["access.json"].update(status=STATUS.BLOCKED),
             "status_not_pass",
         ),
         (
@@ -821,14 +860,14 @@ def test_operation_target_cannot_switch_away_from_initial_synthetic_setup() -> N
             "live_checks_blocking",
         ),
         (
-            lambda setup: setup["access.json"]["surfaces"]["kubernetes"].update(
-                status="BLOCKED"
+            lambda setup: setup["access.json"]["surfaces"][KUBERNETES_AUTHORITY].update(
+                status=STATUS.BLOCKED
             ),
-            "surface_not_pass:kubernetes",
+            f"surface_not_pass:{KUBERNETES_AUTHORITY}",
         ),
         (
-            lambda setup: setup["access.json"]["surfaces"].pop("gitlab"),
-            "identity_missing:gitlab",
+            lambda setup: setup["access.json"]["surfaces"].pop(GITLAB_AUTHORITY),
+            f"identity_missing:{GITLAB_AUTHORITY}",
         ),
         (
             lambda setup: setup["gitlab-access.json"].update(credential_digest=""),
@@ -851,7 +890,7 @@ def test_setup_receipts_preserve_freshness_and_shape_checks(
 
     result = _evaluate(setup)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     name = (
         "gitlab-access.json"
         if reason == "credential_source_unresolved"
@@ -887,7 +926,7 @@ def test_receipt_schema_version_accepts_the_routing_minor_version(
     problem = "access.json:schema_version_unexpected"
     assert (problem not in result["problems"]) is accepted
     if accepted:
-        assert result["status"] == "PASS", result["problems"]
+        assert result["status"] == STATUS.PASS, result["problems"]
 
 
 def test_repeat_operations_require_matching_plan_and_resource() -> None:
@@ -941,7 +980,7 @@ def test_missing_or_undeclared_operation_receipt_blocks_without_local_allowlist(
     receipts = _complete_receipts(setup)
     del receipts["gitlab_runner-list-read.json"]
     receipts["unexpected.json"] = _base_operation(
-        setup, "gitlab_issue", "other", "APPLIED"
+        setup, "gitlab_issue", "other", STATUS.APPLIED
     )
 
     result = _evaluate(setup, receipts)
@@ -983,16 +1022,21 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
         body={"runner_type": "project_type"},
         token_out="/selected/runner-secret",
     )
-    record = {"action": "APPLIED", "id": 9, "verified": True, "sink_persisted": True}
+    record = {
+        "action": STATUS.APPLIED,
+        "id": 9,
+        "verified": True,
+        "sink_persisted": True,
+    }
     report = actions._result(
         plan,
-        "PASS",
+        STATUS.PASS,
         phase="APPLY",
         mutated=True,
-        result_action="APPLIED",
+        result_action=STATUS.APPLIED,
         skill={
-            "digest": _digest(),
-            "functional_digest": _functional_digest(),
+            DIGEST_VALUE_KEY: _digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         identity={"username": "runtime-gl", "id": 31},
@@ -1013,7 +1057,7 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
     required = {
         "kind": "gitlab_runner",
         "operation": "create",
-        "result_action": "APPLIED",
+        "result_action": STATUS.APPLIED,
         "execution_host": report["execution_host"],
         "origin": plan.origin,
         "username": report["identity"]["username"],
@@ -1044,11 +1088,11 @@ def _commit_current_index(repository: Path, message: str) -> str:
     :returns: SHA of the created commit, without changing the checked-out tree.
     """
     tree = subprocess.check_output(
-        ["git", "-C", str(repository), "write-tree"], text=True
+        [GIT_EXECUTABLE, "-C", str(repository), "write-tree"], text=True
     ).strip()
     return subprocess.check_output(
         [
-            "git",
+            GIT_EXECUTABLE,
             "-C",
             str(repository),
             "-c",
@@ -1077,7 +1121,7 @@ def _candidate_identity_receipt(revision: str, skill_root: Path) -> JSONObject:
         "tested_revision": revision,
         "skill": {
             **tree_digest(skill_root),
-            "functional_digest": functional_digest(skill_root),
+            FUNCTIONAL_DIGEST_KEY: functional_digest(skill_root),
             "revision": {"value": revision, "verified": True},
         },
     }
@@ -1101,16 +1145,25 @@ def _sibling_skill_commits(tmp_path: Path) -> tuple[Path, Path, str, str]:
     (bin_root / "fixture.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     (lib_root / "fixture.py").write_text("VALUE = 1\n", encoding="utf-8")
     (schema_root / "fixture.json").write_text('{"type":"object"}\n', encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
-    subprocess.run(["git", "-C", str(repository), "add", "ci-skills"], check=True)
+    subprocess.run([GIT_EXECUTABLE, "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        [GIT_EXECUTABLE, "-C", str(repository), "add", "ci-skills"], check=True
+    )
     tested = _commit_current_index(repository, "tested skill")
     candidate = _commit_current_index(repository, "squash candidate")
     subprocess.run(
-        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        [
+            GIT_EXECUTABLE,
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/heads/main",
+            candidate,
+        ],
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "checkout", "-q", candidate], check=True
     )
     return repository, skill_root, tested, candidate
 
@@ -1129,7 +1182,7 @@ def test_candidate_identity_accepts_document_change_from_nonancestor_commit(
     assert (
         subprocess.run(
             [
-                "git",
+                GIT_EXECUTABLE,
                 "-C",
                 str(repository),
                 "merge-base",
@@ -1146,14 +1199,23 @@ def test_candidate_identity_accepts_document_change_from_nonancestor_commit(
     test_file = skill_root / "tests" / "python" / "test_fixture.py"
     test_file.parent.mkdir(parents=True)
     test_file.write_text("def test_fixture() -> None:\n    pass\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repository), "add", "ci-skills"], check=True)
+    subprocess.run(
+        [GIT_EXECUTABLE, "-C", str(repository), "add", "ci-skills"], check=True
+    )
     candidate = _commit_current_index(repository, "documentation and test updates")
     subprocess.run(
-        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        [
+            GIT_EXECUTABLE,
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/heads/main",
+            candidate,
+        ],
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "checkout", "-q", candidate], check=True
     )
     assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == []
 
@@ -1173,15 +1235,23 @@ def test_candidate_identity_rejects_runtime_change(
         "#!/bin/sh\necho different\n", encoding="utf-8"
     )
     subprocess.run(
-        ["git", "-C", str(repository), "add", "ci-skills/bin/fixture.sh"], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "add", "ci-skills/bin/fixture.sh"],
+        check=True,
     )
     candidate = _commit_current_index(repository, "different skill")
     subprocess.run(
-        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        [
+            GIT_EXECUTABLE,
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/heads/main",
+            candidate,
+        ],
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "checkout", "-q", candidate], check=True
     )
     assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == [
         "candidate_functional_digest_mismatch"
@@ -1201,7 +1271,7 @@ def test_candidate_identity_accepts_source_absent_from_fresh_clone(
     candidate_repository = tmp_path / "candidate"
     subprocess.run(
         [
-            "git",
+            GIT_EXECUTABLE,
             "clone",
             "--quiet",
             "--no-local",
@@ -1217,7 +1287,7 @@ def test_candidate_identity_accepts_source_absent_from_fresh_clone(
     assert (
         subprocess.run(
             [
-                "git",
+                GIT_EXECUTABLE,
                 "-C",
                 str(candidate_repository),
                 "cat-file",
@@ -1267,7 +1337,7 @@ def test_acceptance_requires_recorded_functional_digest() -> None:
     """
     setup = _access_setup()
     receipts = _complete_receipts(setup)
-    del setup["access.json"]["skill"]["functional_digest"]
+    del setup["access.json"]["skill"][FUNCTIONAL_DIGEST_KEY]
 
     result = _evaluate(setup, receipts)
 
@@ -1289,32 +1359,31 @@ def test_gate_never_reads_repository_merge_policy_from_the_skill_target() -> Non
     """
     setup = _access_setup()
     access = setup["access.json"]
-    del access["surfaces"]["github"]
-    del access["targets"]["github"]
-    del access["credential_sources"]["github"]
+    del access["surfaces"][GITHUB_AUTHORITY]
+    del access["targets"][GITHUB_AUTHORITY]
+    del access["credential_sources"][GITHUB_AUTHORITY]
 
     without_github = _evaluate(setup, _complete_receipts(setup))
 
-    assert without_github["status"] == "PASS", without_github["problems"]
+    assert without_github["status"] == STATUS.PASS, without_github["problems"]
     assert not [
         problem
         for problem in without_github["problems"]
-        if "github" in problem or "publication" in problem
+        if GITHUB_AUTHORITY in problem or "publication" in problem
     ]
 
     access["publication"] = True
-    access["surfaces"]["github"] = {
-        "status": "BLOCKED",
+    access["surfaces"][GITHUB_AUTHORITY] = {
+        "status": STATUS.BLOCKED,
         "observed_capability": ["required_checks_read"],
         "details": {"required_checks": []},
     }
 
     with_publication_fields = _evaluate(setup, _complete_receipts(setup))
 
-    assert with_publication_fields["status"] == "PASS", with_publication_fields[
+    assert with_publication_fields["status"] == STATUS.PASS, with_publication_fields[
         "problems"
     ]
-    assert ACCEPTANCE.GATE_SURFACES == ("gitlab", "kubernetes")
 
 
 def test_cli_blocks_without_the_tracked_policy_file(
@@ -1332,9 +1401,9 @@ def test_cli_blocks_without_the_tracked_policy_file(
         sys, "argv", ["check_live_acceptance.py", "--root", str(tmp_path), "--json"]
     )
 
-    assert ACCEPTANCE.main() == 2
+    assert ACCEPTANCE.main() == STATUS.exit_code(STATUS.BLOCKED)
     report = json.loads(capsys.readouterr().out)
-    assert report["status"] == "BLOCKED"
+    assert report["status"] == STATUS.BLOCKED
     assert report["kind"] == "live_acceptance"
     assert report["problems"] == [
         f"policy_missing:{tmp_path / 'inventory/ci/live-acceptance.json'}"
@@ -1357,9 +1426,9 @@ def test_cli_reports_receipt_loading_shape_without_an_expectations_file(
         sys, "argv", ["check_live_acceptance.py", "--root", str(tmp_path), "--json"]
     )
 
-    assert ACCEPTANCE.main() == 2
+    assert ACCEPTANCE.main() == STATUS.exit_code(STATUS.BLOCKED)
     report = json.loads(capsys.readouterr().out)
-    assert report["status"] == "BLOCKED"
+    assert report["status"] == STATUS.BLOCKED
     assert report["kind"] == "live_acceptance"
     assert report["problems"] == [
         f"receipt_directory_missing:{tmp_path / POLICY['receipt_directories'][0]}"
@@ -1562,9 +1631,9 @@ def test_cli_dry_run_lists_policy_and_receipts_without_evaluating(
         ["check_live_acceptance.py", "--root", str(tmp_path), "--json", "--dry-run"],
     )
 
-    assert ACCEPTANCE.main() == 0
+    assert ACCEPTANCE.main() == STATUS.exit_code(STATUS.DRY_RUN)
     report = json.loads(capsys.readouterr().out)
-    assert report["status"] == "DRY_RUN"
+    assert report["status"] == STATUS.DRY_RUN
     assert report["receipts"] == ["stale.json"]
     assert report["policy"]["max_receipt_age_days"] == MAX_AGE_DAYS
     assert report["problems"] == []
@@ -1589,7 +1658,7 @@ def test_cli_dry_run_text_mode_lists_window_directories_and_receipts(
         sys, "argv", ["check_live_acceptance.py", "--root", str(tmp_path), "--dry-run"]
     )
 
-    assert ACCEPTANCE.main() == 0
+    assert ACCEPTANCE.main() == STATUS.exit_code(STATUS.DRY_RUN)
     text = capsys.readouterr().out
     assert "Live acceptance: DRY_RUN" in text
     assert "window    7 days" in text
@@ -1641,7 +1710,7 @@ def test_cli_reads_the_freshness_window_from_the_selected_policy(
         ],
     )
 
-    assert ACCEPTANCE.main() == 2
+    assert ACCEPTANCE.main() == STATUS.exit_code(STATUS.BLOCKED)
     report = json.loads(capsys.readouterr().out)
     assert ("access.json:receipt_stale" in report["problems"]) is stale
 
@@ -1659,7 +1728,7 @@ def test_receipt_older_than_the_policy_window_is_stale() -> None:
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert "access.json:receipt_stale" in result["problems"]
     assert "access.json:setup_receipt_mismatch" not in result["problems"]
 
@@ -1691,7 +1760,7 @@ def test_window_applies_to_operation_receipts_and_the_cleanup_proof() -> None:
         **_context(setup),
         "kind": "gitlab_runner",
         "operation": "create",
-        "result_action": "APPLIED",
+        "result_action": STATUS.APPLIED,
     }
 
     narrow = ACCEPTANCE._check_gitlab_receipt(
@@ -1720,7 +1789,7 @@ def test_receipt_inside_the_policy_window_is_fresh() -> None:
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "PASS", result["problems"]
+    assert result["status"] == STATUS.PASS, result["problems"]
 
 
 def test_no_committed_receipt_carries_a_host_path() -> None:
@@ -1742,12 +1811,12 @@ def test_targeted_acceptance_requires_only_the_selected_current_capability() -> 
     result = ACCEPTANCE.evaluate(
         {}, receipts, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
-    assert result["status"] == "PASS"
+    assert result["status"] == STATUS.PASS
     assert result["accepted"] == ["probe.json"]
     aggregate = ACCEPTANCE.evaluate(
         {}, receipts, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS
     )
-    assert aggregate["status"] == "BLOCKED"
+    assert aggregate["status"] == STATUS.BLOCKED
 
 
 @pytest.mark.parametrize(
@@ -1770,15 +1839,17 @@ def test_targeted_iso_verification_requires_matching_readbacks_and_reader_cleanu
     receipt["captured_at"] = identity["captured_at"]
     receipt["tested_revision"] = identity["tested_revision"]
     receipt["skill"].update(
-        digest=identity["skill"]["digest"],
-        functional_digest=identity["skill"]["functional_digest"],
+        {
+            DIGEST_VALUE_KEY: identity["skill"][DIGEST_VALUE_KEY],
+            FUNCTIONAL_DIGEST_KEY: identity["skill"][FUNCTIONAL_DIGEST_KEY],
+        }
     )
     receipt["skill"]["revision"].update(identity["skill"]["revision"])
     name = "iso-verify.json"
     baseline = ACCEPTANCE.evaluate(
         {}, {name: receipt}, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
-    assert baseline["status"] == "PASS", baseline["problems"]
+    assert baseline["status"] == STATUS.PASS, baseline["problems"]
     assert baseline["accepted"] == [name]
     if failure == "none":
         return
@@ -1810,7 +1881,7 @@ def test_targeted_iso_verification_requires_matching_readbacks_and_reader_cleanu
         {}, {name: receipt}, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
 
-    assert rejected["status"] == "BLOCKED"
+    assert rejected["status"] == STATUS.BLOCKED
     assert name not in rejected["accepted"]
     assert f"{name}:{reason}" in rejected["problems"]
 
@@ -1821,7 +1892,7 @@ def test_targeted_acceptance_still_rejects_other_candidate_bytes() -> None:
     :returns: None after verifying that an unrelated digest cannot pass.
     """
     receipt = _podman_receipt(_access_setup())
-    receipt["skill"]["functional_digest"] = "b" * 64
+    receipt["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     result = ACCEPTANCE.evaluate(
         {},
         {"probe.json": receipt},
@@ -1830,7 +1901,7 @@ def test_targeted_acceptance_still_rejects_other_candidate_bytes() -> None:
         max_age_days=MAX_AGE_DAYS,
         aggregate=False,
     )
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert "probe.json:functional_digest_mismatch" in result["problems"]
 
 
@@ -1842,7 +1913,7 @@ def test_targeted_acceptance_rejects_an_empty_selection() -> None:
     result = ACCEPTANCE.evaluate(
         {}, {}, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert result["problems"] == ["receipts_missing"]
 
 
@@ -1861,7 +1932,7 @@ def test_recorded_identity_verifies_original_source_after_candidate_changes(
         "candidate_functional_digest_mismatch"
     ]
     assert ACCEPTANCE.check_recorded_identity(receipt, skill_root) == []
-    receipt["skill"]["functional_digest"] = "b" * 64
+    receipt["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     assert ACCEPTANCE.check_recorded_identity(receipt, skill_root) == [
         "recorded_functional_digest_mismatch"
     ]
@@ -1884,7 +1955,7 @@ def test_targeted_acceptance_rejects_mixed_installed_revisions() -> None:
         max_age_days=MAX_AGE_DAYS,
         aggregate=False,
     )
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert result["mode"] == "targeted"
     assert result["tested_revision"] is None
     assert "mixed_tested_revisions" in result["problems"]
@@ -1901,7 +1972,7 @@ def test_targeted_chain_requires_matching_independent_runner_read(failure: str) 
     result = ACCEPTANCE.evaluate(
         {}, receipts, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
-    assert result["status"] == "PASS", result["problems"]
+    assert result["status"] == STATUS.PASS, result["problems"]
     assert set(result["accepted"]) == set(receipts)
     assert result["mode"] == "targeted"
     assert result["tested_revision"] == "a" * 40
@@ -1927,7 +1998,7 @@ def test_targeted_chain_requires_matching_independent_runner_read(failure: str) 
         {}, receipts, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
 
-    assert rejected["status"] == "BLOCKED"
+    assert rejected["status"] == STATUS.BLOCKED
     assert "toolbox-runner.json" not in rejected["accepted"]
     assert f"toolbox-runner.json:{reason}" in rejected["problems"]
 
@@ -1940,12 +2011,12 @@ def test_aggregate_acceptance_requires_the_delivered_chain() -> None:
     setup = _access_setup()
     receipts = _complete_receipts(setup)
     baseline = _evaluate(setup, receipts)
-    assert baseline["status"] == "PASS", baseline["problems"]
+    assert baseline["status"] == STATUS.PASS, baseline["problems"]
     del receipts["toolbox-runner.json"]
 
     result = _evaluate(setup, receipts)
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert "image_build_readiness:chain:check:receipt_missing" in result["problems"]
 
 
@@ -1972,22 +2043,22 @@ def test_targeted_gitlab_actions_and_aggregate_require_delivery_readback(
     result = ACCEPTANCE.evaluate(
         {}, selected, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
-    assert result["status"] == "PASS", result["problems"]
+    assert result["status"] == STATUS.PASS, result["problems"]
     assert result["accepted"] == ["action.json"]
-    receipt["readback"]["action"] = "NO_OP"
+    receipt["readback"]["action"] = STATUS.NO_OP
     rejected = ACCEPTANCE.evaluate(
         {}, selected, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
-    assert rejected["status"] == "BLOCKED"
+    assert rejected["status"] == STATUS.BLOCKED
     assert rejected["accepted"] == []
     assert "action.json:operation_readback_missing" in rejected["problems"]
 
     complete = _complete_receipts(setup)
     baseline = _evaluate(setup, complete)
-    assert baseline["status"] == "PASS", baseline["problems"]
+    assert baseline["status"] == STATUS.PASS, baseline["problems"]
     del complete[f"{kind}-{operation}-APPLIED.json"]
     missing = _evaluate(setup, complete)
-    assert missing["status"] == "BLOCKED"
+    assert missing["status"] == STATUS.BLOCKED
     assert f"{kind}:{operation}:APPLIED:receipt_missing" in missing["problems"]
 
 
@@ -2024,7 +2095,7 @@ def test_policy_coverage_accepts_validated_behavior_in_both_modes(
         required_operations=required,
     )
 
-    assert result["status"] == "PASS", result["problems"]
+    assert result["status"] == STATUS.PASS, result["problems"]
     assert set(result["accepted"]) == set(receipts)
     assert json.dumps(receipts, sort_keys=True) == policy_coverage_baseline
 
@@ -2058,9 +2129,9 @@ def test_rejected_behavior_receipt_cannot_satisfy_policy_coverage(
     if failure == "missing":
         del receipts["podman-probe.json"]
     elif failure == "functional-digest":
-        receipts["podman-probe.json"]["skill"]["functional_digest"] = "b" * 64
+        receipts["podman-probe.json"]["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     elif failure == "failed-status":
-        receipts["podman-probe.json"]["status"] = "BLOCKED"
+        receipts["podman-probe.json"]["status"] = STATUS.BLOCKED
     else:
         receipts["podman-probe.json"]["cleanup"]["resources"] = []
 
@@ -2074,7 +2145,7 @@ def test_rejected_behavior_receipt_cannot_satisfy_policy_coverage(
         required_operations=(("image_build_readiness", "probe", None),),
     )
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert "podman-probe.json" not in result["accepted"]
     assert "coverage_missing:image_build_readiness:probe:check" in result["problems"]
     if receipt_problem is not None:
@@ -2101,7 +2172,7 @@ def test_access_only_receipts_do_not_prove_required_behavior() -> None:
         ),
     )
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     assert result["accepted"] == ["access.json"]
     assert result["problems"] == ["coverage_missing:image_build_readiness:probe:check"]
 
@@ -2161,9 +2232,9 @@ def test_cli_no_aggregate_cannot_bypass_required_behavior(
     code = ACCEPTANCE.main()
     result = json.loads(capsys.readouterr().out)
 
-    assert code == (0 if behavior_present else 2)
+    expected = STATUS.PASS if behavior_present else STATUS.BLOCKED
+    assert (code, result["status"]) == (STATUS.exit_code(expected), expected)
     assert result["mode"] == "targeted"
-    assert result["status"] == ("PASS" if behavior_present else "BLOCKED")
     assert "access.json" in result["accepted"]
     assert (
         "coverage_missing:image_build_readiness:probe:check" in result["problems"]
@@ -2193,7 +2264,7 @@ def test_mirror_pair_satisfies_required_behavior_in_both_acceptance_modes(
         required_operations=MIRROR_REQUIRED_OPERATIONS,
     )
 
-    assert result["status"] == "PASS", result["problems"]
+    assert result["status"] == STATUS.PASS, result["problems"]
     assert {MIRROR_APPLIED_FILE, MIRROR_NO_OP_FILE} <= set(result["accepted"])
     assert (
         receipts[MIRROR_APPLIED_FILE]["plan_digest"]
@@ -2273,7 +2344,7 @@ def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evide
     elif failure == "cleanup-future":
         noop["smoke_cleanup"]["captured_at"] = (NOW + timedelta(days=1)).isoformat()
     elif failure == "wrong-action":
-        noop["records"][0]["action"] = "APPLIED"
+        noop["records"][0]["action"] = STATUS.APPLIED
     elif failure == "native-id":
         noop["records"][0]["mirror"]["id"] += 1
     elif failure == "before-refs":
@@ -2281,7 +2352,7 @@ def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evide
     elif failure == "same-capture-time":
         noop["captured_at"] = receipts[MIRROR_APPLIED_FILE]["captured_at"]
     elif failure == "rejected-receipt":
-        noop["skill"]["functional_digest"] = "b" * 64
+        noop["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     else:
         receipts = setup
 
@@ -2295,7 +2366,7 @@ def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evide
         required_operations=MIRROR_REQUIRED_OPERATIONS,
     )
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == STATUS.BLOCKED
     expected = (
         reason
         if reason.startswith("coverage_missing:")

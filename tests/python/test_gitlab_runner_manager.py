@@ -23,7 +23,12 @@ from uuid import uuid4
 
 import pytest
 from conftest import import_script_module
-from lib.python.core.endpoints import GITLAB_PUBLIC_SELECTOR
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    GITLAB_PUBLIC_SELECTOR,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
 from test_tool_pod import MemoryCluster
 
 ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
@@ -125,7 +130,7 @@ def _target() -> TARGET.Target:
             server="https://api.cluster.example.test:6443",
             kubeconfig=None,
         ),
-        active_surfaces=("gitlab", "kubernetes", "harbor"),
+        active_surfaces=(GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
         tested_revision="b" * 40,
         source_file=Path("/unit/target.toml"),
         source_kind="unit-target",
@@ -309,7 +314,7 @@ def test_offline_prepare_defers_provider_and_runner_token_reads(
     assert calls == [
         (
             True,
-            ("gitlab", "kubernetes", "harbor"),
+            (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
             TARGET.GitLabSelection(gitlab_selector, gitlab_profile),
         )
     ]
@@ -400,7 +405,7 @@ def test_fingerprint_binds_exact_target_runner_image_scope_and_token_digest(
     assert plan["run_scope"] == action.candidate_scope.as_dict()
     assert plan["protected"] is None
     assert plan["registration"] == action.runner_token.document()
-    assert plan["gitlab"] == {
+    assert plan[GITLAB_AUTHORITY] == {
         "origin": "https://gitlab.example.test",
         "session": {
             "target_kind": "project",
@@ -767,7 +772,7 @@ def test_delete_targets_only_run_owned_manager_identities() -> None:
     assert callback.child.action.ownership_id == RUN_ID
     assert state.kubernetes.deleted == [(kind, name, NAMESPACE) for kind, name in names]
     assert result == {
-        "action": "APPLIED",
+        "action": STATUS.APPLIED,
         "verified": True,
         "namespace": NAMESPACE,
         "name": runner.name,
@@ -830,7 +835,7 @@ def test_remove_scc_access_preserves_preexisting_external_binding() -> None:
     result = callback.run()
 
     assert result == {
-        "action": "NO_OP",
+        "action": STATUS.NO_OP,
         "verified": True,
         "resource": {
             "kind": "RoleBinding",
@@ -909,7 +914,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     assert len(observed_deployments) == len(expected_deployments)
     assert state.run_scope == scope
     assert result == {
-        "action": "NO_OP",
+        "action": STATUS.NO_OP,
         "verified": True,
         "run_id": RUN_ID,
         "resources": [],
@@ -1153,7 +1158,7 @@ def _manager_cli_harness(
 
     def k8s_auth(callback: KUBERNETES.K8SAuth) -> dict:
         callback.state.kubernetes = cluster
-        callback.state.access_evidence["kubernetes"] = {"identity": "unit-user"}
+        callback.state.access_evidence[KUBERNETES_AUTHORITY] = {"identity": "unit-user"}
         return {"identity": "unit-user"}
 
     def gitlab_config(callback: CALLBACKS.GitLabManagerAuth) -> dict:
@@ -1164,7 +1169,7 @@ def _manager_cli_harness(
         callback.state.gitlab = SimpleNamespace(
             api=object(), session=session, target_id=42
         )
-        callback.state.access_evidence["gitlab"] = {"identity": "unit-user"}
+        callback.state.access_evidence[GITLAB_AUTHORITY] = {"identity": "unit-user"}
         return {"identity": "unit-user"}
 
     def harbor_config(callback: SCRIPT.HarborAuth) -> dict:
@@ -1174,7 +1179,7 @@ def _manager_cli_harness(
 
     def harbor_auth(callback: SCRIPT.HarborAuth) -> dict:
         callback.state.harbor = SimpleNamespace(dockerconfig=b'{"auths":{}}')
-        callback.state.access_evidence["harbor"] = {"identity": "unit-user"}
+        callback.state.access_evidence[HARBOR_AUTHORITY] = {"identity": "unit-user"}
         return {"identity": "unit-user"}
 
     def runner_read(
@@ -1309,7 +1314,7 @@ def _confirmed_manager(
 ) -> tuple[int, dict]:
     """Obtain the real live plan and confirm its exact fingerprint through main."""
     code, plan = _manager_cli_report(cluster, capsys, action=action, run_id=run_id)
-    assert (code, plan["status"]) == (0, "PLANNED")
+    assert (code, plan["status"]) == (STATUS.exit_code(STATUS.PLANNED), STATUS.PLANNED)
     return _manager_cli_report(
         cluster,
         capsys,
@@ -1335,16 +1340,13 @@ def test_manager_main_plans_and_confirmation_refusal_never_write(
         "mismatch": ("--apply", "--confirm-plan", "0" * 64),
     }[mode]
     code, result = _manager_cli_report(cluster, capsys, flags=flags)
-    assert (
-        result["status"]
-        == {
-            "offline": "DRY_RUN",
-            "live-plan": "PLANNED",
-            "unconfirmed": "BLOCKED",
-            "mismatch": "BLOCKED",
-        }[mode]
-    )
-    assert code == (2 if mode in {"unconfirmed", "mismatch"} else 0)
+    expected = {
+        "offline": STATUS.DRY_RUN,
+        "live-plan": STATUS.PLANNED,
+        "unconfirmed": STATUS.BLOCKED,
+        "mismatch": STATUS.BLOCKED,
+    }[mode]
+    assert (code, result["status"]) == (STATUS.exit_code(expected), expected)
     assert cluster.applied == cluster.deleted == []
     assert cluster.objects == {}
     assert cluster.runner_reads == (0 if mode == "offline" else 1)
@@ -1364,8 +1366,14 @@ def test_manager_label_alias_plans_the_same_tags_as_tag(
     tag_code, tag_plan = _manager_cli_report(cluster, capsys, tag_option="--tag")
     label_code, label_plan = _manager_cli_report(cluster, capsys, tag_option="--label")
 
-    assert (tag_code, tag_plan["status"]) == (0, "PLANNED")
-    assert (label_code, label_plan["status"]) == (0, "PLANNED")
+    assert (tag_code, tag_plan["status"]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
+    assert (label_code, label_plan["status"]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
     assert label_plan["plan_digest"] == tag_plan["plan_digest"]
     assert cluster.applied == cluster.deleted == []
 
@@ -1478,7 +1486,7 @@ def test_manager_main_repeat_keeps_identity_plan_and_deployment_no_op(
     """Omitted or explicit identities reuse the observed manager on a second apply."""
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
     code, first = _confirmed_manager(cluster, capsys, run_id=run_id)
-    assert (code, first["status"]) == (0, "PASS")
+    assert (code, first["status"]) == (STATUS.exit_code(STATUS.PASS), STATUS.PASS)
     first_deploy = next(
         item for item in first["records"] if item["callback"] == "DeployManagerRunner"
     )
@@ -1490,7 +1498,7 @@ def test_manager_main_repeat_keeps_identity_plan_and_deployment_no_op(
     before = deepcopy(cluster.objects)
     cluster.applied.clear()
     code, repeated = _confirmed_manager(cluster, capsys, run_id=run_id)
-    assert (code, repeated["status"]) == (0, "PASS")
+    assert (code, repeated["status"]) == (STATUS.exit_code(STATUS.PASS), STATUS.PASS)
     repeat_deploy = next(
         item
         for item in repeated["records"]
@@ -1503,9 +1511,12 @@ def test_manager_main_repeat_keeps_identity_plan_and_deployment_no_op(
     )
     assert repeated["plan_digest"] != first["plan_digest"]
     code, stable_plan = _manager_cli_report(cluster, capsys, run_id=run_id)
-    assert (code, stable_plan["status"]) == (0, "PLANNED")
+    assert (code, stable_plan["status"]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
     assert stable_plan["plan_digest"] == repeated["plan_digest"]
-    assert repeat_deploy["action"] == "NO_OP"
+    assert repeat_deploy["action"] == STATUS.NO_OP
     assert repeat_deploy["namespace"] == first_deploy["namespace"]
     assert repeat_scope["run_id"] == first_scope["run_id"]
     assert not any(
@@ -1528,9 +1539,14 @@ def test_manager_main_failures_report_blocked_and_clean_only_owned_resources(
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
     cluster.fault = fault
     code, result = _confirmed_manager(cluster, capsys)
-    assert (code, result["status"]) == (2, "BLOCKED")
+    assert (code, result["status"]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    )
     assert result["errors"]
-    assert result["cleanup"]["status"] == ("BLOCKED" if fault == "cleanup" else "PASS")
+    assert result["cleanup"]["status"] == (
+        STATUS.BLOCKED if fault == "cleanup" else STATUS.PASS
+    )
     if fault == "error":
         assert "[REDACTED]" in result["errors"][0]["reason"]
     elif fault == "token":
@@ -1561,7 +1577,7 @@ def test_manager_main_signal_cleans_resources_releases_guard_and_restores_handle
     """Real signal handling unwinds the entered callback chain before propagating exit."""
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
     code, plan = _manager_cli_report(cluster, capsys)
-    assert code == 0
+    assert code == STATUS.exit_code(STATUS.PLANNED)
     selected = signal.SIGTERM if fault == "term" else signal.SIGINT
     previous = signal.getsignal(selected)
     cluster.fault = fault
@@ -1602,9 +1618,9 @@ def test_manager_main_delete_preserves_runner_caller_namespace_and_unowned_objec
     }
     cluster.objects[("configmap", NAMESPACE, "caller-data")] = unrelated
     code, deployed = _confirmed_manager(cluster, capsys, run_id=RUN_ID)
-    assert code == 0
+    assert code == STATUS.exit_code(STATUS.PASS)
     code, removed = _confirmed_manager(cluster, capsys, action="delete", run_id=RUN_ID)
-    assert (code, removed["status"]) == (0, "PASS")
+    assert (code, removed["status"]) == (STATUS.exit_code(STATUS.PASS), STATUS.PASS)
     preserved = next(
         item
         for item in removed["records"]
@@ -1617,5 +1633,5 @@ def test_manager_main_delete_preserves_runner_caller_namespace_and_unowned_objec
     assert {kind for kind, _, _ in cluster.objects} == {"namespace", "configmap"}
     assert not any(kind == "namespace" for kind, _, _ in cluster.deleted)
     assert cluster.runner_reads >= 4
-    assert removed["cleanup"] == {"status": "PASS", "failures": []}
+    assert removed["cleanup"] == {"status": STATUS.PASS, "failures": []}
     assert deployed["plan_digest"] != removed["plan_digest"]

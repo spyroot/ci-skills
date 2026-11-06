@@ -31,6 +31,7 @@ JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
 JOB_FIELDS = import_script_module("lib.python.core.gitlab.gitlab_job_fields")
 SCRIPT = import_script_module("gitlab_job")
 TARGET = import_script_module("lib.python.core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 JOB_URL = "https://gitlab.example.test/unit/repo/-/jobs/123"
 
@@ -48,10 +49,10 @@ def _target(tmp_path: Path) -> Path:
     """
     path = tmp_path / "target.toml"
     path.write_text(
-        '[github]\ninvalid = "ignored"\n'
-        '[gitlab]\nurl = "https://gitlab.example.test"\n'
+        f'[{ENDPOINTS.GITHUB_AUTHORITY}]\ninvalid = "ignored"\n'
+        f'[{ENDPOINTS.GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\n'
         'project = "unit/repo"\n'
-        '[kubernetes]\ninvalid = "ignored"\n',
+        f'[{ENDPOINTS.KUBERNETES_AUTHORITY}]\ninvalid = "ignored"\n',
         encoding="utf-8",
     )
     return path

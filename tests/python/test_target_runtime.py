@@ -16,7 +16,13 @@ from typing import TypeAlias, Union
 
 import pytest
 from conftest import REPO_ROOT, import_script_module
-from lib.python.core.endpoints import GITLAB_PRIVATE_TABLE
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    GITLAB_PRIVATE_TABLE,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
 
 HarborTargetCase: TypeAlias = tuple[
     Path, tuple[Path, ...], Mapping[Path, tuple[bytes, int]]
@@ -53,7 +59,7 @@ def harbor_target_case(
     target_path = target_parent / "target.toml"
     target_path.write_text(
         (
-            "[harbor]\n"
+            f"[{HARBOR_AUTHORITY}]\n"
             'url = "https://harbor.example.test"\n'
             'project = "unit"\n'
             f"{declaration}"
@@ -90,7 +96,7 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file: Path) -> N
         ("", "target is missing required authority tables: gitlab"),
         ("[githb]\n", "target contains unsupported tables: githb"),
         (
-            '[gitlab]\nurl = "https://gitlab.example.test"\n[extra]\n',
+            f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\n[extra]\n',
             "target contains unsupported tables: extra",
         ),
     ),
@@ -110,7 +116,7 @@ def test_load_target_distinguishes_missing_from_unsupported_authorities(
     target_path.write_text(body, encoding="utf-8")
 
     with pytest.raises(target_mod.TargetError) as error:
-        target_mod.load_target(target_path, required_surfaces=("gitlab",))
+        target_mod.load_target(target_path, required_surfaces=(GITLAB_AUTHORITY,))
 
     assert str(error.value) == reason
 
@@ -118,16 +124,16 @@ def test_load_target_distinguishes_missing_from_unsupported_authorities(
 @pytest.mark.parametrize(
     ("table", "key"),
     (
-        ("github", "host"),
-        ("github", "repository"),
+        (GITHUB_AUTHORITY, "host"),
+        (GITHUB_AUTHORITY, "repository"),
         (GITLAB_PRIVATE_TABLE, "url"),
-        ("harbor", "url"),
-        ("harbor", "project"),
-        ("kubernetes", "context"),
-        ("kubernetes", "server"),
-        ("kubernetes.node_diagnostics", "node"),
-        ("kubernetes.node_diagnostics.cilium", "namespace"),
-        ("kubernetes.node_diagnostics.journal", "directory"),
+        (HARBOR_AUTHORITY, "url"),
+        (HARBOR_AUTHORITY, "project"),
+        (KUBERNETES_AUTHORITY, "context"),
+        (KUBERNETES_AUTHORITY, "server"),
+        (f"{KUBERNETES_AUTHORITY}.node_diagnostics", "node"),
+        (f"{KUBERNETES_AUTHORITY}.node_diagnostics.cilium", "namespace"),
+        (f"{KUBERNETES_AUTHORITY}.node_diagnostics.journal", "directory"),
     ),
 )
 def test_load_target_qualifies_required_string_diagnostics(
@@ -142,12 +148,12 @@ def test_load_target_qualifies_required_string_diagnostics(
     """
     target_mod = import_script_module("lib.python.core.target")
     body = target_file.read_text(encoding="utf-8") + (
-        '\n[harbor]\nurl = "https://harbor.example.test"\nproject = "unit"\n'
+        f'\n[{HARBOR_AUTHORITY}]\nurl = "https://harbor.example.test"\nproject = "unit"\n'
         'credential_file = "harbor.credential"\n'
-        '\n[kubernetes.node_diagnostics]\nnode = "worker-a"\n'
-        '\n[kubernetes.node_diagnostics.cilium]\nnamespace = "cilium"\n'
+        f'\n[{KUBERNETES_AUTHORITY}.node_diagnostics]\nnode = "worker-a"\n'
+        f'\n[{KUBERNETES_AUTHORITY}.node_diagnostics.cilium]\nnamespace = "cilium"\n'
         'selector = "app=cilium"\ncontainer = "agent"\n'
-        '\n[kubernetes.node_diagnostics.journal]\nnamespace = "diagnostics"\n'
+        f'\n[{KUBERNETES_AUTHORITY}.node_diagnostics.journal]\nnamespace = "diagnostics"\n'
         'selector = "app=journal"\ncontainer = "reader"\n'
         'directory = "/host-journal"\nhost_path = "/var/log/journal"\n'
     )
@@ -208,16 +214,16 @@ def test_load_target_resolves_token_files_from_declared_location(
     target_path = target_parent / "target.toml"
     target_path.write_text(
         (
-            "[github]\n"
+            f"[{GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             f'token_file = "{github_declaration}"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             f'token_file = "{gitlab_declaration}"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
         ),
@@ -244,7 +250,7 @@ def test_harbor_credentials_resolve_beside_target_without_altering_files(
     target_mod = import_script_module("lib.python.core.target")
     credentials = import_script_module("lib.python.access.harbor_credentials")
 
-    target = target_mod.load_target(target_path, required_surfaces=("harbor",))
+    target = target_mod.load_target(target_path, required_surfaces=(HARBOR_AUTHORITY,))
     credential = credentials.resolve_harbor_credential(target.harbor)
 
     assert credential.username == "unit-robot"
@@ -276,15 +282,15 @@ def test_load_target_rejects_relative_token_file_resolved_inside_installed_skill
     target_path = target_parent / "target.toml"
     target_path.write_text(
         (
-            "[github]\n"
+            f"[{GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             'token_file = "../installed-skill/credential"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
         ),
@@ -350,15 +356,15 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(
     (
         (
             (
-                "[github]\n"
+                f"[{GITHUB_AUTHORITY}]\n"
                 'host = "github.example.test"\n'
                 'repository = "unit/repo"\n'
                 'token = "secret-value"\n'
                 "\n"
-                "[gitlab]\n"
+                f"[{GITLAB_AUTHORITY}]\n"
                 'url = "https://gitlab.example.test"\n'
                 "\n"
-                "[kubernetes]\n"
+                f"[{KUBERNETES_AUTHORITY}]\n"
                 'context = "unit-context"\n'
                 'server = "https://api.cluster.example.test:6443"\n'
             ),
@@ -366,14 +372,14 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(
         ),
         (
             (
-                "[github]\n"
+                f"[{GITHUB_AUTHORITY}]\n"
                 'host = "github"\n'
                 'repository = "unit/repo"\n'
                 "\n"
-                "[gitlab]\n"
+                f"[{GITLAB_AUTHORITY}]\n"
                 'url = "https://gitlab.example.test"\n'
                 "\n"
-                "[kubernetes]\n"
+                f"[{KUBERNETES_AUTHORITY}]\n"
                 'context = "unit-context"\n'
                 'server = "https://api.cluster.example.test:6443"\n'
             ),
@@ -381,14 +387,14 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(
         ),
         (
             (
-                "[github]\n"
+                f"[{GITHUB_AUTHORITY}]\n"
                 'host = "github.example.test"\n'
                 'repository = "unit/repo"\n'
                 "\n"
-                "[gitlab]\n"
+                f"[{GITLAB_AUTHORITY}]\n"
                 'url = "https://["\n'
                 "\n"
-                "[kubernetes]\n"
+                f"[{KUBERNETES_AUTHORITY}]\n"
                 'context = "unit-context"\n'
                 'server = "https://api.cluster.example.test:6443"\n'
             ),
@@ -396,14 +402,14 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(
         ),
         (
             (
-                "[github]\n"
+                f"[{GITHUB_AUTHORITY}]\n"
                 'host = "github.example.test"\n'
                 'repository = "unit/repo"\n'
                 "\n"
-                "[gitlab]\n"
+                f"[{GITLAB_AUTHORITY}]\n"
                 'url = "https://token@gitlab.example.test"\n'
                 "\n"
-                "[kubernetes]\n"
+                f"[{KUBERNETES_AUTHORITY}]\n"
                 'context = "unit-context"\n'
                 'server = "https://api.cluster.example.test:6443"\n'
             ),
@@ -411,15 +417,15 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(
         ),
         (
             (
-                "[github]\n"
+                f"[{GITHUB_AUTHORITY}]\n"
                 'host = "github.example.test"\n'
                 'repository = "unit/repo"\n'
                 "\n"
-                "[gitlab]\n"
+                f"[{GITLAB_AUTHORITY}]\n"
                 'url = "https://gitlab.example.test"\n'
                 'token = "inline-token-value"\n'
                 "\n"
-                "[kubernetes]\n"
+                f"[{KUBERNETES_AUTHORITY}]\n"
                 'context = "unit-context"\n'
                 'server = "https://api.cluster.example.test:6443"\n'
             ),

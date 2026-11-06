@@ -301,7 +301,19 @@ class RepositoryReader(ABC):
 
 
 class MirrorDestination(RepositoryReader):
-    """Extend repository reads with explicitly requested destination creation."""
+    """Extend repository reads with explicitly requested destination creation.
+
+    .. attribute :: created_repository_id
+        :type: Optional[int]
+
+        Repository ID that the provider returned to the last ``create`` call.
+        When the engine holds no destination repository after an uncertain
+        apply, ``MirrorCommand.preserve_partial`` reports this ID as the
+        destination ID. None, the interface default, means the destination
+        recorded no created repository, and ``preserve_partial`` reports none.
+    """
+
+    created_repository_id: Optional[int] = None
 
     @abstractmethod
     def create(self, reference: str) -> GitRepository:
@@ -315,7 +327,19 @@ class MirrorDestination(RepositoryReader):
 
 
 class PushMirrorSource(RepositoryReader):
-    """Extend repository reads with native mirror configuration and execution."""
+    """Extend repository reads with native mirror configuration and execution.
+
+    .. attribute :: created_mirror_id
+        :type: Optional[int]
+
+        Mirror ID that the provider returned to the last ``configure`` create
+        call. After an uncertain apply, ``MirrorCommand.preserve_partial``
+        reports this ID as the created mirror. None, the interface default,
+        means the source recorded no created mirror, and ``preserve_partial``
+        reports none.
+    """
+
+    created_mirror_id: Optional[int] = None
 
     @abstractmethod
     def mirrors(self) -> tuple[PushMirror, ...]:

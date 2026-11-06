@@ -48,6 +48,9 @@ REQUEST_DEADLINE_EXCEEDED = "request_deadline_exceeded"
 HTTP_NO_CONTENT: Final = 204
 EMPTY_RESPONSE_BODY: Final = ""
 INVALID_NO_CONTENT_RESPONSE: Final = "invalid_no_content_response"
+# Failure classes that ``http_failure`` returns for 401 and 403.
+AUTHENTICATION_FAILURE: Final = "authentication"
+AUTHORIZATION_FAILURE: Final = "authorization"
 OperationP = ParamSpec("OperationP")
 OperationResultT = TypeVar("OperationResultT")
 _RETRYABLE = frozenset(
@@ -357,9 +360,9 @@ def http_failure(code: Optional[int]) -> Optional[str]:
     if code is None:
         return None
     if code == 401:
-        return "authentication"
+        return AUTHENTICATION_FAILURE
     if code == 403:
-        return "authorization"
+        return AUTHORIZATION_FAILURE
     if code == 408:
         return "provider_408"
     if code == 429:

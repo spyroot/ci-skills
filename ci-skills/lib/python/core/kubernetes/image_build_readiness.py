@@ -19,6 +19,7 @@ from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.catalog import describe
 from lib.python.core.cli import _failure, parser
 from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
 from lib.python.core.kubernetes.kubernetes import (
@@ -232,7 +233,7 @@ class ImageBuildReadiness:
             self.args.target,
             self.args.binding,
             dry_run=mode == ProbeMode.DRY_RUN,
-            required_surfaces=("kubernetes",),
+            required_surfaces=(KUBERNETES_AUTHORITY,),
             gitlab_selection=GitLabSelection.from_args(self.args),
         )
         if mode != ProbeMode.DRY_RUN:
@@ -273,7 +274,9 @@ class ImageBuildReadiness:
         """
         kubernetes = self.target.kubernetes
         target_label = (
-            f"{kubernetes.context}@{kubernetes.server}" if kubernetes else "kubernetes"
+            f"{kubernetes.context}@{kubernetes.server}"
+            if kubernetes
+            else KUBERNETES_AUTHORITY
         )
         output = report(PROBE_KIND, target_label, {}, [], [])
         output["operation"] = "probe"
@@ -418,7 +421,7 @@ class ImageBuildReadiness:
             output = (
                 self._base_output()
                 if hasattr(self, "target")
-                else report(PROBE_KIND, "kubernetes", {}, [], [])
+                else report(PROBE_KIND, KUBERNETES_AUTHORITY, {}, [], [])
             )
             output.update(operation="probe", status=BLOCKED)
             errors.append({"source": PROBE_KIND, "reason": "interrupted"})
@@ -428,7 +431,7 @@ class ImageBuildReadiness:
             output = (
                 self._base_output()
                 if hasattr(self, "target")
-                else report(PROBE_KIND, "kubernetes", {}, [], [])
+                else report(PROBE_KIND, KUBERNETES_AUTHORITY, {}, [], [])
             )
             output.update(operation="probe", status=BLOCKED)
             errors.append({"source": PROBE_KIND, "reason": str(exc)})

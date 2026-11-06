@@ -34,6 +34,7 @@ from conftest import (
     TARGET_TEMPLATE,
     TomlValue,
     copy_template_target,
+    import_script_module,
     install_executable,
     legacy_profile,
     paired,
@@ -148,6 +149,7 @@ PUBLIC: Final = Instance(
     22,
 )
 ROUTED: Final = GITLAB_ROUTED_AUTHORITIES
+STATUS = import_script_module("lib.python.sys.status")
 LEGACY_PUBLIC: Final = legacy_profile(GITLAB_LEGACY_PUBLIC_KEY)
 NESTED_CHILD: Final = "foo"
 UNKNOWN_INSTANCE: Final = "unknown_instance"
@@ -1460,45 +1462,60 @@ def test_api_command_sends_the_selected_host_and_token(
     )
     calls = read_journal(call_journal)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == STATUS.exit_code(STATUS.PASS), result.stderr
     assert calls
     assert _hostnames(calls) == [instance.host] * len(calls)
     assert {call["token"] for call in calls} == {instance.token_text}
     assert result.stderr.count(GITLAB_DEPRECATION_EVENT) == deprecations
 
 
-def test_api_command_on_the_template_reads_the_public_instance(
+@pytest.mark.parametrize(
+    ("selection", "table"),
+    (
+        (NO_SELECTION, TEMPLATE_DEFAULT),
+        (SELECT_PRIVATE, GITLAB_PRIVATE_TABLE),
+        (SELECT_PUBLIC, GITLAB_PUBLIC_TABLE),
+    ),
+    ids=("default", "private", "public"),
+)
+def test_api_command_on_the_template_reads_the_selected_instance(
     template_path: Path,
     providers: Mapping[str, str],
     fake_bin: Path,
     call_journal: Path,
+    selection: GitLabSelection,
+    table: str,
 ) -> None:
-    """Reach the shipped template's public URL with the token file it names.
+    """Reach the selected template instance's URL with the token file it names.
+
+    Without ``--gitlab``, the command reads the instance that the template's
+    ``[gitlab_routing].default`` names.
 
     :param template_path: Copy of the shipped template beside its files.
     :param providers: Child environment of the journaling fake providers.
     :param fake_bin: Directory holding the fake providers.
     :param call_journal: Journal of provider calls.
+    :param selection: Caller's instance choice, or none.
+    :param table: Template instance table the command must read.
     :returns: None; assertions compare the call with the template's own values.
     """
-    target = template_path
-    public = TEMPLATE[GITLAB_PUBLIC_TABLE]
-    token = (template_path.parent / public["token_file"]).read_text(encoding="utf-8")
+    instance = TEMPLATE[table]
+    token = (template_path.parent / instance["token_file"]).read_text(encoding="utf-8")
 
     result = run_script(
         "ci-api",
         "check",
         "--provider",
         GITLAB_AUTHORITY,
-        *_selection_argv(SELECT_PUBLIC),
+        *_selection_argv(selection),
         fake_bin=fake_bin,
-        env={**providers, TARGET_ENV: str(target)},
+        env={**providers, TARGET_ENV: str(template_path)},
     )
     calls = read_journal(call_journal)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == STATUS.exit_code(STATUS.PASS), result.stderr
     assert calls
-    assert _hostnames(calls) == [urlsplit(public["url"]).netloc] * len(calls)
+    assert _hostnames(calls) == [urlsplit(instance["url"]).netloc] * len(calls)
     assert {call["token"] for call in calls} == {token}
     assert GITLAB_DEPRECATION_EVENT not in result.stderr
 
@@ -1548,7 +1565,7 @@ def test_api_selection_conflict_rejects_before_any_provider_call(
         env={**providers, TARGET_ENV: str(target_path)},
     )
 
-    assert result.returncode != 0
+    assert result.returncode != STATUS.exit_code(STATUS.PASS)
     assert read_journal(call_journal) == []
 
 
@@ -1648,8 +1665,8 @@ def test_open_bug_dry_run_reports_origin_and_routing(
     )
     data = parse_json_output(result)
 
-    assert result.returncode == 0, result.stderr
-    assert data["status"] == "DRY_RUN"
+    assert result.returncode == STATUS.exit_code(STATUS.DRY_RUN), result.stderr
+    assert data["status"] == STATUS.DRY_RUN
     assert data["schema_version"] == ROUTED_RESULT_SCHEMA_VERSION
     assert data["origin"] == instance.url
     assert data[ROUTING_RESULT_KEY] == routing
@@ -1685,8 +1702,8 @@ def test_open_bug_on_the_template_reads_the_routing_default(
     )
     data = parse_json_output(result)
 
-    assert result.returncode == 0, result.stderr
-    assert data["status"] == "DRY_RUN"
+    assert result.returncode == STATUS.exit_code(STATUS.DRY_RUN), result.stderr
+    assert data["status"] == STATUS.DRY_RUN
     assert data["origin"] == TEMPLATE[TEMPLATE_DEFAULT]["url"]
     assert data[ROUTING_RESULT_KEY] == _template_routing(
         TEMPLATE_DEFAULT, ROUTING_SELECTED_BY_DEFAULT
@@ -1757,8 +1774,8 @@ def test_open_bug_blocks_on_an_unusable_selection(
     )
     data = parse_json_output(result)
 
-    assert result.returncode == 2
-    assert data["status"] == "BLOCKED"
+    assert result.returncode == STATUS.exit_code(STATUS.BLOCKED)
+    assert data["status"] == STATUS.BLOCKED
     assert [error["reason"] for error in data["errors"]] == [reason]
     assert ROUTING_RESULT_KEY not in data
     assert read_journal(call_journal) == []
@@ -1781,8 +1798,8 @@ def test_open_bug_rejects_an_unknown_selector_choice(target_path: Path) -> None:
     )
     data = parse_json_output(result)
 
-    assert result.returncode == 2
-    assert data["status"] == "BLOCKED"
+    assert result.returncode == STATUS.exit_code(STATUS.BLOCKED)
+    assert data["status"] == STATUS.BLOCKED
     assert data["errors"][0]["source"] == "arguments"
     assert ROUTING_RESULT_KEY not in data
 
@@ -1836,7 +1853,7 @@ def test_open_bug_human_view_prints_the_routing_line(
     )
     lines = result.stdout.splitlines()
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == STATUS.exit_code(STATUS.DRY_RUN), result.stderr
     assert lines[1] == line
     assert lines.count(line) == 1
 
@@ -1896,8 +1913,8 @@ def test_identical_instances_have_distinct_confirmation_digests(
         second["plan"]["body_sha256"],
     )
     assert first["plan_digest"] != second["plan_digest"]
-    assert applied.returncode == 2
-    assert blocked["status"] == "BLOCKED"
+    assert applied.returncode == STATUS.exit_code(STATUS.BLOCKED)
+    assert blocked["status"] == STATUS.BLOCKED
     assert [error["reason"] for error in blocked["errors"]] == [
         "confirm_plan_mismatch_rerun_dry_run"
     ]
@@ -1945,8 +1962,8 @@ def test_access_check_dry_run_on_the_template_reports_routing(
     )
     data = parse_json_output(result)
 
-    assert result.returncode == 0, result.stderr
-    assert data["status"] == "DRY_RUN"
+    assert result.returncode == STATUS.exit_code(STATUS.DRY_RUN), result.stderr
+    assert data["status"] == STATUS.DRY_RUN
     assert data["schema_version"] == ROUTED_RESULT_SCHEMA_VERSION
     assert data[ROUTING_RESULT_KEY] == expected
     assert read_journal(call_journal) == []
@@ -2016,7 +2033,7 @@ def test_access_check_requiring_kubernetes_uses_the_routed_cluster(
 
     if reason is not None:
         data = parse_json_output(result)
-        assert result.returncode == 2
+        assert result.returncode == STATUS.exit_code(STATUS.BLOCKED)
         assert data["errors"][0]["reason"] == reason
         assert calls == []
         return
@@ -2111,8 +2128,8 @@ def test_runner_deploy_plan_on_the_template_reports_the_paired_route(
         *_selection_argv(selection),
     )
 
-    assert code == 0, data
-    assert data["status"] == "DRY_RUN"
+    assert code == STATUS.exit_code(STATUS.DRY_RUN), data
+    assert data["status"] == STATUS.DRY_RUN
     assert data["schema_version"] == ROUTED_RESULT_SCHEMA_VERSION
     assert data[ROUTING_RESULT_KEY] == expected
     specification_validator(WORKFLOW_SCHEMA).validate(data)
@@ -2149,8 +2166,8 @@ def test_template_public_instance_cannot_deploy_a_runner_into_private_tables(
     )
 
     for code, data in ((live_code, live), (dry_code, dry)):
-        assert code == 2
-        assert data["status"] == "BLOCKED"
+        assert code == STATUS.exit_code(STATUS.BLOCKED)
+        assert data["status"] == STATUS.BLOCKED
         assert [error["reason"] for error in data["errors"]] == [reason]
         assert ROUTING_RESULT_KEY not in data
     assert live["errors"] == dry["errors"]
@@ -2158,32 +2175,47 @@ def test_template_public_instance_cannot_deploy_a_runner_into_private_tables(
 
 
 @pytest.mark.parametrize(
-    "selection",
-    (SELECT_PROFILE, SELECT_PUBLIC),
-    ids=("legacy-public-profile", "public-selector"),
+    ("public_instance", "selection"),
+    (
+        (False, SELECT_PROFILE),
+        (False, SELECT_PUBLIC),
+        (True, SELECT_PROFILE),
+        (True, SELECT_PUBLIC),
+    ),
+    ids=(
+        "issue-shape-legacy-public-profile",
+        "issue-shape-public-selector",
+        "half-migrated-legacy-public-profile",
+        "half-migrated-public-selector",
+    ),
 )
 def test_issue_shape_public_gitlab_cannot_deploy_a_runner_into_private_tables(
     target_path: Path,
     providers: Mapping[str, str],
     fake_bin: Path,
     call_journal: Path,
+    public_instance: bool,
     selection: GitLabSelection,
 ) -> None:
-    """Block a runner deploy for the issue #133 public table on an unrouted target.
+    """Block a runner deploy for a public GitLab table on an unrouted target.
 
-    ``[gitlab.com]`` answers the public instance, so the deprecated profile and
+    On the issue #133 shape ``[gitlab.com]`` answers the public instance; on a
+    half-migrated target ``[gitlab_public]`` answers it and ``[gitlab.com]`` is
+    still the legacy public table. In both, the deprecated profile and
     ``--gitlab public`` block alike instead of reading the person's Kubernetes
     and Harbor tables.
 
-    :param target_path: Path receiving the issue #133 shaped target.
+    :param target_path: Path receiving the target.
     :param providers: Child environment of the journaling fake providers.
     :param fake_bin: Directory holding the fake providers.
     :param call_journal: Journal that must stay empty.
-    :param selection: Deprecated profile or instance selector of the public table.
+    :param public_instance: Whether the target also declares ``[gitlab_public]``.
+    :param selection: Deprecated profile or instance selector of a public table.
     :returns: None; assertions verify the dry run blocks before any provider call.
     """
     tables = {
         **issue_target(),
+        **({GITLAB_PUBLIC_TABLE: PUBLIC.fields()} if public_instance else {}),
         HARBOR_AUTHORITY: dict(FIXTURE_HARBOR),
         KUBERNETES_AUTHORITY: dict(FIXTURE_KUBERNETES),
     }
@@ -2198,8 +2230,8 @@ def test_issue_shape_public_gitlab_cannot_deploy_a_runner_into_private_tables(
         *_selection_argv(selection),
     )
 
-    assert code == 2
-    assert data["status"] == "BLOCKED"
+    assert code == STATUS.exit_code(STATUS.BLOCKED)
+    assert data["status"] == STATUS.BLOCKED
     assert [error["reason"] for error in data["errors"]] == [MISSING_ROUTED]
     assert ROUTING_RESULT_KEY not in data
     assert read_journal(call_journal) == []
@@ -2244,13 +2276,13 @@ def test_runner_deploy_plan_uses_the_selected_route(
 
     assert read_journal(call_journal) == []
     if reason is not None:
-        assert code == 2
-        assert data["status"] == "BLOCKED"
+        assert code == STATUS.exit_code(STATUS.BLOCKED)
+        assert data["status"] == STATUS.BLOCKED
         assert [error["reason"] for error in data["errors"]] == [reason]
         assert ROUTING_RESULT_KEY not in data
         return
-    assert code == 0, data
-    assert data["status"] == "DRY_RUN"
+    assert code == STATUS.exit_code(STATUS.DRY_RUN), data
+    assert data["status"] == STATUS.DRY_RUN
     assert data[ROUTING_RESULT_KEY] == _routing(
         GITLAB_PUBLIC_TABLE, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY, ARGV_PUBLIC
     )
@@ -2280,7 +2312,7 @@ def test_dry_run_deprecation_event_does_not_write_the_log_file(
         env={TARGET_ENV: str(target_path)},
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == STATUS.exit_code(STATUS.DRY_RUN), result.stderr
     assert result.stderr.count(GITLAB_DEPRECATION_EVENT) == 1
     assert not log_file.exists()
 
@@ -2315,6 +2347,6 @@ def test_legacy_table_beside_public_instance_reports_the_legacy_table(
         event for event in events if event["event"] == GITLAB_DEPRECATION_EVENT
     ]
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == STATUS.exit_code(STATUS.DRY_RUN), result.stderr
     assert len(deprecations) == 1
     assert deprecations[0]["details"]["table"] == GITLAB_AUTHORITY

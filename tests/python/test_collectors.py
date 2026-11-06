@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Optional, Union
 import pytest
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject, JSONValue
     from lib.python.core.runtime import CommandResult
@@ -41,15 +43,15 @@ def _write_gitlab_token_target(tmp_path: Path, token_file: Path) -> Path:
     path = tmp_path / "target-with-token.toml"
     path.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             f'token_file = "{token_file}"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
         ),
@@ -1963,14 +1965,14 @@ def test_gitlab_job_uses_effective_gitlab_env_token_for_all_reads(
     target_path = tmp_path / "target.toml"
     target_path.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f'kubeconfig = "{kubeconfig}"\n'
@@ -2094,13 +2096,15 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run() -> None:
         "execution_host": "unit-host",
         "skill": {"digest": "d" * 64, "revision": {"value": None}},
         "consuming_project": {"commit": None, "source": None},
-        "credential_sources": {"github": "env:GH_TOKEN"},
+        "credential_sources": {ENDPOINTS.GITHUB_AUTHORITY: "env:GH_TOKEN"},
         "target_file": "/unit/home/.ci-skills/target.toml",
         "target_source": "user",
-        "targets": {"kubernetes": {"server": "https://api.unit.test:6443"}},
+        "targets": {
+            ENDPOINTS.KUBERNETES_AUTHORITY: {"server": "https://api.unit.test:6443"}
+        },
         "surfaces": {
-            "github": {"identity": "unit-gh"},
-            "kubernetes": {"identity": "unit-admin"},
+            ENDPOINTS.GITHUB_AUTHORITY: {"identity": "unit-gh"},
+            ENDPOINTS.KUBERNETES_AUTHORITY: {"identity": "unit-admin"},
         },
     }
 
@@ -2108,9 +2112,17 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run() -> None:
 
     assert evidence["profile"] == "base_access_check"
     assert evidence["execution_host"] == "unit-host"
-    assert evidence["identities"] == {"github": "unit-gh", "kubernetes": "unit-admin"}
-    assert evidence["credential_sources"] == {"github": "env:GH_TOKEN"}
-    assert evidence["targets"]["kubernetes"]["server"] == "https://api.unit.test:6443"
+    assert evidence["identities"] == {
+        ENDPOINTS.GITHUB_AUTHORITY: "unit-gh",
+        ENDPOINTS.KUBERNETES_AUTHORITY: "unit-admin",
+    }
+    assert evidence["credential_sources"] == {
+        ENDPOINTS.GITHUB_AUTHORITY: "env:GH_TOKEN"
+    }
+    assert (
+        evidence["targets"][ENDPOINTS.KUBERNETES_AUTHORITY]["server"]
+        == "https://api.unit.test:6443"
+    )
     assert evidence["skill"]["digest"] == "d" * 64
     assert len(evidence["receipt_sha256"]) == 64
     # A collector report must name its own target source, like the gate does.

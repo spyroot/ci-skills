@@ -26,6 +26,7 @@ from lib.python.core.action_modes import (
 from lib.python.core.catalog import describe
 from lib.python.core.cli import parser
 from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.json_types import JSONObject, JSONValue, json_object
 from lib.python.core.kubernetes.kubernetes import K8SAuth, KubernetesError
@@ -45,7 +46,7 @@ from lib.python.core.kubernetes.tool_pod_workflow import prepare_tool_pod_callba
 from lib.python.core.kubernetes.workflow_report import workflow_result
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.project_binding import resolve_target
-from lib.python.core.provenance import functional_digest
+from lib.python.core.provenance import FUNCTIONAL_DIGEST_KEY, functional_digest
 from lib.python.core.report import emit_result, plan_digest
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import Target, TargetError
@@ -150,7 +151,7 @@ def operation_plan(args: argparse.Namespace, target: Target) -> JSONObject:
         "kind": TOOL_POD_KIND,
         "operation": operation.value,
         "target": {"context": selected.context, "server": selected.server},
-        "functional_digest": functional_digest(SKILL_ROOT),
+        FUNCTIONAL_DIGEST_KEY: functional_digest(SKILL_ROOT),
         "run_id": args.run_id or "",
         "timeout_seconds": args.timeout,
         "spec": ToolPodSpec.load(Path(args.spec)).as_dict() if args.spec else {},
@@ -240,7 +241,7 @@ def execute(args: argparse.Namespace) -> int:
             args.target,
             args.binding,
             dry_run=mode == ActionMode.OFFLINE,
-            required_surfaces=("kubernetes",),
+            required_surfaces=(KUBERNETES_AUTHORITY,),
         )
         if mode != ActionMode.OFFLINE:
             target = bind_sources(target, revision=args.revision)

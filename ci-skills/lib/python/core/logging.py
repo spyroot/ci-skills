@@ -39,7 +39,8 @@ def bind_log_settings(
 ) -> Token[Optional[argparse.Namespace]]:
     """Bind the parsed diagnostic options of the current invocation.
 
-    One command invocation binds once, from its parser. A caller that binds in
+    ``TrackedArgumentParser.parse_args`` calls it after it parses the command
+    arguments. A caller that binds in
     a longer-lived process restores the previous binding with
     ``unbind_log_settings``.
 

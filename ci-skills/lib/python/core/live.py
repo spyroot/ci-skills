@@ -13,6 +13,7 @@ from argparse import Namespace
 from collections.abc import Callable, Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from lib.python.core.endpoints import GITLAB_AUTHORITY, KUBERNETES_AUTHORITY
 from lib.python.core.gitlab.job_read import collect_gitlab_job
 from lib.python.core.json_types import (
     JSONObject,
@@ -158,15 +159,17 @@ def collect_live_checks(
     tasks: MutableMapping[
         str, tuple[Callable[[Target, Namespace], JSONObject], Namespace]
     ] = {}
-    if "kubernetes" in target.active_surfaces:
+    if KUBERNETES_AUTHORITY in target.active_surfaces:
         tasks.update(_kubernetes_checks())
-    if "gitlab" in target.active_surfaces and getattr(args, "job_url", None):
+    if GITLAB_AUTHORITY in target.active_surfaces and getattr(args, "job_url", None):
         tasks["gitlab_job"] = (
             collect_gitlab_job,
             Namespace(job_url=args.job_url, search=None),
         )
 
-    if "kubernetes" in target.active_surfaces and getattr(args, "ceph_namespace", None):
+    if KUBERNETES_AUTHORITY in target.active_surfaces and getattr(
+        args, "ceph_namespace", None
+    ):
         tasks["ceph_cluster"] = (
             collect_ceph_cluster,
             Namespace(

@@ -24,20 +24,30 @@ from conftest import (
     run_script,
 )
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONValue
     from lib.python.core.target import Target
 
 SCRIPT_CASES = (
-    ("access_check.py", (), {"github", "gitlab", "kubernetes"}),
+    (
+        "access_check.py",
+        (),
+        {
+            ENDPOINTS.GITHUB_AUTHORITY,
+            ENDPOINTS.GITLAB_AUTHORITY,
+            ENDPOINTS.KUBERNETES_AUTHORITY,
+        },
+    ),
     (
         "gitlab_job.py",
         ("--job-url", "https://gitlab.example.test/unit/repo/-/jobs/123"),
-        {"gitlab"},
+        {ENDPOINTS.GITLAB_AUTHORITY},
     ),
-    ("storage_report.py", (), {"kubernetes"}),
-    ("event_trace.py", (), {"kubernetes"}),
-    ("cilium_status.py", (), {"kubernetes"}),
+    ("storage_report.py", (), {ENDPOINTS.KUBERNETES_AUTHORITY}),
+    ("event_trace.py", (), {ENDPOINTS.KUBERNETES_AUTHORITY}),
+    ("cilium_status.py", (), {ENDPOINTS.KUBERNETES_AUTHORITY}),
 )
 
 
@@ -259,14 +269,14 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
     target_file = tmp_path / "target.toml"
     target_file.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f'kubeconfig = "{kubeconfig}"\n'

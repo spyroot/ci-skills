@@ -580,12 +580,12 @@ class MirrorCommand:
             return
         record: dict[str, JSONValue] = dict(self.state.record)
         created_repository = engine.created_repository
+        created_mirror_id = engine.source.created_mirror_id
+        if created_mirror_id is not None:
+            record[Field.CREATED_MIRROR_ID] = created_mirror_id
         if engine.destination_repository is not None:
             record[Field.DESTINATION] = engine.destination_repository.evidence()
-        elif (
-            isinstance(engine.destination, GitHubRepositoryService)
-            and engine.destination.created_repository_id is not None
-        ):
+        elif engine.destination.created_repository_id is not None:
             record[Field.DESTINATION] = {
                 **json_object(record[Field.DESTINATION]),
                 Field.ID: engine.destination.created_repository_id,
@@ -598,14 +598,19 @@ class MirrorCommand:
                 Field.VERIFIED_SOURCE_REF_COUNT: NO_VERIFIED_REFS,
                 Field.CREATED: {
                     Field.REPOSITORY: created_repository,
-                    Field.MIRROR: engine.created_mirror,
+                    Field.MIRROR: engine.created_mirror
+                    or created_mirror_id is not None,
                 },
                 Field.REPLACEMENT_REQUIRED: engine.replacement_required,
                 Field.REPLACED_MIRROR_ID: engine.replaced_mirror_id,
             }
         )
-        if engine.current_mirror is not None:
+        if engine.current_mirror is not None and (
+            created_mirror_id is None or engine.current_mirror.id == created_mirror_id
+        ):
             record[Field.MIRROR] = engine.current_mirror.evidence()
+        elif created_mirror_id is not None:
+            record[Field.MIRROR] = None
         self.state.record = record
 
     def output(

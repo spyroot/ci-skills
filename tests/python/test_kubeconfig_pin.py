@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 import pytest
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 ORIGINAL = "apiVersion: v1\nkind: Config\n"
 REWRITTEN = "apiVersion: v1\nkind: Config\nchanged: true\n"
 
@@ -60,14 +62,14 @@ def _target(tmp_path: Path, kubeconfig: Path) -> Target:
     credentials, _access, target_module = _modules()
     path = tmp_path / "target.toml"
     path.write_text(
-        "[github]\n"
+        f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
         'host = "github.example.test"\n'
         'repository = "unit/repo"\n'
         "\n"
-        "[gitlab]\n"
+        f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
         'url = "https://gitlab.example.test"\n'
         "\n"
-        "[kubernetes]\n"
+        f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
         'context = "unit-context"\n'
         'server = "https://api.cluster.example.test:6443"\n'
         f'kubeconfig = "{kubeconfig}"\n',
@@ -207,14 +209,14 @@ def test_an_unbound_target_is_not_checked(tmp_path: Path, kubeconfig: Path) -> N
     _credentials, _access, target_module = _modules()
     path = tmp_path / "target.toml"
     path.write_text(
-        "[github]\n"
+        f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
         'host = "github.example.test"\n'
         'repository = "unit/repo"\n'
         "\n"
-        "[gitlab]\n"
+        f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
         'url = "https://gitlab.example.test"\n'
         "\n"
-        "[kubernetes]\n"
+        f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
         'context = "unit-context"\n'
         'server = "https://api.cluster.example.test:6443"\n'
         f'kubeconfig = "{kubeconfig}"\n',
@@ -235,14 +237,14 @@ def _target_with_search_path(tmp_path: Path, entries: str) -> tuple[ModuleType, 
     _credentials, _access, target_module = _modules()
     path = tmp_path / "target.toml"
     path.write_text(
-        "[github]\n"
+        f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
         'host = "github.example.test"\n'
         'repository = "unit/repo"\n'
         "\n"
-        "[gitlab]\n"
+        f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
         'url = "https://gitlab.example.test"\n'
         "\n"
-        "[kubernetes]\n"
+        f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
         'context = "unit-context"\n'
         'server = "https://api.cluster.example.test:6443"\n'
         f"kubeconfigs = {entries}\n",
@@ -290,7 +292,10 @@ def test_the_declared_search_path_beats_the_ambient_kubeconfig(
 
     bound = credentials.bind_sources(target_module.load_target(path), revision="a" * 40)
 
-    assert bound.sources.kubernetes.reference == "target:kubernetes.kubeconfigs"
+    assert (
+        bound.sources.kubernetes.reference
+        == f"target:{ENDPOINTS.KUBERNETES_AUTHORITY}.kubeconfigs"
+    )
     assert bound.sources.kubeconfig_files == (declared,)
     assert ambient not in bound.sources.kubeconfig_files
 
@@ -350,14 +355,14 @@ def test_declaring_both_kubeconfig_forms_is_refused(tmp_path: Path) -> None:
     _credentials, _access, target_module = _modules()
     path = tmp_path / "target.toml"
     path.write_text(
-        "[github]\n"
+        f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
         'host = "github.example.test"\n'
         'repository = "unit/repo"\n'
         "\n"
-        "[gitlab]\n"
+        f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
         'url = "https://gitlab.example.test"\n'
         "\n"
-        "[kubernetes]\n"
+        f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
         'context = "unit-context"\n'
         'server = "https://api.cluster.example.test:6443"\n'
         f'kubeconfig = "{kubeconfig}"\n'

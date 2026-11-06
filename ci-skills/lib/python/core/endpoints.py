@@ -9,19 +9,17 @@ pods, nodes, namespaces, pipelines, milestones, merge requests -- it reads from
 the live system at run time.
 
 `TARGET_CONTRACT` is the one declaration of the allowed keys. `core/target.py`
-accepts exactly these and `catalog.AUTHORITIES` is derived from it.
-
-GitLab is one authority, `gitlab`, declared by up to two instance tables:
-`[gitlab_private]` and `[gitlab_public]`. The optional `[gitlab_routing]` names
-the default instance (else `GITLAB_DEFAULT_INSTANCE`) and the Kubernetes and
-Harbor tables paired with each instance. Table
-names use `_`, never `.`: TOML reads `[gitlab.com]` as a table `com` nested in
-`[gitlab]`. The legacy `[gitlab]` table and its `[gitlab.NAME]` profiles are
-read for one release. The
-repository gate that checks the tracked documents against it,
+accepts exactly these, and `core/catalog.py` derives `catalog.AUTHORITIES` from
+it. The repository gate that checks the tracked documents against it,
 `gates/gate-ci-skills-endpoints.py`, lives outside the skill
 (`tools/skillkit/endpoint_gate.py`). Adding an authority (a registry, say) is one
 `Table` here, with its endpoint and its access.
+
+GitLab is one authority, `gitlab`, with two instance tables and the optional
+`[gitlab_routing]` table; the `GITLAB_*` constants below name them, and
+`core/target.py` selects among them. Table names use `_`, never `.`: TOML reads
+`[gitlab.com]` as table `com` nested in `[gitlab]`. `core/target.py` reads the
+legacy `[gitlab]` table and its `[gitlab.NAME]` profiles for one release (TD-11).
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -250,8 +248,9 @@ class TargetContract:
         """Index target authority and routing declarations for lookup.
 
         :param authorities: Top-level authority tables allowed in a target file.
-        :param routing: Top-level table pairing an instance with other tables,
-            or ``None`` for a contract without one.
+        :param routing: The ``[gitlab_routing]`` table declaration. When the value
+            is ``None``, the contract declares no routing table, ``tables`` omits
+            it and ``routing_table`` returns ``None``.
         """
         self._authorities = authorities
         self._routing = routing
@@ -286,7 +285,9 @@ class TargetContract:
         """Resolve a top-level table name to the authority it declares.
 
         :param table: Top-level table name, such as ``gitlab_public``.
-        :returns: Authority name, or ``None`` for routing and undeclared names.
+        :returns: Authority name, such as ``gitlab`` for ``gitlab_public``;
+            ``None`` for ``gitlab_routing`` and for a name the contract does not
+            declare.
         """
         for authority in self._authorities:
             if table == authority.name or table in authority.instances:
@@ -294,9 +295,10 @@ class TargetContract:
         return None
 
     def routing_table(self) -> Optional[str]:
-        """Return the name of the table that pairs instances with other tables.
+        """Return the name of the routing table, ``gitlab_routing``.
 
-        :returns: Routing table name, or ``None`` for a contract without one.
+        :returns: ``gitlab_routing``, or ``None`` when the caller built the
+            contract with ``routing=None``.
         """
         return self._routing.name if self._routing else None
 

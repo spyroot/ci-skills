@@ -13,7 +13,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from conftest import install_executable, parse_json_output, read_journal, run_script
+from conftest import (
+    import_script_module,
+    install_executable,
+    parse_json_output,
+    read_journal,
+    run_script,
+)
+
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 TEST_REVISION = "a" * 40
 
@@ -203,15 +211,15 @@ def live_target_file(tmp_path: Path) -> Path:
     target = tmp_path / "target.toml"
     target.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             'required_checks = ["portable-required-check"]\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f'kubeconfig = "{kubeconfig}"\n'
@@ -241,14 +249,21 @@ def _keep_target_providers(target_file: Path, providers: tuple[str, ...]) -> Non
 @pytest.mark.parametrize(
     ("providers", "extra_table"),
     (
-        (("github",), ""),
-        (("gitlab",), ""),
-        (("kubernetes",), ""),
-        (("gitlab", "kubernetes"), ""),
-        (("github", "gitlab", "kubernetes"), ""),
+        ((ENDPOINTS.GITHUB_AUTHORITY,), ""),
+        ((ENDPOINTS.GITLAB_AUTHORITY,), ""),
+        ((ENDPOINTS.KUBERNETES_AUTHORITY,), ""),
+        ((ENDPOINTS.GITLAB_AUTHORITY, ENDPOINTS.KUBERNETES_AUTHORITY), ""),
         (
-            ("gitlab",),
-            '[harbor]\nurl = "https://harbor.example.test"\nproject = "unit"\n',
+            (
+                ENDPOINTS.GITHUB_AUTHORITY,
+                ENDPOINTS.GITLAB_AUTHORITY,
+                ENDPOINTS.KUBERNETES_AUTHORITY,
+            ),
+            "",
+        ),
+        (
+            (ENDPOINTS.GITLAB_AUTHORITY,),
+            f'[{ENDPOINTS.HARBOR_AUTHORITY}]\nurl = "https://harbor.example.test"\nproject = "unit"\n',
         ),
     ),
 )
@@ -286,13 +301,17 @@ def test_access_check_uses_only_configured_providers(
     assert data["status"] == "PASS"
     assert set(data["surfaces"]) == set(providers)
     assert set(data["credential_sources"]) == set(providers)
-    expected_tools = {"github": "gh", "gitlab": "glab", "kubernetes": "kubectl"}
+    expected_tools = {
+        ENDPOINTS.GITHUB_AUTHORITY: "gh",
+        ENDPOINTS.GITLAB_AUTHORITY: "glab",
+        ENDPOINTS.KUBERNETES_AUTHORITY: "kubectl",
+    }
     assert {row["tool"] for row in read_journal(call_journal)} == {
         expected_tools[name] for name in providers
     }
     expected_collectors = (
         {"storage_report", "event_trace", "cilium_status"}
-        if "kubernetes" in providers
+        if ENDPOINTS.KUBERNETES_AUTHORITY in providers
         else set()
     )
     assert set(data["live_checks"]) == expected_collectors
@@ -301,7 +320,10 @@ def test_access_check_uses_only_configured_providers(
 
 @pytest.mark.parametrize(
     "body",
-    ("", '[harbor]\nurl = "https://harbor.example.test"\nproject = "unit"\n'),
+    (
+        "",
+        f'[{ENDPOINTS.HARBOR_AUTHORITY}]\nurl = "https://harbor.example.test"\nproject = "unit"\n',
+    ),
 )
 def test_access_check_requires_at_least_one_supported_configured_provider(
     fake_access_tools: Path,
@@ -340,13 +362,21 @@ def test_access_check_requires_at_least_one_supported_configured_provider(
 @pytest.mark.parametrize(
     ("configured", "options", "required"),
     (
-        ("kubernetes", ("--publication",), "github"),
         (
-            "kubernetes",
-            ("--job-url", "https://gitlab.example.test/unit/repo/-/jobs/1"),
-            "gitlab",
+            ENDPOINTS.KUBERNETES_AUTHORITY,
+            ("--publication",),
+            ENDPOINTS.GITHUB_AUTHORITY,
         ),
-        ("gitlab", ("--ceph-namespace", "unit-ceph"), "kubernetes"),
+        (
+            ENDPOINTS.KUBERNETES_AUTHORITY,
+            ("--job-url", "https://gitlab.example.test/unit/repo/-/jobs/1"),
+            ENDPOINTS.GITLAB_AUTHORITY,
+        ),
+        (
+            ENDPOINTS.GITLAB_AUTHORITY,
+            ("--ceph-namespace", "unit-ceph"),
+            ENDPOINTS.KUBERNETES_AUTHORITY,
+        ),
     ),
 )
 def test_access_check_selected_option_requires_provider_before_any_probe(
@@ -398,7 +428,7 @@ def test_access_check_provider_denial_does_not_pass_with_no_extra_collectors(
     :param call_journal: Journal proving that GitLab access was actually attempted.
     :returns: None; assertions verify an actual authentication failure stays blocked.
     """
-    _keep_target_providers(live_target_file, ("gitlab",))
+    _keep_target_providers(live_target_file, (ENDPOINTS.GITLAB_AUTHORITY,))
     result = run_script(
         "access_check.py",
         "--revision",
@@ -411,8 +441,8 @@ def test_access_check_provider_denial_does_not_pass_with_no_extra_collectors(
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
-    assert set(data["surfaces"]) == {"gitlab"}
-    assert data["surfaces"]["gitlab"]["reason"] == "authentication"
+    assert set(data["surfaces"]) == {ENDPOINTS.GITLAB_AUTHORITY}
+    assert data["surfaces"][ENDPOINTS.GITLAB_AUTHORITY]["reason"] == "authentication"
     assert {row["tool"] for row in read_journal(call_journal)} == {"glab"}
 
 
@@ -444,12 +474,21 @@ def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
     assert result.returncode == 0
     assert data["status"] == "PASS"
     assert data["publication"] is True
-    assert "repository_admin" in data["surfaces"]["github"]["observed_capability"]
-    assert "protection_read" in data["surfaces"]["github"]["observed_capability"]
-    assert "required_checks_read" in data["surfaces"]["github"]["observed_capability"]
-    assert data["surfaces"]["github"]["details"]["required_checks"] == [
-        "portable-required-check"
-    ]
+    assert (
+        "repository_admin"
+        in data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["observed_capability"]
+    )
+    assert (
+        "protection_read"
+        in data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["observed_capability"]
+    )
+    assert (
+        "required_checks_read"
+        in data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["observed_capability"]
+    )
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["details"][
+        "required_checks"
+    ] == ["portable-required-check"]
 
 
 def test_access_check_publication_denies_non_admin_identity(
@@ -477,8 +516,8 @@ def test_access_check_publication_denies_non_admin_identity(
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
     assert data["publication"] is True
-    assert data["surfaces"]["github"]["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == "admin_required"
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["status"] == "BLOCKED"
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"] == "admin_required"
 
 
 def test_access_check_publication_blocks_when_protection_read_fails(
@@ -505,8 +544,8 @@ def test_access_check_publication_blocks_when_protection_read_fails(
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == "command_failed"
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["status"] == "BLOCKED"
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"] == "command_failed"
 
 
 def test_access_check_publication_blocks_when_required_checks_are_empty(
@@ -533,8 +572,11 @@ def test_access_check_publication_blocks_when_required_checks_are_empty(
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == "required_checks_missing"
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["status"] == "BLOCKED"
+    assert (
+        data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"]
+        == "required_checks_missing"
+    )
 
 
 def test_access_check_blocks_when_github_repository_name_is_not_text(
@@ -565,8 +607,10 @@ def test_access_check_blocks_when_github_repository_name_is_not_text(
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == "JSON string required"
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["status"] == "BLOCKED"
+    assert (
+        data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"] == "JSON string required"
+    )
 
 
 @pytest.mark.parametrize(
@@ -607,8 +651,11 @@ def test_access_check_publication_blocks_malformed_required_status_checks(
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == "required_checks_missing"
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["status"] == "BLOCKED"
+    assert (
+        data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"]
+        == "required_checks_missing"
+    )
 
 
 def test_publication_blocks_when_only_an_unrelated_check_is_required(
@@ -638,7 +685,7 @@ def test_publication_blocks_when_only_an_unrelated_check_is_required(
 
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == (
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"] == (
         "required_checks_incomplete:portable-required-check"
     )
 
@@ -669,7 +716,9 @@ def test_publication_accepts_extra_checks_beyond_the_declared_set(
     data = parse_json_output(result)
 
     assert result.returncode == 0
-    assert data["surfaces"]["github"]["details"]["required_checks"] == [
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["details"][
+        "required_checks"
+    ] == [
         "extra-check",
         "portable-required-check",
     ]
@@ -701,7 +750,9 @@ def test_a_declared_check_is_matched_exactly_not_by_substring(
     data = parse_json_output(result)
 
     assert result.returncode == 2
-    assert data["surfaces"]["github"]["reason"].startswith("required_checks_incomplete")
+    assert data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"].startswith(
+        "required_checks_incomplete"
+    )
 
 
 def test_publication_blocks_when_the_target_declares_no_required_checks(
@@ -720,14 +771,14 @@ def test_publication_blocks_when_the_target_declares_no_required_checks(
     target = tmp_path / "undeclared.toml"
     target.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f'kubeconfig = "{kubeconfig}"\n'
@@ -751,7 +802,10 @@ def test_publication_blocks_when_the_target_declares_no_required_checks(
     data = parse_json_output(result)
 
     assert result.returncode == 2
-    assert data["surfaces"]["github"]["reason"] == "required_checks_not_declared"
+    assert (
+        data["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["reason"]
+        == "required_checks_not_declared"
+    )
 
 
 def test_the_written_receipt_carries_no_path_from_this_host(

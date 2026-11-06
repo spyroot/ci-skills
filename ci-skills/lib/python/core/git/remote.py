@@ -10,13 +10,15 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 from typing import Final, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from lib.python.core.cli_api import APIError, CommandRunner, RequestDeadline
 from lib.python.core.git.refs import RefSnapshot
 from lib.python.core.runtime import error_class, run_command_bounded
 
 GIT_EXECUTABLE: Final = "git"
+# Repository path suffix that URL and remote-reference normalization strips.
+GIT_SUFFIX: Final = ".git"
 LS_REMOTE_ARGUMENTS: Final = ("ls-remote", "--refs", "--heads", "--tags")
 HTTPS_SCHEME: Final = "https"
 AUTHORIZATION_PREFIX: Final = "Authorization: Basic "
@@ -43,6 +45,25 @@ TRACE_VARIABLES: Final = (
 INVALID_REMOTE: Final = "git_remote_invalid"
 INVALID_CREDENTIAL: Final = "git_remote_credential_invalid"
 EXTRA_HEADER_TEMPLATE: Final = "http.{url}.extraheader"
+
+
+def repository_url_key(url: str) -> str:
+    """Return the comparison key of a repository URL.
+
+    :param url: Repository URL; the provider that supplies it has validated it.
+    :returns: The case-folded URL. For an ``https`` URL, ``repository_url_key``
+        also strips trailing ``/`` and then one ``.git`` suffix from the path; for
+        other schemes it returns the case-folded URL unchanged.
+    :raises ValueError: ``urllib.parse.urlsplit`` rejects the URL.
+    """  # noqa: DOC502 - Standard URL parsing propagates malformed-route errors.
+    normalized = url.casefold()
+    parsed = urlsplit(normalized)
+    if parsed.scheme != HTTPS_SCHEME:
+        return normalized
+    path = parsed.path.rstrip("/").removesuffix(GIT_SUFFIX)
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment)
+    )
 
 
 class GitRemoteReader:

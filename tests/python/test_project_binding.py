@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Optional, TypedDict, Union, Unpack
 import pytest
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 if TYPE_CHECKING:
     from lib.python.core.runtime import CommandResult
     from lib.python.core.target import Target
@@ -92,14 +94,14 @@ def _write_target(
     path = directory / filename
     path.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             f"host = {_toml_string(github_host)}\n"
             f"repository = {_toml_string(repository)}\n"
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             f"url = {_toml_string(gitlab_url)}\n"
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             f"context = {_toml_string(context)}\n"
             f"server = {_toml_string(server)}\n"
         ),
@@ -136,7 +138,7 @@ def _file_source(path: Union[str, Path]) -> str:
     :param path: Kubeconfig path encoded in the source entry.
     :returns: TOML table text for a file source.
     """
-    return f'[[kubernetes.sources]]\nkind = "file"\npath = {_toml_string(path)}\n'
+    return f'[[{ENDPOINTS.KUBERNETES_AUTHORITY}.sources]]\nkind = "file"\npath = {_toml_string(path)}\n'
 
 
 def _environment_source(name: str) -> str:
@@ -145,9 +147,7 @@ def _environment_source(name: str) -> str:
     :param name: Variable name containing a kubeconfig path.
     :returns: TOML table text for an environment source.
     """
-    return (
-        f'[[kubernetes.sources]]\nkind = "environment"\nname = {_toml_string(name)}\n'
-    )
+    return f'[[{ENDPOINTS.KUBERNETES_AUTHORITY}.sources]]\nkind = "environment"\nname = {_toml_string(name)}\n'
 
 
 def _command_source(*argv: str) -> str:
@@ -158,7 +158,7 @@ def _command_source(*argv: str) -> str:
 
     """
     return (
-        "[[kubernetes.sources]]\n"
+        f"[[{ENDPOINTS.KUBERNETES_AUTHORITY}.sources]]\n"
         'kind = "command"\n'
         f"argv = [{', '.join(_toml_string(part) for part in argv)}]\n"
     )
@@ -195,7 +195,7 @@ def _write_binding(
             'schema_version = "1.0"\n'
             f"target = {_toml_string(target)}\n"
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             f"{sources}"
         ),
         encoding="utf-8",

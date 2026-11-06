@@ -28,6 +28,7 @@ SCHEMA = import_script_module("lib.python.core.schema")
 RUNTIME = import_script_module("lib.python.core.runtime")
 TARGET = import_script_module("lib.python.core.target")
 STATUS = import_script_module("lib.python.sys.status")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 if TYPE_CHECKING:
     from lib.python.core.abstract.callback import AbstractCallback
@@ -42,7 +43,7 @@ def _target() -> TARGET.Target:
         kubernetes=TARGET.KubernetesTarget(
             "unit-context", "https://api.cluster.example.test:6443", None
         ),
-        active_surfaces=("kubernetes",),
+        active_surfaces=(ENDPOINTS.KUBERNETES_AUTHORITY,),
     )
 
 
@@ -1036,7 +1037,7 @@ def _bind_cli_cluster(monkeypatch: pytest.MonkeyPatch, cluster: MemoryCluster) -
     """Replace authentication/provider boundaries while retaining CLI composition."""
 
     def resolve(*_args: object, **kwargs: object) -> TARGET.Target:
-        assert kwargs["required_surfaces"] == ("kubernetes",)
+        assert kwargs["required_surfaces"] == (ENDPOINTS.KUBERNETES_AUTHORITY,)
         return cluster.target
 
     def configure(callback: KUBERNETES.K8SAuth) -> JSONObject:
@@ -1045,7 +1046,9 @@ def _bind_cli_cluster(monkeypatch: pytest.MonkeyPatch, cluster: MemoryCluster) -
 
     def authenticate(callback: KUBERNETES.K8SAuth) -> JSONObject:
         callback.state.kubernetes = cluster
-        callback.state.access_evidence["kubernetes"] = {"identity": "unit-user"}
+        callback.state.access_evidence[ENDPOINTS.KUBERNETES_AUTHORITY] = {
+            "identity": "unit-user"
+        }
         return {"identity": "unit-user"}
 
     monkeypatch.setattr(CLI, "resolve_target", resolve)
@@ -1100,7 +1103,7 @@ def test_confirmed_cli_reports_real_lifecycle_outcome_and_result_schema(
     )
     SCHEMA.validate_specification(report, "results/tool-pod.schema.json")
     assert report["plan_digest"] == CLI.plan_digest(report["plan"])
-    assert report["access"]["kubernetes"]["identity"] == "unit-user"
+    assert report["access"][ENDPOINTS.KUBERNETES_AUTHORITY]["identity"] == "unit-user"
     if outcome == "success":
         assert code == 0
         assert report["status"] == STATUS.PASS

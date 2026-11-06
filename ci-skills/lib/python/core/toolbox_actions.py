@@ -28,7 +28,12 @@ from lib.python.core.catalog import (
 from lib.python.core.cli import parser
 from lib.python.core.cli_api import APIError
 from lib.python.core.delivery_state import DeliveryState
-from lib.python.core.endpoints import ROUTING_RESULT_KEY
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+    ROUTING_RESULT_KEY,
+)
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.harbor.registry_mirror import (
     HarborCallback,
@@ -307,7 +312,7 @@ class WorkflowAction(SkillAction):
             raise ValueError("spec_required")
         surfaces = tuple(COMMANDS[COMMAND_BY_KIND[args.kind]]["requires"])
         if args.kind == "create_selfhosted_runner" and args.action == "delete":
-            surfaces = ("github", "kubernetes")
+            surfaces = (GITHUB_AUTHORITY, KUBERNETES_AUTHORITY)
         self.target = resolve_target(
             args.target, args.binding, dry_run=args.dry_run, required_surfaces=surfaces
         )
@@ -354,14 +359,14 @@ class WorkflowAction(SkillAction):
                 "tested_revision": self.target.tested_revision,
                 "target_file": str(self.target.source_file),
                 "target_source": self.target.source_kind,
-                "github": github,
-                "kubernetes": {
+                GITHUB_AUTHORITY: github,
+                KUBERNETES_AUTHORITY: {
                     "context": self.target.kubernetes.context,
                     "server": self.target.kubernetes.server,
                 }
                 if self.target.kubernetes
                 else None,
-                "harbor": {
+                HARBOR_AUTHORITY: {
                     "url": self.target.harbor.url,
                     "project": self.target.harbor.project,
                 }

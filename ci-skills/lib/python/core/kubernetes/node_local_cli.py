@@ -21,6 +21,7 @@ from lib.python.access.credentials import bind_sources
 from lib.python.access.shared import access_evidence
 from lib.python.core.argument_parser import TrackedArgumentParser
 from lib.python.core.catalog import NODE_LOCAL_COMMANDS, describe_node
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.node_local import (
     CEPH_CLASSIFICATIONS,
@@ -296,7 +297,7 @@ class NodeDiagnosticRun:
                 "target": selected.node,
                 "target_file": str(target.source_file.resolve()),
                 "target_source": target.source_kind,
-                "kubernetes": {
+                KUBERNETES_AUTHORITY: {
                     "context": target.kubernetes.context,
                     "server": target.kubernetes.server,
                 },
@@ -376,7 +377,7 @@ class NodeDiagnosticRun:
                 "access": access_evidence(gate),
                 "target_file": self.data["target_file"],
                 "target_source": self.data["target_source"],
-                "kubernetes": self.data["kubernetes"],
+                KUBERNETES_AUTHORITY: self.data[KUBERNETES_AUTHORITY],
             }
         )
         self.data = data

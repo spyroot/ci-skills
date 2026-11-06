@@ -15,14 +15,18 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
+import re
 import signal
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from datetime import datetime, timedelta
+from enum import StrEnum
+from http import HTTPMethod, HTTPStatus
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import ClassVar, Final, NoReturn, Optional
+from urllib.parse import quote
 
 import pytest
 from conftest import REPO_ROOT, SKILL_ROOT, import_script_module, load_module
@@ -45,13 +49,22 @@ CLI_API = import_script_module("lib.python.core.cli_api")
 MIRROR_PROVIDER = import_script_module("lib.python.core.gitlab.mirror.provider")
 REPOSITORY = import_script_module("lib.python.core.github.repository")
 SYS_STATUS = import_script_module(QUALIFY.STATUS_MODULE)
-OUTCOME = import_script_module(QUALIFY.MIRROR_CONSTANTS_MODULE).Outcome
+MIRROR_CONSTANTS = import_script_module(QUALIFY.MIRROR_CONSTANTS_MODULE)
+MIRROR_CLI = import_script_module(QUALIFY.MIRROR_CLI_MODULE)
+MIRRORING = import_script_module(QUALIFY.MIRRORING_MODULE)
 SCHEMA = import_script_module("lib.python.core.schema")
 EVIDENCE = import_script_module("lib.python.core.gitlab.mirror.evidence")
-PROVENANCE = import_script_module("lib.python.core.provenance")
+PROVENANCE = import_script_module(QUALIFY.PROVENANCE_MODULE)
+REMOTE = import_script_module(QUALIFY.REMOTE_MODULE)
 
 # The repository's own lib stands in for the installed copy.
-STATUS: Final = QUALIFY.InstalledStatus.bind(SYS_STATUS, OUTCOME)
+STATUS: Final = QUALIFY.InstalledStatus.bind(SYS_STATUS, MIRROR_CONSTANTS.Outcome)
+FIELDS: Final = QUALIFY.InstalledFields.bind(
+    MIRROR_CONSTANTS.Field,
+    MIRROR_CLI.EnvelopeField,
+    MIRRORING.MirrorField,
+    PROVENANCE,
+)
 EXIT_OK: Final[int] = STATUS.exit_code(STATUS.passed)
 EXIT_STOP: Final[int] = STATUS.exit_code(STATUS.blocked)
 MAX_AGE_DAYS: Final[int] = ACCEPTANCE.load_policy(
@@ -62,22 +75,6 @@ MIRROR_OPERATIONS: Final = tuple(
     for action in (STATUS.applied, STATUS.no_op)
 )
 CLEANUP_DELAY: Final = timedelta(seconds=1)
-CLEANUP_FIELDS: Final = (
-    "SMOKE_CLEANUP_FIELD",
-    "KIND_FIELD",
-    "BEFORE_FIELD",
-    "DELETE_FIELD",
-    "AFTER_FIELD",
-    "REPEAT_FIELD",
-    "SOURCE_FIELD",
-    "DESTINATION_FIELD",
-    "MIRROR_ID_FIELD",
-    "MIRROR_HTTP_STATUS_FIELD",
-    "DESTINATION_HTTP_STATUS_FIELD",
-    "MIRROR_ABSENT_FIELD",
-    "DESTINATION_ID_HTTP_STATUS_FIELD",
-    "MUTATED_FIELD",
-)
 FAKE_PASS: Final[str] = "UNIT_PASS"
 FAKE_PLANNED: Final[str] = "UNIT_PLANNED"
 FAKE_BLOCKED: Final[str] = "UNIT_BLOCKED"
@@ -85,30 +82,85 @@ FAKE_APPLIED: Final[str] = "UNIT_APPLIED"
 FAKE_NO_OP: Final[str] = "UNIT_NO_OP"
 FAKE_EXIT_OK: Final[int] = 0
 FAKE_EXIT_STOP: Final[int] = 7
+# Prefix that gives every bound result and evidence key another value.
+FAKE_KEY_PREFIX: Final[str] = "unit_"
 
 CANDIDATE: Final[str] = "c" * 40
-SOURCE_HOST: Final[str] = "gitlab.example.test"
-SOURCE: Final[dict[str, object]] = {
-    "id": 261,
-    "host": SOURCE_HOST,
-    "path": "unit/mirror-source",
-}
+OTHER_CANDIDATE: Final[str] = "d" * 40
 SOURCE_ID: Final[int] = 261
+SOURCE_HOST: Final[str] = "gitlab.example.test"
+SOURCE_PATH: Final[str] = "unit/mirror-source"
+DESTINATION_HOST: Final[str] = "github.example.test"
 DESTINATION_PATH: Final[str] = "unit/mirror-destination"
 REPOSITORY_ID: Final[int] = 9001
-DESTINATION: Final[dict[str, object]] = {
-    "id": REPOSITORY_ID,
-    "host": "github.example.test",
-    "path": DESTINATION_PATH,
-}
+OTHER_REPOSITORY_ID: Final[int] = 9002
 CLONE_URL: Final[str] = "https://github.example.test/unit/mirror-destination.git"
+# Mirror URLs GitLab can report for a mirror created with CLONE_URL.
+MIRROR_URL_WITHOUT_SUFFIX: Final[str] = (
+    "https://github.example.test/unit/mirror-destination"
+)
+MIRROR_URL_WITH_SLASH: Final[str] = (
+    "https://github.example.test/unit/mirror-destination.git/"
+)
+# A mirror URL whose unclosed IPv6 host makes urlsplit raise ValueError.
+MALFORMED_MIRROR_URL: Final[str] = "https://[::1/x"
 MIRROR_ID: Final[int] = 15
-MIRROR: Final[dict[str, object]] = {"id": MIRROR_ID}
+EXECUTION_HOST: Final[str] = "unit-host"
+SKILL_DIGEST: Final[str] = "unit-digest"
+
+
+def _source(fields: object = FIELDS) -> dict[str, object]:
+    """Build the source evidence the installed command reports.
+
+    :param fields: Keys the evidence is written with.
+    :returns: Source evidence.
+    """
+    return {fields.id: SOURCE_ID, fields.host: SOURCE_HOST, fields.path: SOURCE_PATH}
+
+
+def _destination(
+    fields: object = FIELDS, identity: Optional[int] = REPOSITORY_ID
+) -> dict[str, object]:
+    """Build the destination evidence the installed command reports.
+
+    :param fields: Keys the evidence is written with.
+    :param identity: Repository ID, or None for an absent destination.
+    :returns: Destination evidence.
+    """
+    return {
+        fields.id: identity,
+        fields.host: DESTINATION_HOST,
+        fields.path: DESTINATION_PATH,
+    }
+
+
+def _mirror(fields: object = FIELDS) -> dict[str, object]:
+    """Build the mirror evidence the installed command reports.
+
+    :param fields: Keys the evidence is written with.
+    :returns: Mirror evidence.
+    """
+    return {fields.id: MIRROR_ID}
+
+
+def _owned(mirror: bool, repository: bool, fields: object = FIELDS) -> dict[str, bool]:
+    """Build the ``created`` flags of an APPLIED record.
+
+    :param mirror: Whether the run created the mirror.
+    :param repository: Whether the run created the repository.
+    :param fields: Keys the flags are written with.
+    :returns: Ownership flags.
+    """
+    return {fields.mirror: mirror, fields.repository: repository}
+
+
+SOURCE: Final[dict[str, object]] = _source()
+DESTINATION: Final[dict[str, object]] = _destination()
+MIRROR: Final[dict[str, object]] = _mirror()
 SEED: Final[str] = "a" * 40
 MOVED: Final[str] = "e" * 40
 REFS: Final[dict[str, object]] = {"count": 2, "digest": "unit"}
 PLAN_DIGEST: Final[str] = "b" * 64
-CAPTURED: Final[str] = "2026-11-06T00:00:00+00:00"
 TARGET_SOURCE: Final[str] = "project"
 OTHER_TARGET_SOURCE: Final[str] = "user"
 PROVIDER_REASON: Final[str] = "unit_provider_failure"
@@ -140,7 +192,7 @@ def inputs(tmp_path: Path) -> object:
     return QUALIFY.QualificationInputs(
         skill=skill,
         work_dir=work,
-        project=str(SOURCE["path"]),
+        project=SOURCE_PATH,
         destination=DESTINATION_PATH,
         source_id=SOURCE_ID,
         seed_refs=(MAIN_REF, TAG_REF),
@@ -157,6 +209,72 @@ def bindings() -> object:
     :returns: Names bound from ``ci-skills/lib``.
     """
     return QUALIFY.installed_bindings(SKILL_ROOT)
+
+
+def _replaced(module: ModuleType, **names: object) -> SimpleNamespace:
+    """Copy an installed module with some of its names replaced.
+
+    :param module: Module of the repository's own ``lib``.
+    :param **names: Replacement per module attribute.
+    :returns: Namespace with the module's names and the replacements.
+    """
+    return SimpleNamespace(**{**vars(module), **names})
+
+
+def _renamed(enumeration: type[StrEnum]) -> SimpleNamespace:
+    """Give every member of an installed key enumeration another value.
+
+    :param enumeration: ``Field``, ``EnvelopeField`` or ``MirrorField``.
+    :returns: Namespace of the member names with ``FAKE_KEY_PREFIX`` values.
+    """
+    return SimpleNamespace(
+        **{member.name: FAKE_KEY_PREFIX + member.value for member in enumeration}
+    )
+
+
+def _serve(monkeypatch: pytest.MonkeyPatch, fakes: Mapping[str, object]) -> None:
+    """Serve fake installed modules by name and the real ones otherwise.
+
+    :param monkeypatch: Restores the module loader and ``sys.path``.
+    :param fakes: Fake module per dotted name.
+    """
+    loader = QUALIFY._installed_module
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(
+        QUALIFY,
+        "_installed_module",
+        lambda skill, name: fakes[name] if name in fakes else loader(skill, name),
+    )
+
+
+@pytest.fixture
+def fake_fields(monkeypatch: pytest.MonkeyPatch) -> object:
+    """Bind keys from installed enumerations whose every value differs from the lib.
+
+    :param monkeypatch: Serves the renamed ``Field``, ``EnvelopeField`` and
+        ``MirrorField``, and a provenance module with a renamed
+        ``DIGEST_VALUE_KEY``.
+    :returns: Keys bound by ``installed_bindings``.
+    """
+    _serve(
+        monkeypatch,
+        {
+            QUALIFY.MIRROR_CONSTANTS_MODULE: _replaced(
+                MIRROR_CONSTANTS, Field=_renamed(MIRROR_CONSTANTS.Field)
+            ),
+            QUALIFY.MIRROR_CLI_MODULE: _replaced(
+                MIRROR_CLI, EnvelopeField=_renamed(MIRROR_CLI.EnvelopeField)
+            ),
+            QUALIFY.MIRRORING_MODULE: _replaced(
+                MIRRORING, MirrorField=_renamed(MIRRORING.MirrorField)
+            ),
+            QUALIFY.PROVENANCE_MODULE: _replaced(
+                PROVENANCE,
+                DIGEST_VALUE_KEY=FAKE_KEY_PREFIX + PROVENANCE.DIGEST_VALUE_KEY,
+            ),
+        },
+    )
+    return QUALIFY.installed_bindings(SKILL_ROOT).fields
 
 
 class ScriptedRunner(QUALIFY.CommandRunner):
@@ -208,12 +326,16 @@ class FakeProvider(QUALIFY.MirrorProvider):
     the instance.
     """
 
-    def __init__(self, mirror: bool = True, destination: bool = True) -> None:
+    def __init__(
+        self, mirror: bool = True, destination: bool = True, fields: object = FIELDS
+    ) -> None:
         """Start with the run-created objects present or absent.
 
         :param mirror: Whether the mirror starts present.
         :param destination: Whether the destination starts present.
+        :param fields: Keys the installed evidence is written with.
         """
+        self.fields = fields
         self.mirror_present = mirror
         self.destination_present = destination
         self.mirror_deleted = False
@@ -221,7 +343,7 @@ class FakeProvider(QUALIFY.MirrorProvider):
         self.mirror_reads_after_delete = 0
         self.deletes: MutableSequence[str] = []
         self.labels: MutableSequence[str] = []
-        self.mirror_delete_status = 204
+        self.mirror_delete_status = HTTPStatus.NO_CONTENT
         self.keep_mirror = False
         self.mirror_matches = True
         self.destination_override: Optional[dict[str, object]] = None
@@ -258,7 +380,7 @@ class FakeProvider(QUALIFY.MirrorProvider):
 
         :returns: Source evidence.
         """
-        return self.source_override or dict(SOURCE)
+        return self.source_override or _source(self.fields)
 
     def ref_commit(self, ref: object) -> str:
         """Return the configured commit of a retained ref.
@@ -315,9 +437,9 @@ class FakeProvider(QUALIFY.MirrorProvider):
         :returns: Evidence, or None when absent.
         """
         if self.destination_present:
-            return self.destination_override or dict(DESTINATION)
+            return self.destination_override or _destination(self.fields)
         if self.destination_deleted and "destination" in self.reappear:
-            return dict(DESTINATION)
+            return _destination(self.fields)
         return None
 
     def destination_id_present(self, repository_id: int) -> bool:
@@ -342,105 +464,107 @@ class FakeProvider(QUALIFY.MirrorProvider):
         self.deletes.append(f"destination:{path}:{repository_id}")
         self.destination_present = False
         self.destination_deleted = True
-        return 204
+        return HTTPStatus.NO_CONTENT
 
 
 def _planned(
     record: Optional[Mapping[str, object]] = None,
+    top: Optional[Mapping[str, object]] = None,
     tokens: object = STATUS,
-    **top: object,
+    fields: object = FIELDS,
 ) -> dict[str, object]:
     """Build a live-plan result of a clean fixture with optional changes.
 
     :param record: Record fields replacing the clean ones.
+    :param top: Top-level fields replacing the clean ones.
     :param tokens: Status tokens the scripted command reports with.
-    :param **top: Top-level fields replacing the clean ones.
+    :param fields: Keys the scripted command writes with.
     :returns: Live-plan result.
     """
     clean = {
-        "source": SOURCE,
-        "destination": {
-            "id": None,
-            "host": DESTINATION["host"],
-            "path": DESTINATION_PATH,
-        },
-        "mirror": None,
+        fields.source: _source(fields),
+        fields.destination: _destination(fields, None),
+        fields.mirror: None,
     }
     return {
-        "status": tokens.planned,
-        "plan_digest": PLAN_DIGEST,
-        QUALIFY.TARGET_SOURCE_FIELD: TARGET_SOURCE,
-        "records": [{**clean, **(record or {})}],
-        **top,
+        fields.status: tokens.planned,
+        fields.plan_digest: PLAN_DIGEST,
+        fields.target_source: TARGET_SOURCE,
+        fields.records: [{**clean, **(record or {})}],
+        **(top or {}),
     }
 
 
-def _created(tokens: object = STATUS, **changes: object) -> dict[str, object]:
+def _created(
+    changes: Optional[Mapping[str, object]] = None,
+    tokens: object = STATUS,
+    fields: object = FIELDS,
+) -> dict[str, object]:
     """Build the APPLIED record of a run that created both objects.
 
+    :param changes: Record fields replacing the defaults.
     :param tokens: Status tokens the scripted command reports with.
-    :param **changes: Record fields replacing the defaults.
+    :param fields: Keys the scripted command writes with.
     :returns: APPLIED record.
     """
     return {
-        "action": tokens.applied,
-        "source": SOURCE,
-        "destination": DESTINATION,
-        "mirror": MIRROR,
-        "created": {"mirror": True, "repository": True},
-        "before": {"mirror": None},
-        "replacement_required": False,
-        "source_refs": REFS,
-        "destination_refs": REFS,
-        **changes,
+        fields.action: tokens.applied,
+        fields.source: _source(fields),
+        fields.destination: _destination(fields),
+        fields.mirror: _mirror(fields),
+        fields.created: _owned(True, True, fields),
+        fields.source_refs: REFS,
+        fields.destination_refs: REFS,
+        **(changes or {}),
     }
 
 
 def _results(
     overrides: Optional[Mapping[str, tuple[int, dict[str, object]]]] = None,
     tokens: object = STATUS,
+    fields: object = FIELDS,
 ) -> dict[str, tuple[int, dict[str, object]]]:
     """Build the scripted results of a successful run with optional overrides.
 
     :param overrides: Replacement result per step label.
     :param tokens: Status tokens and exit mapping the scripted command uses.
+    :param fields: Keys the scripted command writes with.
     :returns: Exit code and result per step label.
     """
     passed = tokens.exit_code(tokens.passed)
     receipt = {
-        "captured_at": CAPTURED,
-        "execution_host": "unit-host",
-        "tested_revision": CANDIDATE,
-        QUALIFY.TARGET_SOURCE_FIELD: TARGET_SOURCE,
-        "skill": {
-            "digest": "unit-digest",
-            "revision": {"value": CANDIDATE, "verified": True},
-        },
+        fields.execution_host: EXECUTION_HOST,
+        fields.tested_revision: CANDIDATE,
+        fields.target_source: TARGET_SOURCE,
+        fields.skill: {fields.digest: SKILL_DIGEST},
     }
-    noop_record = _created(tokens, action=tokens.no_op)
+    noop_record = _created({fields.action: tokens.no_op}, tokens, fields)
     results = {
-        QUALIFY.LIVE_PLAN_STEP: (passed, _planned(tokens=tokens)),
+        QUALIFY.LIVE_PLAN_STEP: (passed, _planned(tokens=tokens, fields=fields)),
         QUALIFY.REJECTION_STEP: (
             tokens.exit_code(tokens.blocked),
-            {"status": tokens.blocked, "mutated": False},
+            {fields.status: tokens.blocked, fields.mutated: False},
         ),
         QUALIFY.APPLIED_STEP: (
             passed,
             {
                 **receipt,
-                "status": tokens.passed,
-                "mutated": True,
-                "records": [_created(tokens)],
+                fields.status: tokens.passed,
+                fields.mutated: True,
+                fields.records: [_created(tokens=tokens, fields=fields)],
             },
         ),
-        QUALIFY.NOOP_PLAN_STEP: (passed, _planned(noop_record, tokens)),
+        QUALIFY.NOOP_PLAN_STEP: (
+            passed,
+            _planned(noop_record, tokens=tokens, fields=fields),
+        ),
         QUALIFY.NOOP_STEP: (
             passed,
             {
                 **receipt,
-                "status": tokens.passed,
-                "mutated": False,
-                "records": [noop_record],
+                fields.status: tokens.passed,
+                fields.mutated: False,
+                fields.records: [noop_record],
             },
         ),
     }
@@ -455,7 +579,7 @@ def _applied(record: dict[str, object]) -> tuple[int, dict[str, object]]:
     :returns: Exit code and result.
     """
     code, applied = _results()[QUALIFY.APPLIED_STEP]
-    return code, {**applied, "records": [record]}
+    return code, {**applied, FIELDS.records: [record]}
 
 
 def _ledger(inputs: object) -> dict[str, object]:
@@ -472,18 +596,22 @@ def _qualification(
     runner: object,
     provider: Callable[[str], object],
     tokens: object = STATUS,
+    fields: object = FIELDS,
     **controls: object,
 ) -> object:
-    """Build a qualification bound to the given status tokens.
+    """Build a qualification bound to the given status tokens and keys.
 
     :param inputs: Synthetic fixture inputs.
     :param runner: Command runner.
     :param provider: Provider factory.
     :param tokens: Status tokens bound from the installed copy.
+    :param fields: Result and receipt keys bound from the installed copy.
     :param **controls: ``sleep`` or ``clock`` replacement.
     :returns: Qualification under test.
     """
-    return QUALIFY.MirrorQualification(inputs, runner, provider, tokens, **controls)
+    return QUALIFY.MirrorQualification(
+        inputs, runner, provider, tokens, fields, **controls
+    )
 
 
 def _interrupt() -> None:
@@ -521,12 +649,14 @@ def _engine_pair() -> tuple[dict[str, object], dict[str, object]]:
 
     :returns: APPLIED and NO_OP receipts.
     """
+    field = MIRROR_CONSTANTS.Field
     pair = json.loads(_mirror_pair_baseline())
     digest = PROVENANCE.functional_digest(SKILL_ROOT)
     for receipt in pair.values():
-        receipt["tested_revision"] = CANDIDATE
-        receipt["skill"]["revision"]["value"] = CANDIDATE
-        receipt["skill"]["functional_digest"] = digest
+        skill = receipt[field.SKILL]
+        receipt[field.TESTED_REVISION] = CANDIDATE
+        skill[field.REVISION][field.VALUE] = CANDIDATE
+        skill[field.FUNCTIONAL_DIGEST] = digest
     return pair[MIRROR_APPLIED_FILE], pair[MIRROR_NO_OP_FILE]
 
 
@@ -539,28 +669,23 @@ def test_qualification_removes_only_created_objects_and_records_cleanup(
     :returns: None; assertions verify steps, deletions, ledger, schema and checker.
     """
     applied, noop = _engine_pair()
-    record = applied["records"][0]
-    source = record[QUALIFY.SOURCE_FIELD]
-    destination = record[QUALIFY.DESTINATION_FIELD]
-    mirror_id = record["mirror"]["id"]
+    record = applied[FIELDS.records][0]
+    source = record[FIELDS.source]
+    destination = record[FIELDS.destination]
+    mirror_id = record[FIELDS.mirror][FIELDS.id]
     selected = dataclasses.replace(
         inputs,
-        project=source["path"],
-        destination=destination["path"],
-        source_id=source["id"],
+        project=source[FIELDS.path],
+        destination=destination[FIELDS.path],
+        source_id=source[FIELDS.id],
     )
-    absent = {**destination, "id": None}
+    absent = {**destination, FIELDS.id: None}
     runner = ScriptedRunner(
         _results(
             {
                 QUALIFY.LIVE_PLAN_STEP: (
                     EXIT_OK,
-                    _planned(
-                        {
-                            QUALIFY.SOURCE_FIELD: source,
-                            QUALIFY.DESTINATION_FIELD: absent,
-                        }
-                    ),
+                    _planned({FIELDS.source: source, FIELDS.destination: absent}),
                 ),
                 QUALIFY.APPLIED_STEP: (EXIT_OK, applied),
                 QUALIFY.NOOP_STEP: (EXIT_OK, noop),
@@ -589,12 +714,12 @@ def test_qualification_removes_only_created_objects_and_records_cleanup(
     )
     assert provider.deletes == [
         f"mirror:{mirror_id}",
-        f"destination:{destination['path']}:{destination['id']}",
+        f"destination:{destination[FIELDS.path]}:{destination[FIELDS.id]}",
     ]
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
-    assert ledger["candidate"] == CANDIDATE
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.LEDGER_CANDIDATE_FIELD] == CANDIDATE
     assert ledger[QUALIFY.TARGET_SOURCE_FIELD] == TARGET_SOURCE
-    assert ledger["seed_refs"] == SEED_REFS
+    assert ledger[QUALIFY.LEDGER_SEED_REFS_FIELD] == SEED_REFS
     cleanup = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert cleanup[QUALIFY.STATUS_FIELD] == STATUS.passed
     assert cleanup[QUALIFY.BEFORE_FIELD] == {
@@ -603,8 +728,8 @@ def test_qualification_removes_only_created_objects_and_records_cleanup(
         QUALIFY.MIRROR_ID_FIELD: mirror_id,
     }
     assert cleanup[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
     assert cleanup[QUALIFY.REPEAT_FIELD][QUALIFY.MUTATED_FIELD] is False
     assert QUALIFY.RECONCILED_FIELD not in cleanup
@@ -636,17 +761,6 @@ def test_qualification_removes_only_created_objects_and_records_cleanup(
     assert result["tested_revision"] == CANDIDATE
 
 
-@pytest.mark.parametrize("name", CLEANUP_FIELDS)
-def test_acceptance_checker_reads_the_shared_cleanup_fields(name: str) -> None:
-    """Keep one definition of each cleanup record field the checker reads.
-
-    :param name: Field constant name in `mirror_qualification`.
-    :returns: None; assertions verify the checker binds the tool's constant.
-    """
-    assert getattr(ACCEPTANCE, name) is getattr(QUALIFY, name)
-    assert ACCEPTANCE.MIRROR_SMOKE_CLEANUP_KIND is QUALIFY.CLEANUP_KIND
-
-
 def test_plan_only_stops_after_the_rejection_and_writes_no_ledger(
     inputs: object,
 ) -> None:
@@ -669,32 +783,37 @@ def test_plan_only_stops_after_the_rejection_and_writes_no_ledger(
     assert provider.labels == [QUALIFY.BASELINE_PLAN_STEP]
     assert provider.deletes == []
     assert not (inputs.work_dir / QUALIFY.ALLOCATION_FILE).exists()
-    assert summary["plan_digest"] == PLAN_DIGEST
-    assert summary["candidate"] == CANDIDATE
+    assert summary[QUALIFY.LEDGER_PLAN_DIGEST_FIELD] == PLAN_DIGEST
+    assert summary[QUALIFY.LEDGER_CANDIDATE_FIELD] == CANDIDATE
     assert summary[QUALIFY.TARGET_SOURCE_FIELD] == TARGET_SOURCE
-    assert summary["seed_refs"] == SEED_REFS
+    assert summary[QUALIFY.LEDGER_SEED_REFS_FIELD] == SEED_REFS
 
 
 @pytest.mark.parametrize(
     ("overrides", "change", "reason"),
     (
         (
-            {QUALIFY.LIVE_PLAN_STEP: (0, _planned({"source": {**SOURCE, "id": 262}}))},
+            {
+                QUALIFY.LIVE_PLAN_STEP: (
+                    0,
+                    _planned({FIELDS.source: {**SOURCE, FIELDS.id: SOURCE_ID + 1}}),
+                )
+            },
             None,
             "source_id_mismatch",
         ),
         (
-            {QUALIFY.LIVE_PLAN_STEP: (0, _planned({"destination": DESTINATION}))},
+            {QUALIFY.LIVE_PLAN_STEP: (0, _planned({FIELDS.destination: DESTINATION}))},
             None,
             "destination_present",
         ),
         (
-            {QUALIFY.LIVE_PLAN_STEP: (0, _planned({"mirror": MIRROR}))},
+            {QUALIFY.LIVE_PLAN_STEP: (0, _planned({FIELDS.mirror: MIRROR}))},
             None,
             "mirror_present",
         ),
         (
-            {QUALIFY.LIVE_PLAN_STEP: (0, _planned(target_source=None))},
+            {QUALIFY.LIVE_PLAN_STEP: (0, _planned(top={FIELDS.target_source: None}))},
             None,
             "target_source_mismatch",
         ),
@@ -706,7 +825,7 @@ def test_plan_only_stops_after_the_rejection_and_writes_no_ledger(
         (
             None,
             lambda provider: setattr(
-                provider, "source_override", {**SOURCE, "path": "unit/other"}
+                provider, "source_override", {**SOURCE, FIELDS.path: "unit/other"}
             ),
             QUALIFY.SOURCE_IDENTITY_CHANGED,
         ),
@@ -719,7 +838,7 @@ def test_plan_only_stops_after_the_rejection_and_writes_no_ledger(
             {
                 QUALIFY.REJECTION_STEP: (
                     EXIT_STOP,
-                    {"status": STATUS.blocked, "mutated": True},
+                    {FIELDS.status: STATUS.blocked, FIELDS.mutated: True},
                 )
             },
             None,
@@ -729,7 +848,7 @@ def test_plan_only_stops_after_the_rejection_and_writes_no_ledger(
             {
                 QUALIFY.REJECTION_STEP: (
                     EXIT_OK,
-                    {"status": STATUS.passed, "mutated": False},
+                    {FIELDS.status: STATUS.passed, FIELDS.mutated: False},
                 )
             },
             None,
@@ -783,7 +902,7 @@ def test_qualification_stops_before_any_write(
             {
                 QUALIFY.APPLIED_STEP: (
                     EXIT_STOP,
-                    {"status": STATUS.blocked},
+                    {FIELDS.status: STATUS.blocked},
                 )
             },
             f"{QUALIFY.APPLIED_STEP}_unexpected:{EXIT_STOP}:{STATUS.blocked}",
@@ -793,27 +912,27 @@ def test_qualification_stops_before_any_write(
         (
             {
                 QUALIFY.APPLIED_STEP: _applied(
-                    _created(created={"mirror": True, "repository": False})
+                    _created({FIELDS.created: _owned(True, False)})
                 )
             },
             "applied_result_unexpected",
             QUALIFY.CLEANUP_PENDING,
-            {"mirror": True, "repository": False},
+            _owned(True, False),
         ),
         (
             {
                 QUALIFY.NOOP_STEP: (
                     EXIT_OK,
                     {
-                        "status": STATUS.passed,
-                        "mutated": False,
-                        "records": [_created()],
+                        FIELDS.status: STATUS.passed,
+                        FIELDS.mutated: False,
+                        FIELDS.records: [_created()],
                     },
                 )
             },
             "noop_result_unexpected",
             QUALIFY.CLEANUP_PENDING,
-            {"mirror": True, "repository": True},
+            _owned(True, True),
         ),
     ),
     ids=("apply-blocked", "repository-adopted-not-created", "repeat-not-no-op"),
@@ -836,12 +955,12 @@ def test_apply_outcome_is_recorded_before_the_run_stops(
     """
     provider = FakeProvider()
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(inputs, ScriptedRunner(_results(overrides)), provider).run()
 
     ledger = _ledger(inputs)
-    assert ledger["cleanup"] == state
-    assert ledger["created"] == created
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == state
+    assert ledger[QUALIFY.LEDGER_CREATED_FIELD] == created
     assert provider.deletes == []
     assert provider.labels == [QUALIFY.BASELINE_PLAN_STEP]
 
@@ -856,14 +975,18 @@ def test_apply_outcome_is_recorded_before_the_run_stops(
             QUALIFY.MIRROR_DELETE_PENDING,
         ),
         (
-            lambda provider: setattr(provider, "mirror_delete_status", 500),
+            lambda provider: setattr(
+                provider, "mirror_delete_status", HTTPStatus.INTERNAL_SERVER_ERROR
+            ),
             "mirror_deletion_unverified",
             [MIRROR_DELETED],
             QUALIFY.MIRROR_DELETE_PENDING,
         ),
         (
             lambda provider: setattr(
-                provider, "destination_override", {**DESTINATION, "id": 9002}
+                provider,
+                "destination_override",
+                {**DESTINATION, FIELDS.id: OTHER_REPOSITORY_ID},
             ),
             QUALIFY.DESTINATION_IDENTITY_CHANGED,
             [],
@@ -885,7 +1008,7 @@ def test_apply_outcome_is_recorded_before_the_run_stops(
             lambda provider: setattr(
                 provider,
                 "destination_after_mirror_delete",
-                {**DESTINATION, "id": 9002},
+                {**DESTINATION, FIELDS.id: OTHER_REPOSITORY_ID},
             ),
             QUALIFY.DESTINATION_IDENTITY_CHANGED,
             [MIRROR_DELETED],
@@ -936,11 +1059,11 @@ def test_cleanup_stops_when_an_identity_or_deletion_is_unproven(
     provider = FakeProvider()
     change(provider)
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
     assert provider.deletes == deletes
-    assert _ledger(inputs)["cleanup"] == state
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == state
     assert not (inputs.work_dir / QUALIFY.CLEANUP_RECORD).exists()
 
 
@@ -988,11 +1111,11 @@ def test_absence_read_back_stops_on_a_present_object_or_moved_ref(
     provider = FakeProvider()
     change(provider)
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
     assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
-    assert _ledger(inputs)["cleanup"] == QUALIFY.VERIFY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.VERIFY_PENDING
     assert not (inputs.work_dir / QUALIFY.CLEANUP_RECORD).exists()
     assert not (inputs.work_dir / QUALIFY.NOOP_WITH_CLEANUP).exists()
 
@@ -1009,7 +1132,9 @@ def test_existing_ledger_blocks_a_second_run(inputs: object, mode: str) -> None:
     runner = ScriptedRunner(_results())
     qualification = _qualification(inputs, runner, FakeProvider())
 
-    with pytest.raises(QUALIFY.QualificationError, match=QUALIFY.ALLOCATION_EXISTS):
+    with pytest.raises(
+        QUALIFY.QualificationError, match=re.escape(QUALIFY.ALLOCATION_EXISTS)
+    ):
         getattr(qualification, mode)()
 
     assert runner.calls == []
@@ -1029,7 +1154,9 @@ def test_ledger_is_created_exclusively(inputs: object) -> None:
         },
     )
 
-    with pytest.raises(QUALIFY.QualificationError, match=QUALIFY.ALLOCATION_EXISTS):
+    with pytest.raises(
+        QUALIFY.QualificationError, match=re.escape(QUALIFY.ALLOCATION_EXISTS)
+    ):
         _qualification(inputs, runner, FakeProvider()).run()
 
     assert QUALIFY.APPLIED_STEP not in runner.labels
@@ -1059,12 +1186,13 @@ def test_ledger_write_failure_keeps_the_previous_ledger(
     provider = FakeProvider()
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^write_failed:{QUALIFY.ALLOCATION_FILE}$"
+        QUALIFY.QualificationError,
+        match=f"^write_failed:{re.escape(QUALIFY.ALLOCATION_FILE)}$",
     ):
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
-    assert _ledger(inputs)["cleanup"] == QUALIFY.APPLY_PENDING
-    assert _ledger(inputs)["created"] is None
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_CREATED_FIELD] is None
     assert not list(inputs.work_dir.glob(f"*{QUALIFY.STAGED_SUFFIX}"))
     assert provider.deletes == []
 
@@ -1096,8 +1224,8 @@ def test_interrupt_at_the_apply_records_the_ledger_and_deletes_nothing(
     assert runner.labels[-1] == QUALIFY.APPLIED_STEP
     assert provider.deletes == []
     ledger = _ledger(inputs)
-    assert ledger["cleanup"] == QUALIFY.APPLY_PENDING
-    assert ledger["created"] is None
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
+    assert ledger[QUALIFY.LEDGER_CREATED_FIELD] is None
     assert not list(inputs.work_dir.glob(f"*{QUALIFY.STAGED_SUFFIX}"))
     reconciler = FakeProvider()
 
@@ -1118,14 +1246,14 @@ def test_interrupt_at_the_apply_records_the_ledger_and_deletes_nothing(
             FakeProvider,
             [],
             [MIRROR_DELETED, DESTINATION_DELETED],
-            204,
+            HTTPStatus.NO_CONTENT,
         ),
         (
             AFTER_DELETE,
             lambda: FakeProvider(mirror=False),
             [MIRROR_DELETED],
             [DESTINATION_DELETED],
-            404,
+            HTTPStatus.NOT_FOUND,
         ),
     ),
     ids=("before-mirror-delete", "after-mirror-delete"),
@@ -1157,8 +1285,8 @@ def test_interrupt_at_the_mirror_delete_leaves_the_ledger_for_reconcile(
     assert str(raised.value) == _interrupted(QUALIFY.MIRROR_DELETE_PENDING)
     assert provider.deletes == run_deletes
     ledger = _ledger(inputs)
-    assert ledger["cleanup"] == QUALIFY.MIRROR_DELETE_PENDING
-    assert ledger["created"] == {"mirror": True, "repository": True}
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.MIRROR_DELETE_PENDING
+    assert ledger[QUALIFY.LEDGER_CREATED_FIELD] == _owned(True, True)
     assert not (inputs.work_dir / QUALIFY.CLEANUP_RECORD).exists()
     assert not (inputs.work_dir / QUALIFY.NOOP_WITH_CLEANUP).exists()
     fresh = reconciler()
@@ -1166,11 +1294,11 @@ def test_interrupt_at_the_mirror_delete_leaves_the_ledger_for_reconcile(
     reconciled = _qualification(inputs, ScriptedRunner(_results()), fresh).reconcile()
 
     assert fresh.deletes == reconcile_deletes
-    assert reconciled["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert reconciled[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
         QUALIFY.MIRROR_HTTP_STATUS_FIELD: mirror_status,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
 
 
@@ -1183,7 +1311,8 @@ def test_interrupt_before_the_ledger_writes_nothing(inputs: object) -> None:
     runner = ScriptedRunner(_results(), hooks={QUALIFY.REJECTION_STEP: _interrupt})
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.INTERRUPTED_WITHOUT_LEDGER}$"
+        QUALIFY.QualificationError,
+        match=f"^{re.escape(QUALIFY.INTERRUPTED_WITHOUT_LEDGER)}$",
     ):
         _qualification(inputs, runner, FakeProvider()).plan()
 
@@ -1221,30 +1350,25 @@ def test_bound_status_tokens_drive_every_comparison(
     :param monkeypatch: Serves a fake installed status module and mirror outcomes.
     :returns: None; assertions verify the fake tokens pass and the real ones stop.
     """
-    loader = QUALIFY._installed_module
-    fakes = {
-        QUALIFY.STATUS_MODULE: SimpleNamespace(
-            PASS=FAKE_PASS,
-            PLANNED=FAKE_PLANNED,
-            BLOCKED=FAKE_BLOCKED,
-            exit_code=_fake_exit_code,
-        ),
-        QUALIFY.MIRROR_CONSTANTS_MODULE: SimpleNamespace(
-            Outcome=SimpleNamespace(APPLIED=FAKE_APPLIED, NO_OP=FAKE_NO_OP)
-        ),
-    }
-    monkeypatch.setattr(sys, "path", list(sys.path))
-    monkeypatch.setattr(
-        QUALIFY,
-        "_installed_module",
-        lambda skill, name: fakes[name] if name in fakes else loader(skill, name),
+    _serve(
+        monkeypatch,
+        {
+            QUALIFY.STATUS_MODULE: SimpleNamespace(
+                PASS=FAKE_PASS,
+                PLANNED=FAKE_PLANNED,
+                BLOCKED=FAKE_BLOCKED,
+                exit_code=_fake_exit_code,
+            ),
+            QUALIFY.MIRROR_CONSTANTS_MODULE: _replaced(
+                MIRROR_CONSTANTS,
+                Outcome=SimpleNamespace(APPLIED=FAKE_APPLIED, NO_OP=FAKE_NO_OP),
+            ),
+        },
     )
     tokens = QUALIFY.installed_bindings(SKILL_ROOT).status
+    reason = f"{QUALIFY.LIVE_PLAN_STEP}_unexpected:{EXIT_OK}:{STATUS.planned}"
 
-    with pytest.raises(
-        QUALIFY.QualificationError,
-        match=f"^{QUALIFY.LIVE_PLAN_STEP}_unexpected:{EXIT_OK}:{STATUS.planned}$",
-    ):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(
             inputs, ScriptedRunner(_results()), FakeProvider(), tokens
         ).plan()
@@ -1252,9 +1376,118 @@ def test_bound_status_tokens_drive_every_comparison(
         inputs, ScriptedRunner(_results(tokens=tokens)), FakeProvider(), tokens
     ).run()
 
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.STATUS_FIELD] == FAKE_PASS
+
+
+def test_bound_fields_drive_every_read_of_a_run(
+    inputs: object, fake_fields: object
+) -> None:
+    """Read the command result and receipt with the installed copy's keys.
+
+    :param inputs: Synthetic fixture inputs.
+    :param fake_fields: Keys bound from renamed installed enumerations.
+    :returns: None; assertions verify the renamed keys pass, the lib's stop, and
+        the cleanup record keeps this tool's own keys.
+    """
+    reason = f"{QUALIFY.LIVE_PLAN_STEP}_unexpected:{EXIT_OK}:None"
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
+        _qualification(
+            inputs, ScriptedRunner(_results()), FakeProvider(), fields=fake_fields
+        ).plan()
+    provider = FakeProvider(fields=fake_fields)
+
+    ledger = _qualification(
+        inputs,
+        ScriptedRunner(_results(fields=fake_fields)),
+        provider,
+        fields=fake_fields,
+    ).run()
+
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
+    record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
+    assert record[QUALIFY.BEFORE_FIELD] == {
+        QUALIFY.SOURCE_FIELD: _source(fake_fields),
+        QUALIFY.DESTINATION_FIELD: _destination(fake_fields),
+        QUALIFY.MIRROR_ID_FIELD: MIRROR_ID,
+    }
+    assert record[QUALIFY.EXECUTION_HOST_FIELD] == EXECUTION_HOST
+    assert record[QUALIFY.SKILL_DIGEST_FIELD] == SKILL_DIGEST
+    assert record[QUALIFY.TESTED_REVISION_FIELD] == CANDIDATE
+
+
+def test_bound_fields_drive_every_read_of_a_reconcile(
+    inputs: object, fake_fields: object
+) -> None:
+    """Reconcile a ledger and receipts written with the installed copy's keys.
+
+    The run stops at the NO_OP receipt of another candidate, before any deletion;
+    reconcile then binds the record to the ledger's candidate.
+
+    :param inputs: Synthetic fixture inputs.
+    :param fake_fields: Keys bound from renamed installed enumerations.
+    :returns: None; assertions verify both deletions and the record identity.
+    """
+    results = _results(fields=fake_fields)
+    code, noop = results[QUALIFY.NOOP_STEP]
+    results[QUALIFY.NOOP_STEP] = (
+        code,
+        {**noop, fake_fields.tested_revision: OTHER_CANDIDATE},
+    )
+    with pytest.raises(
+        QUALIFY.QualificationError, match="^receipt_candidate_mismatch$"
+    ):
+        _qualification(
+            inputs,
+            ScriptedRunner(results),
+            FakeProvider(fields=fake_fields),
+            fields=fake_fields,
+        ).run()
+    provider = FakeProvider(fields=fake_fields)
+
+    ledger = _qualification(
+        inputs, ScriptedRunner(results), provider, fields=fake_fields
+    ).reconcile()
+
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
+    record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
+    assert record[QUALIFY.TESTED_REVISION_FIELD] == CANDIDATE
+    assert record[QUALIFY.EXECUTION_HOST_FIELD] == EXECUTION_HOST
+    assert record[QUALIFY.SKILL_DIGEST_FIELD] == SKILL_DIGEST
+
+
+def test_bound_fields_name_the_manual_read_back(
+    inputs: object, fake_fields: object
+) -> None:
+    """Name the recorded host and path read with the installed copy's keys.
+
+    :param inputs: Synthetic fixture inputs.
+    :param fake_fields: Keys bound from renamed installed enumerations.
+    :returns: None; assertions verify the reason and no provider was bound.
+    """
+    results = _results(
+        {QUALIFY.APPLIED_STEP: (EXIT_STOP, {fake_fields.status: STATUS.blocked})},
+        fields=fake_fields,
+    )
+    with pytest.raises(QUALIFY.QualificationError):
+        _qualification(
+            inputs,
+            ScriptedRunner(results),
+            FakeProvider(fields=fake_fields),
+            fields=fake_fields,
+        ).run()
+    provider = FakeProvider(fields=fake_fields)
+
+    with pytest.raises(QUALIFY.QualificationError) as raised:
+        _qualification(
+            inputs, ScriptedRunner(results), provider, fields=fake_fields
+        ).reconcile()
+
+    assert str(raised.value) == _manual_read_back()
+    assert provider.labels == []
 
 
 def test_receipt_from_another_candidate_is_rejected(inputs: object) -> None:
@@ -1265,7 +1498,10 @@ def test_receipt_from_another_candidate_is_rejected(inputs: object) -> None:
     """
     results = _results()
     code, noop = results[QUALIFY.NOOP_STEP]
-    results[QUALIFY.NOOP_STEP] = (code, {**noop, "tested_revision": "d" * 40})
+    results[QUALIFY.NOOP_STEP] = (
+        code,
+        {**noop, FIELDS.tested_revision: OTHER_CANDIDATE},
+    )
     provider = FakeProvider()
 
     with pytest.raises(QUALIFY.QualificationError, match="receipt_candidate_mismatch"):
@@ -1298,7 +1534,7 @@ def test_command_selection_carries_the_gitlab_selector(inputs: object) -> None:
     assert inputs.command_selection()[:5] == (
         "sync",
         "--project",
-        str(SOURCE["path"]),
+        SOURCE_PATH,
         "--destination",
         DESTINATION_PATH,
     )
@@ -1329,7 +1565,7 @@ def test_reconcile_without_a_ledger_is_blocked(inputs: object) -> None:
     provider = FakeProvider()
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.NOTHING_TO_RECONCILE}$"
+        QUALIFY.QualificationError, match=f"^{re.escape(QUALIFY.NOTHING_TO_RECONCILE)}$"
     ):
         _qualification(inputs, ScriptedRunner(_results()), provider).reconcile()
 
@@ -1347,7 +1583,7 @@ def test_reconcile_of_a_completed_ledger_is_blocked(inputs: object) -> None:
     reconciler = FakeProvider()
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.NOTHING_TO_RECONCILE}$"
+        QUALIFY.QualificationError, match=f"^{re.escape(QUALIFY.NOTHING_TO_RECONCILE)}$"
     ):
         _qualification(inputs, ScriptedRunner(_results()), reconciler).reconcile()
 
@@ -1372,14 +1608,14 @@ def test_reconcile_removes_the_recorded_ids_after_a_failed_cleanup(
     assert runner.calls == []
     assert provider.labels == [QUALIFY.RECONCILE_PLAN_STEP]
     assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
-    assert ledger["reconciled"] is True
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.RECONCILED_FIELD] is True
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.RECONCILED_FIELD] is True
     assert record[QUALIFY.TESTED_REVISION_FIELD] == CANDIDATE
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
     }
     assert record[QUALIFY.REPEAT_FIELD][QUALIFY.MUTATED_FIELD] is False
 
@@ -1395,7 +1631,7 @@ def test_reconcile_deletes_only_the_objects_the_run_created(inputs: object) -> N
         FakeProvider(),
         {
             QUALIFY.APPLIED_STEP: _applied(
-                _created(created={"mirror": True, "repository": False})
+                _created({FIELDS.created: _owned(True, False)})
             )
         },
     )
@@ -1407,7 +1643,7 @@ def test_reconcile_deletes_only_the_objects_the_run_created(inputs: object) -> N
     assert provider.destination_present is True
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
         QUALIFY.DESTINATION_HTTP_STATUS_FIELD: None,
     }
     assert record[QUALIFY.AFTER_FIELD][QUALIFY.DESTINATION_HTTP_STATUS_FIELD] is None
@@ -1428,11 +1664,11 @@ def test_reconcile_does_not_delete_objects_already_absent(inputs: object) -> Non
     ledger = _qualification(inputs, ScriptedRunner(_results()), provider).reconcile()
 
     assert provider.deletes == []
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 404,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 404,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NOT_FOUND,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NOT_FOUND,
     }
 
 
@@ -1444,9 +1680,9 @@ def _manual_read_back() -> str:
     return QUALIFY.MANUAL_READ_BACK.format(
         reason=QUALIFY.LEDGER_IDS_MISSING,
         destination=QUALIFY.EVIDENCE_LOCATION.format(
-            host=DESTINATION["host"], path=DESTINATION_PATH
+            host=DESTINATION_HOST, path=DESTINATION_PATH
         ),
-        source=QUALIFY.EVIDENCE_LOCATION.format(host=SOURCE_HOST, path=SOURCE["path"]),
+        source=QUALIFY.EVIDENCE_LOCATION.format(host=SOURCE_HOST, path=SOURCE_PATH),
     )
 
 
@@ -1462,7 +1698,7 @@ def test_reconcile_without_recorded_ids_is_blocked(inputs: object) -> None:
         {
             QUALIFY.APPLIED_STEP: (
                 EXIT_STOP,
-                {"status": STATUS.blocked},
+                {FIELDS.status: STATUS.blocked},
             )
         },
     )
@@ -1474,7 +1710,7 @@ def test_reconcile_without_recorded_ids_is_blocked(inputs: object) -> None:
     assert str(raised.value) == _manual_read_back()
     assert provider.labels == []
     assert provider.deletes == []
-    assert _ledger(inputs)["cleanup"] == QUALIFY.APPLY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
 
 
 def test_reconcile_record_is_written_only_to_the_cleanup_file(inputs: object) -> None:
@@ -1518,7 +1754,9 @@ def test_reconcile_record_is_written_only_to_the_cleanup_file(inputs: object) ->
         ),
         (
             lambda provider: setattr(
-                provider, "destination_override", {**DESTINATION, "id": 9002}
+                provider,
+                "destination_override",
+                {**DESTINATION, FIELDS.id: OTHER_REPOSITORY_ID},
             ),
             None,
             QUALIFY.DESTINATION_IDENTITY_CHANGED,
@@ -1571,11 +1809,11 @@ def test_reconcile_stops_when_ownership_is_unproven(
         change(provider)
     selected = dataclasses.replace(inputs, **(inputs_change or {}))
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(selected, ScriptedRunner(_results()), provider).reconcile()
 
     assert provider.deletes == deletes
-    assert _ledger(inputs)["cleanup"] != QUALIFY.CLEANUP_PASS
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] != QUALIFY.CLEANUP_PASS
 
 
 def _completed(
@@ -1692,7 +1930,7 @@ def test_installed_command_failures_become_stopping_reasons(
     :param reason: Exact stopping reason.
     :returns: None; assertions verify the reason.
     """
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.InstalledMirrorCommand(inputs, execute).run(
             QUALIFY.LIVE_PLAN_STEP, [QUALIFY.LIVE_PLAN_OPTION]
         )
@@ -1753,6 +1991,7 @@ class FakeApi:
         self.responses = responses or {}
         self.error = error
         self.calls: MutableSequence[tuple[str, str]] = []
+        self.on_delete: Optional[Callable[[], None]] = None
 
     def get_json(self, session: object, endpoint: str) -> object:
         """Record a GET and answer it.
@@ -1768,7 +2007,7 @@ class FakeApi:
         return self.responses[endpoint]
 
     def request_no_content(self, session: object, method: str, endpoint: str) -> None:
-        """Record a no-content request.
+        """Record a no-content request; a DELETE then runs ``on_delete``, if set.
 
         :param session: Provider session.
         :param method: HTTP method.
@@ -1778,6 +2017,8 @@ class FakeApi:
         self.calls.append((str(method), endpoint))
         if self.error is not None:
             raise self.error
+        if method == HTTPMethod.DELETE and self.on_delete is not None:
+            self.on_delete()
 
 
 class FakeGitHubSession:
@@ -1888,7 +2129,7 @@ class FakeRepositoryService:
         return SimpleNamespace(
             id=self.repository_id,
             clone_url=CLONE_URL,
-            evidence=lambda: {**DESTINATION, "id": self.repository_id},
+            evidence=lambda: {**DESTINATION, FIELDS.id: self.repository_id},
         )
 
 
@@ -1930,7 +2171,9 @@ def test_installed_bindings_read_the_installed_lib(bindings: object) -> None:
     assert bindings.repository_endpoint == REPOSITORY.REPOSITORY_ENDPOINT
     assert bindings.repository_not_found == REPOSITORY.NOT_FOUND
     assert bindings.path_separator == REPOSITORY.PATH_SEPARATOR
+    assert bindings.repository_url_key is REMOTE.repository_url_key
     assert bindings.status == STATUS
+    assert bindings.fields == FIELDS
 
 
 def test_installed_bindings_refuse_a_lib_from_another_directory(
@@ -1943,11 +2186,9 @@ def test_installed_bindings_refuse_a_lib_from_another_directory(
     :returns: None; assertions verify the reason.
     """
     monkeypatch.setattr(sys, "path", list(sys.path))
+    reason = QUALIFY.INSTALLED_LIB_SHADOWED.format(name=QUALIFY.CATALOG_MODULE)
 
-    with pytest.raises(
-        QUALIFY.QualificationError,
-        match=f"^installed_lib_shadowed:{QUALIFY.CATALOG_MODULE}$",
-    ):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.installed_bindings(tmp_path)
 
 
@@ -1964,12 +2205,45 @@ def test_installed_bindings_refuse_a_lib_without_a_bound_name(
     monkeypatch.setattr(
         QUALIFY, "_installed_module", lambda skill, name: SimpleNamespace()
     )
+    # Attribute name that installed_bindings reads first from installed catalog.
+    reason = QUALIFY.INSTALLED_LIB_INCOMPATIBLE.format(name="GITLAB_TARGET_OPTION")
 
-    with pytest.raises(
-        QUALIFY.QualificationError,
-        match="^installed_lib_incompatible:GITLAB_TARGET_OPTION$",
-    ):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.installed_bindings(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("module", "name"),
+    (
+        (QUALIFY.REMOTE_MODULE, REMOTE.repository_url_key.__name__),
+        # Attribute name that InstalledFields.bind reads from installed provenance.
+        (QUALIFY.PROVENANCE_MODULE, "DIGEST_VALUE_KEY"),
+    ),
+    ids=("remote-without-repository-url-key", "provenance-without-digest-key"),
+)
+def test_installed_bindings_refuse_an_older_lib_without_a_newer_name(
+    monkeypatch: pytest.MonkeyPatch, module: str, name: str
+) -> None:
+    """Stop with the missing name when the installed module predates that name.
+
+    :param monkeypatch: Serves the installed module without ``name``.
+    :param module: Dotted installed module name.
+    :param name: Name ``installed_bindings`` binds from ``module``.
+    :returns: None; assertions verify the reason.
+    """
+    installed = vars(import_script_module(module))
+    _serve(
+        monkeypatch,
+        {
+            module: SimpleNamespace(
+                **{key: value for key, value in installed.items() if key != name}
+            )
+        },
+    )
+    reason = QUALIFY.INSTALLED_LIB_INCOMPATIBLE.format(name=name)
+
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
+        QUALIFY.installed_bindings(SKILL_ROOT)
 
 
 def test_native_provider_reads_through_the_installed_routes(
@@ -1984,7 +2258,7 @@ def test_native_provider_reads_through_the_installed_routes(
     ref_route = QUALIFY.REF_ENDPOINT.format(
         project=SOURCE_ID, kind=BRANCHES, name="release%2F1.0"
     )
-    api = FakeApi({ref_route: {"commit": {"id": SEED}}})
+    api = FakeApi({ref_route: {QUALIFY.REF_COMMIT_KEY: {QUALIFY.COMMIT_ID_KEY: SEED}}})
     session = FakeGitHubSession(FakeApi())
     provider = _native(
         inputs,
@@ -2016,6 +2290,205 @@ def test_native_provider_reads_through_the_installed_routes(
     assert absent.destination_id_present(REPOSITORY_ID) is False
 
 
+@pytest.mark.parametrize(
+    "mirror_url",
+    (MIRROR_URL_WITHOUT_SUFFIX, MIRROR_URL_WITH_SLASH),
+    ids=("without-git-suffix", "trailing-slash"),
+)
+def test_native_provider_matches_the_mirror_url_by_the_installed_key(
+    inputs: object, bindings: object, mirror_url: str
+) -> None:
+    """Match a mirror URL that differs from the clone URL only in its URL key.
+
+    GitLab can report ``https://host/o/r`` or ``https://host/o/r.git/`` for a
+    mirror created with the clone URL ``https://host/o/r.git``. A replaced
+    ``repository_url_key`` that keeps the URL unchanged stops the match, so the
+    provider compares with the bound key and not with its own normalization.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :param mirror_url: URL GitLab reports for the mirror.
+    :returns: None; assertions verify the match with the installed key and the
+        mismatch with a key that keeps the URL unchanged.
+    """
+    source = FakeMirrorSource(FakeApi(), mirror_url=mirror_url)
+    matched = _native(inputs, bindings, source)
+    kept = _native(
+        inputs, dataclasses.replace(bindings, repository_url_key=str), source
+    )
+
+    assert matched.mirror_targets(MIRROR_ID, DESTINATION_PATH) is True
+    assert kept.mirror_targets(MIRROR_ID, DESTINATION_PATH) is False
+
+
+def test_native_provider_stops_on_a_malformed_mirror_url(
+    inputs: object, bindings: object
+) -> None:
+    """Stop with a named reason when the installed URL key rejects the mirror URL.
+
+    ``mirror_targets`` converts the ``ValueError`` of ``repository_url_key`` into
+    ``QualificationError``, which ``qualify_mirror.main`` reports as BLOCKED.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :returns: None; assertions verify the reason and the original ``ValueError``.
+    """
+    provider = _native(
+        inputs, bindings, FakeMirrorSource(FakeApi(), mirror_url=MALFORMED_MIRROR_URL)
+    )
+
+    with pytest.raises(
+        QUALIFY.QualificationError,
+        match=f"^{re.escape(QUALIFY.REPOSITORY_URL_MALFORMED)}$",
+    ) as stopped:
+        provider.mirror_targets(MIRROR_ID, DESTINATION_PATH)
+
+    assert isinstance(stopped.value.__cause__, ValueError)
+
+
+def _ref_responses() -> dict[str, object]:
+    """Build the GitLab ref responses of every seed ref.
+
+    :returns: ``REF_ENDPOINT`` response per seed ref, holding its input commit.
+    """
+    return {
+        QUALIFY.REF_ENDPOINT.format(
+            project=SOURCE_ID, kind=ref.kind, name=quote(ref.name, safe="")
+        ): {QUALIFY.REF_COMMIT_KEY: {QUALIFY.COMMIT_ID_KEY: ref.commit}}
+        for ref in (MAIN_REF, TAG_REF)
+    }
+
+
+class NativeServices:
+    """Hold fake installed services whose DELETE removes the deleted object.
+
+    Calling the instance is the provider factory: it records the label and returns
+    a ``NativeMirrorProvider`` over the same services.
+    """
+
+    def __init__(self, inputs: object, bindings: object, mirror_url: str) -> None:
+        """Start with the mirror and the destination present.
+
+        :param inputs: Synthetic fixture inputs.
+        :param bindings: Installed names; ``create_guard`` is replaced.
+        :param mirror_url: URL GitLab reports for the mirror.
+        """
+        self.inputs = inputs
+        self.bindings = dataclasses.replace(bindings, create_guard=FakeGuard())
+        self.gitlab = FakeApi(_ref_responses())
+        self.github = FakeApi()
+        self.source = FakeMirrorSource(self.gitlab, mirror_url=mirror_url)
+        self.session = FakeGitHubSession(self.github)
+        self.destination = FakeRepositoryService(self.session)
+        self.gitlab.on_delete = self._remove_mirror
+        self.github.on_delete = self._remove_destination
+        self.labels: MutableSequence[str] = []
+
+    def __call__(self, label: str) -> object:
+        """Record the factory label and build a provider over these services.
+
+        :param label: Output file stem of the provider's live plan.
+        :returns: Native provider.
+        """
+        self.labels.append(label)
+        return _native(self.inputs, self.bindings, self.source, self.destination)
+
+    def _remove_mirror(self) -> None:
+        """Make the next mirror read return provider not-found."""
+        self.source.mirror_url = None
+
+    def _remove_destination(self) -> None:
+        """Make the next path and ID reads find no repository."""
+        self.destination.repository_id = None
+        self.session.present = False
+
+    @property
+    def deletes(self) -> tuple[tuple[str, str], ...]:
+        """List the GitLab, then the GitHub, DELETE requests.
+
+        :returns: Method and route of every DELETE.
+        """
+        return tuple(
+            call
+            for call in (*self.gitlab.calls, *self.github.calls)
+            if call[0] == HTTPMethod.DELETE
+        )
+
+
+# The mirror delete by native ID, then the destination delete by path.
+NATIVE_DELETES: Final[tuple[tuple[str, str], ...]] = (
+    (
+        HTTPMethod.DELETE,
+        MIRROR_PROVIDER.MIRROR_ENDPOINT.format(project=SOURCE_ID, mirror=MIRROR_ID),
+    ),
+    (
+        HTTPMethod.DELETE,
+        REPOSITORY.REPOSITORY_ENDPOINT.format(reference=DESTINATION_PATH),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "mirror_url",
+    (MIRROR_URL_WITHOUT_SUFFIX, MIRROR_URL_WITH_SLASH),
+    ids=("without-git-suffix", "trailing-slash"),
+)
+def test_run_cleanup_completes_when_gitlab_reports_another_url_form(
+    inputs: object, bindings: object, mirror_url: str
+) -> None:
+    """Remove both objects when the mirror URL lacks ``.git`` or ends in ``/``.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :param mirror_url: URL GitLab reports for the run-created mirror.
+    :returns: None; assertions verify the ledger, both deletes and the record.
+    """
+    services = NativeServices(inputs, bindings, mirror_url)
+
+    ledger = _qualification(inputs, ScriptedRunner(_results()), services).run()
+
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert services.labels == [QUALIFY.BASELINE_PLAN_STEP, QUALIFY.CLEANUP_PLAN_STEP]
+    assert services.deletes == NATIVE_DELETES
+    record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
+    assert record[QUALIFY.DELETE_FIELD] == {
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+    }
+
+
+@pytest.mark.parametrize(
+    "mirror_url",
+    (MIRROR_URL_WITHOUT_SUFFIX, MIRROR_URL_WITH_SLASH),
+    ids=("without-git-suffix", "trailing-slash"),
+)
+def test_reconcile_completes_when_gitlab_reports_another_url_form(
+    inputs: object, bindings: object, mirror_url: str
+) -> None:
+    """Finish a pending cleanup when the mirror URL lacks ``.git`` or ends in ``/``.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :param mirror_url: URL GitLab reports for the run-created mirror.
+    :returns: None; assertions verify the ledger, both deletes and the record.
+    """
+    _failed_run(inputs, lambda provider: setattr(provider, "keep_mirror", True))
+    services = NativeServices(inputs, bindings, mirror_url)
+
+    ledger = _qualification(inputs, ScriptedRunner(_results()), services).reconcile()
+
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.RECONCILED_FIELD] is True
+    assert services.labels == [QUALIFY.RECONCILE_PLAN_STEP]
+    assert services.deletes == NATIVE_DELETES
+    record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
+    assert record[QUALIFY.RECONCILED_FIELD] is True
+    assert record[QUALIFY.DELETE_FIELD] == {
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NO_CONTENT,
+    }
+
+
 def test_native_provider_deletes_the_mirror_inside_the_installed_guard(
     inputs: object, bindings: object
 ) -> None:
@@ -2033,7 +2506,7 @@ def test_native_provider_deletes_the_mirror_inside_the_installed_guard(
 
     status = provider.delete_mirror(MIRROR_ID, DESTINATION_PATH)
 
-    assert status == 204
+    assert status == HTTPStatus.NO_CONTENT
     assert guard.args == (
         SOURCE_HOST,
         MIRROR_PROVIDER.PROJECT_SCOPE,
@@ -2068,7 +2541,8 @@ def test_native_provider_keeps_a_mirror_that_targets_another_repository(
     )
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.MIRROR_IDENTITY_CHANGED}$"
+        QUALIFY.QualificationError,
+        match=f"^{re.escape(QUALIFY.MIRROR_IDENTITY_CHANGED)}$",
     ):
         provider.delete_mirror(MIRROR_ID, DESTINATION_PATH)
 
@@ -2094,7 +2568,7 @@ def test_native_provider_deletes_the_destination_after_an_id_match(
 
     status = provider.delete_destination(DESTINATION_PATH, REPOSITORY_ID)
 
-    assert status == 204
+    assert status == HTTPStatus.NO_CONTENT
     assert api.calls == [
         ("DELETE", REPOSITORY.REPOSITORY_ENDPOINT.format(reference=DESTINATION_PATH))
     ]
@@ -2120,7 +2594,7 @@ def test_native_provider_keeps_a_destination_with_another_id(
 
     with pytest.raises(
         QUALIFY.QualificationError,
-        match=f"^{QUALIFY.DESTINATION_IDENTITY_CHANGED}$",
+        match=f"^{re.escape(QUALIFY.DESTINATION_IDENTITY_CHANGED)}$",
     ):
         provider.delete_destination(DESTINATION_PATH, REPOSITORY_ID)
 
@@ -2247,8 +2721,10 @@ def test_native_provider_converts_a_pending_guard(
 
     with pytest.raises(
         QUALIFY.QualificationError,
-        match=QUALIFY.PROVIDER_FAILURE.format(
-            step=QUALIFY.MIRROR_DELETE, reason=PROVIDER_REASON
+        match=re.escape(
+            QUALIFY.PROVIDER_FAILURE.format(
+                step=QUALIFY.MIRROR_DELETE, reason=PROVIDER_REASON
+            )
         ),
     ):
         provider.delete_mirror(MIRROR_ID, DESTINATION_PATH)
@@ -2369,7 +2845,7 @@ def test_native_provider_bind_stops_when_the_live_plan_fails(
         bindings, mirror_parser=FakeParser, mirror_command=command
     )
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.NativeMirrorProvider.bind(inputs, selected, QUALIFY.BASELINE_PLAN_STEP)
 
 
@@ -2458,8 +2934,8 @@ def test_main_prints_the_ledger_and_exits_zero_after_pass(
 
     output = _output(capsys)
     assert code == EXIT_OK
-    assert output["status"] == STATUS.passed
-    assert output["ledger"]["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert output[QUALIFY.STATUS_FIELD] == STATUS.passed
+    assert output[CLI.LEDGER_FIELD][QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
 
 
@@ -2495,8 +2971,8 @@ def test_main_dry_run_is_the_default_and_writes_no_ledger(
 
     output = _output(capsys)
     assert code == EXIT_OK
-    assert output["status"] == STATUS.planned
-    assert output["plan"]["plan_digest"] == PLAN_DIGEST
+    assert output[QUALIFY.STATUS_FIELD] == STATUS.planned
+    assert output[CLI.PLAN_FIELD][QUALIFY.LEDGER_PLAN_DIGEST_FIELD] == PLAN_DIGEST
     assert runner.labels == [QUALIFY.LIVE_PLAN_STEP, QUALIFY.REJECTION_STEP]
     assert provider.deletes == []
     assert not (inputs.work_dir / QUALIFY.ALLOCATION_FILE).exists()
@@ -2559,10 +3035,10 @@ def test_main_sigterm_during_apply_exits_two_and_names_reconcile(
 
     assert code == EXIT_STOP
     assert _output(capsys) == {
-        "status": STATUS.blocked,
-        "reason": _interrupted(QUALIFY.APPLY_PENDING),
+        QUALIFY.STATUS_FIELD: STATUS.blocked,
+        CLI.REASON_FIELD: _interrupted(QUALIFY.APPLY_PENDING),
     }
-    assert _ledger(inputs)["cleanup"] == QUALIFY.APPLY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
     assert provider.deletes == []
     assert signal.getsignal(signal.SIGTERM) == previous
 
@@ -2646,7 +3122,7 @@ def _failing_provider(selected: object, bound: object, label: str) -> object:
     ("results", "runner", "provider", "reason"),
     (
         (
-            {QUALIFY.LIVE_PLAN_STEP: (0, _planned({"destination": DESTINATION}))},
+            {QUALIFY.LIVE_PLAN_STEP: (0, _planned({FIELDS.destination: DESTINATION}))},
             None,
             None,
             "destination_present",
@@ -2696,7 +3172,10 @@ def test_main_prints_the_reason_and_exits_two_when_blocked(
     code = CLI.main(_argv(inputs, CLI.APPLY_MODE_OPTION))
 
     assert code == EXIT_STOP
-    assert _output(capsys) == {"status": STATUS.blocked, "reason": reason}
+    assert _output(capsys) == {
+        QUALIFY.STATUS_FIELD: STATUS.blocked,
+        CLI.REASON_FIELD: reason,
+    }
     assert fake.deletes == []
 
 
@@ -2731,8 +3210,8 @@ def test_main_reconcile_without_a_ledger_exits_two(
 
     assert code == EXIT_STOP
     assert _output(capsys) == {
-        "status": STATUS.blocked,
-        "reason": QUALIFY.NOTHING_TO_RECONCILE,
+        QUALIFY.STATUS_FIELD: STATUS.blocked,
+        CLI.REASON_FIELD: QUALIFY.NOTHING_TO_RECONCILE,
     }
     assert not missing.exists()
 
@@ -2742,13 +3221,17 @@ def test_main_reports_an_unavailable_installed_copy(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Exit 2 when the installed ``lib`` cannot be bound.
+    """Report BLOCKED from the repository's status module when ``lib`` cannot be bound.
+
+    The first run reads ``ci-skills/lib/python/sys/status.py`` by path; the second
+    replaces that module and the output follows it.
 
     :param inputs: Synthetic fixture inputs.
     :param monkeypatch: Replaces the adapter's bound names.
     :param capsys: Captured output.
-    :returns: None; assertions verify exit code and output.
+    :returns: None; assertions verify exit code and output against each module.
     """
+    reason = QUALIFY.INSTALLED_LIB_UNAVAILABLE.format(name=QUALIFY.CATALOG_MODULE)
 
     def unavailable(skill: Path) -> NoReturn:
         """Fail like a missing installed module.
@@ -2756,18 +3239,29 @@ def test_main_reports_an_unavailable_installed_copy(
         :param skill: Installed directory.
         :raises QUALIFY.QualificationError: Always.
         """
-        raise QUALIFY.QualificationError(
-            f"installed_lib_unavailable:{QUALIFY.CATALOG_MODULE}"
-        )
+        raise QUALIFY.QualificationError(reason)
 
     monkeypatch.setattr(CLI, "installed_bindings", unavailable)
 
     code = CLI.main(_argv(inputs))
 
-    assert code == CLI.PRE_BINDING_EXIT
+    assert code == SYS_STATUS.exit_code(SYS_STATUS.BLOCKED)
     assert _output(capsys) == {
-        "status": CLI.PRE_BINDING_BLOCKED,
-        "reason": f"installed_lib_unavailable:{QUALIFY.CATALOG_MODULE}",
+        QUALIFY.STATUS_FIELD: SYS_STATUS.BLOCKED,
+        CLI.REASON_FIELD: reason,
+    }
+    monkeypatch.setattr(
+        CLI,
+        "repository_status",
+        lambda: SimpleNamespace(BLOCKED=FAKE_BLOCKED, exit_code=_fake_exit_code),
+    )
+
+    code = CLI.main(_argv(inputs))
+
+    assert code == FAKE_EXIT_STOP
+    assert _output(capsys) == {
+        QUALIFY.STATUS_FIELD: FAKE_BLOCKED,
+        CLI.REASON_FIELD: reason,
     }
 
 

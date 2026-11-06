@@ -30,6 +30,7 @@ from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
 CATALOG = import_script_module("lib.python.core.catalog")
 CLI = import_script_module("lib.python.core.cli")
 PROJECT_BINDING = import_script_module("lib.python.core.project_binding")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
 PYTHON_COMMANDS = tuple(
@@ -327,8 +328,8 @@ def test_node_local_commands_publish_their_distinct_interface(script: Path) -> N
 
     assert actual == declared
     assert "--target" not in actual
-    assert contract["requires_authorities"] == ["kubernetes"]
-    assert set(contract["access_protocol"]) == {"kubernetes"}
+    assert contract["requires_authorities"] == [ENDPOINTS.KUBERNETES_AUTHORITY]
+    assert set(contract["access_protocol"]) == {ENDPOINTS.KUBERNETES_AUTHORITY}
     assert contract["execution_surface"] == (
         "Kubernetes API and one existing Pod on the selected node"
     )
@@ -361,11 +362,14 @@ def test_the_kubernetes_chain_declares_ambient_fallback_after_selected_sources()
     """The published order matches the effective kubeconfig source binder.
     :returns: None; assertions in the body validate the regression.
     """
-    chain = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["kubernetes"]]
+    chain = [
+        step["source"]
+        for step in CATALOG.ACCESS_PROTOCOL[ENDPOINTS.KUBERNETES_AUTHORITY]
+    ]
 
-    assert chain[0] == "target:kubernetes.kubeconfigs"
-    assert "target:kubernetes.kubeconfig" in chain
-    assert "binding:kubernetes.sources" in chain
+    assert chain[0] == f"target:{ENDPOINTS.KUBERNETES_AUTHORITY}.kubeconfigs"
+    assert f"target:{ENDPOINTS.KUBERNETES_AUTHORITY}.kubeconfig" in chain
+    assert f"binding:{ENDPOINTS.KUBERNETES_AUTHORITY}.sources" in chain
     assert chain[-2:] == ["env:KUBECONFIG", "kubectl-default:~/.kube/config"]
     assert "first match wins" in CATALOG.ACCESS_PROTOCOL["rule"]
 
@@ -428,7 +432,8 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(
     target = target_mod.load_target(target_file)  # host: github.example.test
 
     declared = {
-        step["source"]: step["when"] for step in CATALOG.ACCESS_PROTOCOL["github"]
+        step["source"]: step["when"]
+        for step in CATALOG.ACCESS_PROTOCOL[ENDPOINTS.GITHUB_AUTHORITY]
     }
     enterprise = "env:" + " or ".join(CATALOG.GITHUB_ENTERPRISE_VARIABLES)
     dotcom = "env:" + " or ".join(CATALOG.GITHUB_CLOUD_VARIABLES)
@@ -450,7 +455,9 @@ def test_the_declared_gitlab_variables_are_the_ones_resolved() -> None:
     """
     credentials = import_script_module("lib.python.access.gitlab_credentials")
     access = import_script_module("lib.python.access.gitlab")
-    declared = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["gitlab"]]
+    declared = [
+        step["source"] for step in CATALOG.ACCESS_PROTOCOL[ENDPOINTS.GITLAB_AUTHORITY]
+    ]
 
     for name in CATALOG.GITLAB_VARIABLES:
         assert any(name in source for source in declared), name

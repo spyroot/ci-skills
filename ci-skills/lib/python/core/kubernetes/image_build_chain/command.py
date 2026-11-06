@@ -17,7 +17,7 @@ import argparse
 from collections.abc import MutableMapping, MutableSequence
 
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
-from lib.python.core.endpoints import ROUTING_RESULT_KEY
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY, ROUTING_RESULT_KEY
 from lib.python.core.gitlab.gitlab_actions import ActionError
 from lib.python.core.gitlab.gitlab_api import GitLabAPIError
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
@@ -58,7 +58,9 @@ class ImageBuildChain:
         target = getattr(self.action, "target", None)
         kubernetes = target.kubernetes if target is not None else None
         selected = (
-            f"{kubernetes.context}@{kubernetes.server}" if kubernetes else "kubernetes"
+            f"{kubernetes.context}@{kubernetes.server}"
+            if kubernetes
+            else KUBERNETES_AUTHORITY
         )
         output = report(PROBE_KIND, selected, {}, [], [])
         output["operation"] = CHAIN_OPERATION

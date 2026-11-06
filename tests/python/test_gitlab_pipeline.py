@@ -19,6 +19,7 @@ from conftest import import_script_module
 PIPELINES = import_script_module("lib.python.core.gitlab.gitlab_pipelines")
 GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 SCRIPT = import_script_module("gitlab_pipeline")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ def _target(tmp_path: Path) -> Path:
     """
     path = tmp_path / "target.toml"
     path.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
+        f'[{ENDPOINTS.GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
         encoding="utf-8",
     )
     return path

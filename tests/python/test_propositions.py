@@ -30,6 +30,7 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
 CATALOG = import_script_module("lib.python.core.catalog")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 PROPOSITION_SCHEMA = json.loads(
     (REPO_ROOT / "schemas" / "reference-next.schema.json").read_text(encoding="utf-8")
 )
@@ -185,9 +186,13 @@ def test_root_clusters_offer_every_manifest_command_by_declared_authority() -> N
     commands = _commands()
     provider_references = {
         "glab": ["access", "project binding", "mcp"],
-        "kubernetes": ["access", "project binding"],
-        "github": ["access", "project binding"],
-        "harbor": ["access", "project binding", "toolbox specification"],
+        ENDPOINTS.KUBERNETES_AUTHORITY: ["access", "project binding"],
+        ENDPOINTS.GITHUB_AUTHORITY: ["access", "project binding"],
+        ENDPOINTS.HARBOR_AUTHORITY: [
+            "access",
+            "project binding",
+            "toolbox specification",
+        ],
         "offline": [],
     }
 
@@ -273,14 +278,14 @@ def test_selected_clusters_keep_their_own_provider_references() -> None:
     """
     for cluster, unrelated in (
         ("glab", {"toolbox specification"}),
-        ("kubernetes", {"mcp", "toolbox specification"}),
-        ("github", {"mcp", "toolbox specification"}),
-        ("harbor", {"mcp"}),
+        (ENDPOINTS.KUBERNETES_AUTHORITY, {"mcp", "toolbox specification"}),
+        (ENDPOINTS.GITHUB_AUTHORITY, {"mcp", "toolbox specification"}),
+        (ENDPOINTS.HARBOR_AUTHORITY, {"mcp"}),
     ):
         selected = CATALOG.proposition(cluster)
         _validate(selected)
         assert unrelated.isdisjoint(_entries(selected)), cluster
-    for cluster in ("glab", "kubernetes", "harbor"):
+    for cluster in ("glab", ENDPOINTS.KUBERNETES_AUTHORITY, ENDPOINTS.HARBOR_AUTHORITY):
         assert "gitlab_runner_manager.py" in CATALOG.proposition(cluster)["tools"]
 
 
@@ -326,9 +331,11 @@ def test_tool_pod_proposition_offers_installed_usage() -> None:
     }
 
     assert _entries(selected)["Tool Pod preparation"] == expected
-    cluster = CATALOG.proposition("kubernetes")
+    cluster = CATALOG.proposition(ENDPOINTS.KUBERNETES_AUTHORITY)
     assert _entries(cluster)["Tool Pod preparation"] == expected
-    assert "Tool Pod preparation" not in _entries(CATALOG.proposition()["kubernetes"])
+    assert "Tool Pod preparation" not in _entries(
+        CATALOG.proposition()[ENDPOINTS.KUBERNETES_AUTHORITY]
+    )
     assert "create_selfhosted_runner.py" not in selected["tools"]
     unrelated = CATALOG.proposition("gitlab_runner.py")
     assert "Tool Pod preparation" not in _entries(unrelated)
@@ -352,14 +359,14 @@ def test_podman_proposition_offers_installed_readiness_procedure() -> None:
     }
 
     root = CATALOG.proposition()
-    cluster = CATALOG.proposition("kubernetes")
+    cluster = CATALOG.proposition(ENDPOINTS.KUBERNETES_AUTHORITY)
     unrelated = CATALOG.proposition("gitlab_runner.py")
     for payload in (root, selected, unrelated):
         _validate(payload)
     for name, record in expected.items():
         assert _entries(selected)[name] == {"name": name, **record}
         assert _entries(cluster)[name] == {"name": name, **record}
-        assert name not in _entries(root["kubernetes"])
+        assert name not in _entries(root[ENDPOINTS.KUBERNETES_AUTHORITY])
         assert name not in _entries(unrelated)
     assert "create_selfhosted_runner.py" not in selected["tools"]
 
@@ -382,14 +389,14 @@ def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
     }
 
     root = CATALOG.proposition()
-    cluster = CATALOG.proposition("kubernetes")
+    cluster = CATALOG.proposition(ENDPOINTS.KUBERNETES_AUTHORITY)
     unrelated = CATALOG.proposition("gitlab_runner.py")
     for payload in (root, selected, unrelated):
         _validate(payload)
     for name, reference in expected.items():
         assert _entries(selected)[name] == {"name": name, **reference}
         assert _entries(cluster)[name] == {"name": name, **reference}
-        assert name not in _entries(root["kubernetes"])
+        assert name not in _entries(root[ENDPOINTS.KUBERNETES_AUTHORITY])
         assert _registered_file(name).is_file()
         assert name not in _entries(unrelated)
     assert "toolbox.py" not in selected["tools"]
@@ -416,7 +423,7 @@ def test_toolbox_chain_nodes_offer_harbor_shapes_and_podman_in_pod() -> None:
     offering = [
         CATALOG.proposition(node)
         for node in (
-            "harbor",
+            ENDPOINTS.HARBOR_AUTHORITY,
             "toolbox.py",
             "harbor_push.py",
             "harbor_pull.py",
@@ -429,7 +436,7 @@ def test_toolbox_chain_nodes_offer_harbor_shapes_and_podman_in_pod() -> None:
         assert _registered_file(name).is_file()
         for selected in offering:
             assert _entries(selected)[name] == {"name": name, **record}
-        assert name not in _entries(root["harbor"])
+        assert name not in _entries(root[ENDPOINTS.HARBOR_AUTHORITY])
         assert name not in _entries(unrelated)
 
 

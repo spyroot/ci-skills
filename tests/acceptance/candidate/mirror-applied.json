@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-06T02:38:19.920772+00:00",
+  "captured_at": "2026-11-06T06:07:55.029448+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "1c89a62eddbad57824b77bbaf29eaa5ea725cb6edb53e3db86ab03589d83f309",
+  "plan_digest": "f58f7092c25bce40a3a6682cd3a04772b936450f170f08d7a45243ac01fc00fe",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1447750315,
+        "id": 1447896555,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 17,
+        "id": 18,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-06T02:38:17.278Z",
+        "last_successful_update_at": "2026-11-06T06:07:51.947Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "78c36437c79097aac06ab98ca5d7273b135b0d1ebe1c6aca36b7a0df22d90bd9",
+    "digest": "63bdb745176bdf3d27ba1d0a5be9765b2f21fbed2b5aa781e742930957434664",
     "file_count": 276,
-    "functional_digest": "571967ccd71c9738be7ead1ede49eadc6ecdb60bd71ddac92c01b3e5894ebf68",
+    "functional_digest": "5e988fb7fa7c79553667eb2b9dfba548ae7f14c58c19f3774cf09e58aab734e3",
     "revision": {
       "source": "installer_record",
-      "value": "931b18876fe927f771d8ebe6fafc760a8acfd57b",
+      "value": "fa7063c8185766a9d3de6f3d12b351738c22c9b9",
       "verified": true
     }
   },
@@ -108,5 +108,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "env:CI_SKILLS_TARGET",
-  "tested_revision": "931b18876fe927f771d8ebe6fafc760a8acfd57b"
+  "tested_revision": "fa7063c8185766a9d3de6f3d12b351738c22c9b9"
 }

@@ -10,6 +10,7 @@ from typing import Final
 
 from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.git.mirroring import MirrorPolicy
+from lib.python.core.provenance import FUNCTIONAL_DIGEST_KEY
 
 KIND: Final = "gitlab_mirror"
 COMMAND: Final = "gitlab_mirror.py"
@@ -70,7 +71,8 @@ class Field(StrEnum):
 
     .. attribute :: FUNCTIONAL_DIGEST
 
-        Native token ``functional_digest``.
+        Key of the skill functional digest; ``FUNCTIONAL_DIGEST_KEY`` of
+        ``core/provenance.py``.
 
     .. attribute :: CREDENTIAL_DIGEST
 
@@ -127,6 +129,12 @@ class Field(StrEnum):
     .. attribute :: REPLACEMENT_REQUIRED
 
         Whether confirmation permits replacing the selected failed mirror.
+
+    .. attribute :: CREATED_MIRROR_ID
+
+        Key of the mirror ID that the GitLab create call returned. The ID does not
+        prove that the mirror configuration or its synchronization passed
+        read-back.
 
     .. attribute :: REPLACED_MIRROR_ID
 
@@ -186,7 +194,7 @@ class Field(StrEnum):
 
     .. attribute :: ROUTING
 
-        Selected GitLab table and its paired tables.
+        Key of the result ``routing`` object.
 
     .. attribute :: REASON
 
@@ -204,7 +212,7 @@ class Field(StrEnum):
     DESTINATION_REFS = "destination_refs"
     MIRROR = "mirror"
     POLICY = "policy"
-    FUNCTIONAL_DIGEST = "functional_digest"
+    FUNCTIONAL_DIGEST = FUNCTIONAL_DIGEST_KEY
     CREDENTIAL_DIGEST = "credential_digest"
     COUNT = "count"
     SHA256 = "sha256"
@@ -219,6 +227,7 @@ class Field(StrEnum):
     CREATED = "created"
     REPOSITORY = "repository"
     REPLACEMENT_REQUIRED = "replacement_required"
+    CREATED_MIRROR_ID = "created_mirror_id"
     REPLACED_MIRROR_ID = "replaced_mirror_id"
     PLAN_DIGEST = "plan_digest"
     MUTATED = "mutated"

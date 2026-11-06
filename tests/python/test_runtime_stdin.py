@@ -20,6 +20,7 @@ from conftest import import_script_module
 RUNTIME = import_script_module("lib.python.core.runtime")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 TARGET = import_script_module("lib.python.core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 @pytest.fixture
@@ -209,7 +210,7 @@ def test_pod_exec_only_enables_interactive_input_for_supplied_bytes(
         kubernetes=TARGET.KubernetesTarget(
             "unit-context", "https://api.example.test:6443", None
         ),
-        active_surfaces=("kubernetes",),
+        active_surfaces=(ENDPOINTS.KUBERNETES_AUTHORITY,),
     )
     service = KUBERNETES.KubernetesService(target)
 

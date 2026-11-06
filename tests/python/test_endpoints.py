@@ -36,15 +36,20 @@ from conftest import (
     routing_table,
 )
 from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
     GITLAB_PRIVATE_TABLE,
     GITLAB_PUBLIC_TABLE,
     GITLAB_ROUTED_AUTHORITIES,
     GITLAB_ROUTING_TABLE,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
 )
 
 ENDPOINTS = import_script_module("lib.python.core.endpoints")
 CATALOG = import_script_module("lib.python.core.catalog")
 TARGET = import_script_module("lib.python.core.target")
+STATUS = import_script_module("lib.python.sys.status")
 GATE_LIB = load_module(
     "skillkit_endpoint_gate", REPO_ROOT / "tools" / "skillkit" / "endpoint_gate.py"
 )
@@ -75,7 +80,7 @@ ROUTED_EXAMPLE: Final[str] = render_target(
     }
 )
 PROFILE_EXAMPLE: Final[str] = (
-    '[gitlab."public.test"]\n'
+    f'[{GITLAB_AUTHORITY}."public.test"]\n'
     'url = "https://public.example.test"\n'
     'project = "consumer/public"\n'
     'token_file = "public.token"\n'
@@ -185,37 +190,37 @@ def test_the_contract_accepts_exactly_the_keys_the_parser_accepted() -> None:
     :returns: None; assertions in the body validate the regression.
     """
     contract = ENDPOINTS.TARGET_CONTRACT
-    assert contract.names("github") == {
+    assert contract.names(GITHUB_AUTHORITY) == {
         "host",
         "repository",
         "token_file",
         "required_checks",
     }
-    assert contract.names("gitlab") == {
+    assert contract.names(GITLAB_AUTHORITY) == {
         "url",
         "token_file",
         "project",
         "group",
         "runner_id",
     }
-    assert contract.names("kubernetes") == {
+    assert contract.names(KUBERNETES_AUTHORITY) == {
         "context",
         "server",
         "kubeconfig",
         "kubeconfigs",
         "node_diagnostics",
     }
-    assert contract.names("kubernetes.node_diagnostics") == {
+    assert contract.names(f"{KUBERNETES_AUTHORITY}.node_diagnostics") == {
         "node",
         "cilium",
         "journal",
     }
-    assert contract.names("kubernetes.node_diagnostics.cilium") == {
+    assert contract.names(f"{KUBERNETES_AUTHORITY}.node_diagnostics.cilium") == {
         "namespace",
         "selector",
         "container",
     }
-    assert contract.names("kubernetes.node_diagnostics.journal") == {
+    assert contract.names(f"{KUBERNETES_AUTHORITY}.node_diagnostics.journal") == {
         "namespace",
         "selector",
         "container",
@@ -238,8 +243,8 @@ def test_routed_example_passes_the_endpoint_gate(repo: Path) -> None:
 
     code, record = _gate(repo)
 
-    assert code == 0
-    assert record["status"] == "PASS", record["findings"]
+    assert code == GATE_LIB.ExitCode.PASS
+    assert record["status"] == STATUS.PASS, record["findings"]
 
 
 def test_the_authorities_come_from_the_contract() -> None:
@@ -247,7 +252,12 @@ def test_the_authorities_come_from_the_contract() -> None:
     :returns: None; assertions in the body validate the regression.
     """
     assert CATALOG.AUTHORITIES == ENDPOINTS.TARGET_CONTRACT.authorities
-    assert CATALOG.AUTHORITIES == ("github", "gitlab", "harbor", "kubernetes")
+    assert CATALOG.AUTHORITIES == (
+        GITHUB_AUTHORITY,
+        GITLAB_AUTHORITY,
+        HARBOR_AUTHORITY,
+        KUBERNETES_AUTHORITY,
+    )
 
 
 def test_every_declared_key_is_a_pointer_or_a_listed_value() -> None:
@@ -256,11 +266,11 @@ def test_every_declared_key_is_a_pointer_or_a_listed_value() -> None:
     """
     contract = ENDPOINTS.TARGET_CONTRACT
     assert contract.unpaired() == ()
-    assert contract.role("gitlab.token_file") is ENDPOINTS.Role.ACCESS
-    assert contract.role("kubernetes.server") is ENDPOINTS.Role.ENDPOINT
-    assert contract.role("kubernetes.node_diagnostics") is None
-    assert "gitlab.runner_id" in contract.value_keys()
-    assert "kubernetes.kubeconfig" not in contract.value_keys()
+    assert contract.role(f"{GITLAB_AUTHORITY}.token_file") is ENDPOINTS.Role.ACCESS
+    assert contract.role(f"{KUBERNETES_AUTHORITY}.server") is ENDPOINTS.Role.ENDPOINT
+    assert contract.role(f"{KUBERNETES_AUTHORITY}.node_diagnostics") is None
+    assert f"{GITLAB_AUTHORITY}.runner_id" in contract.value_keys()
+    assert f"{KUBERNETES_AUTHORITY}.kubeconfig" not in contract.value_keys()
 
 
 def test_an_unknown_table_path_is_refused_by_the_contract() -> None:
@@ -282,7 +292,7 @@ def test_the_parser_rejects_a_key_the_contract_does_not_declare(
     """
     target = tmp_path / "target.toml"
     target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\nnamespace = "x"\n'
+        f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nnamespace = "x"\n'
     )
     with pytest.raises(TARGET.TargetError, match="unsupported fields: namespace"):
         TARGET.load_gitlab_target(target)
@@ -299,18 +309,18 @@ def test_the_parser_keeps_the_journal_route_fields_and_refuses_them_for_cilium(
     """
     target = tmp_path / "target.toml"
     head = (
-        "[kubernetes]\n"
+        f"[{KUBERNETES_AUTHORITY}]\n"
         'context = "admin"\nserver = "https://api.cluster.example.test:6443"\n'
-        '[kubernetes.node_diagnostics]\nnode = "n1"\n'
+        f'[{KUBERNETES_AUTHORITY}.node_diagnostics]\nnode = "n1"\n'
     )
     route = 'namespace = "ns"\nselector = "app=x"\ncontainer = "c"\n'
     target.write_text(
         head
-        + "[kubernetes.node_diagnostics.journal]\n"
+        + f"[{KUBERNETES_AUTHORITY}.node_diagnostics.journal]\n"
         + route
         + 'directory = "/host-journal"\nhost_path = "/var/log/journal"\n'
     )
-    loaded = TARGET.load_target(target, required_surfaces=("kubernetes",))
+    loaded = TARGET.load_target(target, required_surfaces=(KUBERNETES_AUTHORITY,))
     journal = loaded.kubernetes.node_diagnostics.journal
     assert (journal.directory, journal.host_path) == (
         "/host-journal",
@@ -318,10 +328,13 @@ def test_the_parser_keeps_the_journal_route_fields_and_refuses_them_for_cilium(
     )
 
     target.write_text(
-        head + "[kubernetes.node_diagnostics.cilium]\n" + route + 'directory = "/x"\n'
+        head
+        + f"[{KUBERNETES_AUTHORITY}.node_diagnostics.cilium]\n"
+        + route
+        + 'directory = "/x"\n'
     )
     with pytest.raises(TARGET.TargetError, match="unsupported fields: directory"):
-        TARGET.load_target(target, required_surfaces=("kubernetes",))
+        TARGET.load_target(target, required_surfaces=(KUBERNETES_AUTHORITY,))
 
 
 # --- reading documents --------------------------------------------------------------
@@ -333,38 +346,54 @@ def test_commented_keys_belong_to_the_commented_table_and_active_keys_do_not() -
     """
     document = GATE_LIB.TargetDocument(
         "t.toml",
-        "[kubernetes]\n"
+        f"[{KUBERNETES_AUTHORITY}]\n"
         'context = "c"\n'
-        "# [kubernetes.node_diagnostics]\n"
+        f"# [{KUBERNETES_AUTHORITY}.node_diagnostics]\n"
         '# node = "n1"\n'
         'server = "https://api.example.test"\n',
     )
     lines = {use.path: use.line for use in document.uses()}
-    assert lines["kubernetes.node_diagnostics.node"] == 4
-    assert lines["kubernetes.server"] == 5
-    assert "kubernetes.node_diagnostics.server" not in lines
+    assert lines[f"{KUBERNETES_AUTHORITY}.node_diagnostics.node"] == 4
+    assert lines[f"{KUBERNETES_AUTHORITY}.server"] == 5
+    assert f"{KUBERNETES_AUTHORITY}.node_diagnostics.server" not in lines
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
         pytest.param(
-            "# [harbor]  # optional registry\n# url = 1\n",
-            "harbor.url",
+            f"# [{HARBOR_AUTHORITY}]  # optional registry\n# url = 1\n",
+            f"{HARBOR_AUTHORITY}.url",
             id="trailing-comment",
         ),
-        pytest.param("## [harbor]\n## url = 1\n", "harbor.url", id="double-hash"),
-        pytest.param('# [ "harbor" ]\n# url = 1\n', "harbor.url", id="quoted-spaced"),
-        pytest.param("[gitlab]\n# 'evil' = 1\n", "gitlab.evil", id="single-quoted"),
-        pytest.param('[gitlab]\n# "a b" = 1\n', 'gitlab."a b"', id="spaced-quoted"),
         pytest.param(
-            '[kubernetes]\nextra = [{ pod = "x" }]\n',
-            "kubernetes.extra.pod",
+            f"## [{HARBOR_AUTHORITY}]\n## url = 1\n",
+            f"{HARBOR_AUTHORITY}.url",
+            id="double-hash",
+        ),
+        pytest.param(
+            f'# [ "{HARBOR_AUTHORITY}" ]\n# url = 1\n',
+            f"{HARBOR_AUTHORITY}.url",
+            id="quoted-spaced",
+        ),
+        pytest.param(
+            f"[{GITLAB_AUTHORITY}]\n# 'evil' = 1\n",
+            f"{GITLAB_AUTHORITY}.evil",
+            id="single-quoted",
+        ),
+        pytest.param(
+            f'[{GITLAB_AUTHORITY}]\n# "a b" = 1\n',
+            f'{GITLAB_AUTHORITY}."a b"',
+            id="spaced-quoted",
+        ),
+        pytest.param(
+            f'[{KUBERNETES_AUTHORITY}]\nextra = [{{ pod = "x" }}]\n',
+            f"{KUBERNETES_AUTHORITY}.extra.pod",
             id="table-in-array",
         ),
         pytest.param(
-            '[[kubernetes.sources]]\nkind = "file"\n',
-            "kubernetes.sources.kind",
+            f'[[{KUBERNETES_AUTHORITY}.sources]]\nkind = "file"\n',
+            f"{KUBERNETES_AUTHORITY}.sources.kind",
             id="array-table",
         ),
     ],
@@ -388,15 +417,15 @@ def test_a_binding_block_is_another_format_and_a_target_block_is_read() -> None:
         "```toml\n"
         'schema_version = "1.0"\n'
         'target = "./target.toml"\n'
-        "[[kubernetes.sources]]\n"
+        f"[[{KUBERNETES_AUTHORITY}.sources]]\n"
         'kind = "file"\n'
         "```\n"
         "~~~TOML\n"
         'harbor_url = "x"\n'
-        "[gitlab]\n"
+        f"[{GITLAB_AUTHORITY}]\n"
         "~~~\n"
         "  ```toml title=example\n"
-        "  [gitlab]\n"
+        f"  [{GITLAB_AUTHORITY}]\n"
         "  ```\n"
         "```toml\n"
         "# just a note\n"
@@ -574,22 +603,22 @@ def test_the_runner_reference_is_native_config_and_keeps_target_validation(
         line == "```toml native-config=gitlab-runner/config.toml" for line in fences
     )
     code, record = _gate(repo)
-    assert code == 0
-    assert record["status"] == "PASS"
+    assert code == GATE_LIB.ExitCode.PASS
+    assert record["status"] == STATUS.PASS
     assert not any(
         document.startswith(f"{source}:") for document in record["documents"]
     )
 
     _append(
         reference,
-        '\n```toml native-config=ci-skills/target.toml\n[gitlab]\nnamespace = "x"\n```\n',
+        f'\n```toml native-config=ci-skills/target.toml\n[{GITLAB_AUTHORITY}]\nnamespace = "x"\n```\n',
     )
     code, record = _gate(repo)
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert record["status"] == "FAIL"
     assert [
         (item["rule"], item["path"], item["source"]) for item in record["findings"]
-    ] == [("undeclared", "gitlab.namespace", source)]
+    ] == [("undeclared", f"{GITLAB_AUTHORITY}.namespace", source)]
 
 
 def test_the_gate_passes_the_real_documents_and_lists_the_value_keys(
@@ -602,8 +631,8 @@ def test_the_gate_passes_the_real_documents_and_lists_the_value_keys(
     :returns: None; assertions in the body validate the regression.
     """
     code, record = _gate(repo)
-    assert code == 0
-    assert record["status"] == "PASS"
+    assert code == GATE_LIB.ExitCode.PASS
+    assert record["status"] == STATUS.PASS
     assert record["value_keys"] == list(ENDPOINTS.TARGET_CONTRACT.value_keys())
     assert f"{TEMPLATE}:1" in record["documents"]
 
@@ -623,7 +652,7 @@ def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
     lines.insert(index + 1, 'namespace = "ci"')
     template.write_text("\n".join(lines) + "\n")
     code, record = _gate(repo)
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert record["findings"] == [
         {
             "rule": "undeclared",
@@ -644,7 +673,7 @@ def test_a_commented_random_key_fails(repo: Path) -> None:
     """
     _append(repo / TEMPLATE, "# pipeline_id = 42\n")
     code, record = _gate(repo)
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert [rule for rule, path in _rules(record) if path.endswith(".pipeline_id")] == [
         "undeclared"
     ]
@@ -659,7 +688,7 @@ def test_a_new_authority_without_a_declaration_fails(repo: Path) -> None:
     """
     _append(repo / TEMPLATE, f'\n# [{UNKNOWN_AUTHORITY}]\n# url = "x"\n')
     code, record = _gate(repo)
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert ("undeclared", UNKNOWN_AUTHORITY) in _rules(record)
     assert ("undeclared", f"{UNKNOWN_AUTHORITY}.url") in _rules(record)
 
@@ -679,9 +708,12 @@ def test_a_random_key_in_a_documented_example_fails(repo: Path) -> None:
         )
     )
     code, record = _gate(repo)
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     finding = record["findings"][0]
-    assert (finding["rule"], finding["path"]) == ("undeclared", "kubernetes.namespace")
+    assert (finding["rule"], finding["path"]) == (
+        "undeclared",
+        f"{KUBERNETES_AUTHORITY}.namespace",
+    )
     assert finding["source"] == "ci-skills/references/access.md"
 
 
@@ -695,11 +727,12 @@ def test_a_top_level_key_in_an_example_is_not_skipped(repo: Path) -> None:
     access = repo / "ci-skills" / "references" / "access.md"
     access.write_text(
         access.read_text().replace(
-            "```toml\n[github]\n", '```toml\nharbor_url = "x"\n[github]\n'
+            f"```toml\n[{GITHUB_AUTHORITY}]\n",
+            f'```toml\nharbor_url = "x"\n[{GITHUB_AUTHORITY}]\n',
         )
     )
     code, record = _gate(repo)
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert ("undeclared", "harbor_url") in _rules(record)
 
 
@@ -712,10 +745,12 @@ def test_an_example_that_does_not_parse_fails(repo: Path) -> None:
     """
     access = repo / "ci-skills" / "references" / "access.md"
     access.write_text(
-        access.read_text().replace("```toml\n[github]\n", "```toml\n[github\n")
+        access.read_text().replace(
+            f"```toml\n[{GITHUB_AUTHORITY}]\n", f"```toml\n[{GITHUB_AUTHORITY}\n"
+        )
     )
     code, record = _gate(repo)
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert "parse_error" in [rule for rule, _ in _rules(record)]
 
 
@@ -730,7 +765,7 @@ def test_vendored_upstream_text_is_not_checked(repo: Path) -> None:
     vendored.parent.mkdir(parents=True)
     vendored.write_text('```toml\n[runners.kubernetes]\nnamespace = "x"\n```\n')
     code, record = _gate(repo)
-    assert code == 0
+    assert code == GATE_LIB.ExitCode.PASS
     assert not any("vendor" in document for document in record["documents"])
 
 
@@ -747,7 +782,7 @@ def test_a_value_key_new_since_the_base_fails(repo: Path) -> None:
     git(repo, *IDENTITY, "commit", "-qam", "base without runner_id")
     template.write_text(current)
     code, record = _gate(repo, "--base", "HEAD")
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert _rules(record) == [("value_introduced", f"{GITLAB_PRIVATE_TABLE}.runner_id")]
 
 
@@ -759,8 +794,8 @@ def test_a_value_key_present_at_the_base_is_listed_not_failed(repo: Path) -> Non
     :returns: None; assertions in the body validate the regression.
     """
     code, record = _gate(repo, "--base", "HEAD")
-    assert code == 0
-    assert "gitlab.runner_id" in record["value_keys"]
+    assert code == GATE_LIB.ExitCode.PASS
+    assert f"{GITLAB_AUTHORITY}.runner_id" in record["value_keys"]
 
 
 def test_a_declared_key_missing_from_the_template_fails(repo: Path) -> None:
@@ -773,8 +808,8 @@ def test_a_declared_key_missing_from_the_template_fails(repo: Path) -> None:
     template = repo / TEMPLATE
     template.write_text(template.read_text().replace('# group = "group"\n', ""))
     code, record = _gate(repo)
-    assert code == 1
-    assert ("undocumented", "gitlab.group") in _rules(record)
+    assert code == GATE_LIB.ExitCode.FAIL
+    assert ("undocumented", f"{GITLAB_AUTHORITY}.group") in _rules(record)
 
 
 def test_a_declared_table_missing_from_the_template_fails(repo: Path) -> None:
@@ -785,12 +820,15 @@ def test_a_declared_table_missing_from_the_template_fails(repo: Path) -> None:
     :returns: None; assertions in the body validate the regression.
     """
     template = repo / TEMPLATE
-    header = "# [kubernetes.node_diagnostics.cilium]\n"
+    header = f"# [{KUBERNETES_AUTHORITY}.node_diagnostics.cilium]\n"
     assert header in template.read_text()
     template.write_text(template.read_text().replace(header, ""))
     code, record = _gate(repo)
-    assert code == 1
-    assert ("undocumented", "kubernetes.node_diagnostics.cilium") in _rules(record)
+    assert code == GATE_LIB.ExitCode.FAIL
+    assert (
+        "undocumented",
+        f"{KUBERNETES_AUTHORITY}.node_diagnostics.cilium",
+    ) in _rules(record)
 
 
 def test_an_unreadable_base_fails_closed(repo: Path) -> None:
@@ -801,7 +839,7 @@ def test_an_unreadable_base_fails_closed(repo: Path) -> None:
     :returns: None; assertions in the body validate the regression.
     """
     code, record = _gate(repo, "--base", "no-such-revision")
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert _rules(record) == [("base_unreadable", TEMPLATE)]
 
 
@@ -817,7 +855,7 @@ def test_a_base_shaped_like_an_option_is_not_passed_to_git_as_one(
     """
     leak = tmp_path / "leak"
     code, record = _gate(repo, f"--base=--output={leak}")
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert _rules(record) == [("base_unreadable", TEMPLATE)]
     assert not leak.exists()
 
@@ -836,7 +874,10 @@ def test_the_staged_index_is_checked_not_the_working_tree(repo: Path) -> None:
     template.write_text(clean)
     staged_code, staged = _gate(repo, "--staged")
     working_code, _ = _gate(repo)
-    assert (staged_code, working_code) == (1, 0)
+    assert (staged_code, working_code) == (
+        GATE_LIB.ExitCode.FAIL,
+        GATE_LIB.ExitCode.PASS,
+    )
     assert any(path.endswith(".pipeline_id") for _, path in _rules(staged))
 
 
@@ -848,7 +889,7 @@ def test_a_missing_template_means_the_gate_could_not_run(tmp_path: Path) -> None
     :returns: None; assertions in the body validate the regression.
     """
     result = _run(tmp_path, "--json")
-    assert result.returncode == 2
+    assert result.returncode == GATE_LIB.ExitCode.UNUSABLE
     assert result.stdout == ""
 
 
@@ -889,11 +930,11 @@ VALID = {
     "status": "FAIL",
     "base": "HEAD",
     "documents": ["target.toml.template:1"],
-    "value_keys": ["gitlab.runner_id"],
+    "value_keys": [f"{GITLAB_AUTHORITY}.runner_id"],
     "findings": [
         {
             "rule": "undeclared",
-            "path": "gitlab.namespace",
+            "path": f"{GITLAB_AUTHORITY}.namespace",
             "source": "target.toml.template",
             "line": 51,
             "detail": "not an endpoint or access key of the target contract",
@@ -952,20 +993,20 @@ def test_documented_named_profiles_keep_quoted_key_identity(
     quoted = json.dumps(name)
     paths = {use.path for use in uses}
 
-    assert f"gitlab.{quoted}" in paths
-    assert f"gitlab.{quoted}.url" in paths
+    assert f"{GITLAB_AUTHORITY}.{quoted}" in paths
+    assert f"{GITLAB_AUTHORITY}.{quoted}.url" in paths
     assert all(
         ENDPOINTS.TARGET_CONTRACT.declares(use.path, table=use.is_table) for use in uses
     )
-    assert ENDPOINTS.TARGET_CONTRACT.role(f"gitlab.{quoted}.token_file") is (
-        ENDPOINTS.Role.ACCESS
-    )
+    assert ENDPOINTS.TARGET_CONTRACT.role(
+        f"{GITLAB_AUTHORITY}.{quoted}.token_file"
+    ) is (ENDPOINTS.Role.ACCESS)
     _append(repo / "README.md", f"\n```toml\n{text}```\n")
 
     code, record = _gate(repo)
 
-    assert code == 0
-    assert record["status"] == "PASS", record["findings"]
+    assert code == GATE_LIB.ExitCode.PASS
+    assert record["status"] == STATUS.PASS, record["findings"]
 
 
 @pytest.mark.parametrize(
@@ -974,22 +1015,22 @@ def test_documented_named_profiles_keep_quoted_key_identity(
         (
             'token_file = "public.token"\n',
             'token_file = "public.token"\npassword = "fixture"\n',
-            'gitlab."public.test".password',
+            f'{GITLAB_AUTHORITY}."public.test".password',
         ),
         (
             'token_file = "public.token"\n',
-            'token_file = "public.token"\n[gitlab."public.test".extra]\n',
-            'gitlab."public.test".extra',
+            f'token_file = "public.token"\n[{GITLAB_AUTHORITY}."public.test".extra]\n',
+            f'{GITLAB_AUTHORITY}."public.test".extra',
         ),
         (
             'token_file = "public.token"\n',
-            '[gitlab."public.test".token_file]\n',
-            'gitlab."public.test".token_file',
+            f'[{GITLAB_AUTHORITY}."public.test".token_file]\n',
+            f'{GITLAB_AUTHORITY}."public.test".token_file',
         ),
         (
-            '[gitlab."public.test"]\n',
-            '[gitlab]\npassword = "fixture"\n[gitlab."public.test"]\n',
-            "gitlab.password",
+            f'[{GITLAB_AUTHORITY}."public.test"]\n',
+            f'[{GITLAB_AUTHORITY}]\npassword = "fixture"\n[{GITLAB_AUTHORITY}."public.test"]\n',
+            f"{GITLAB_AUTHORITY}.password",
         ),
     ),
     ids=(
@@ -1015,6 +1056,6 @@ def test_named_profile_gate_rejects_one_unknown_or_mistyped_declaration(
 
     code, record = _gate(repo)
 
-    assert code == 1
+    assert code == GATE_LIB.ExitCode.FAIL
     assert record["status"] == "FAIL"
     assert ("undeclared", rejected) in _rules(record)

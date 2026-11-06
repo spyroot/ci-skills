@@ -26,6 +26,7 @@ CLI = import_script_module("lib.python.core.gitlab.cli")
 ISSUE = import_script_module("gitlab_issue")
 JOB = import_script_module("gitlab_job")
 PIPELINE = import_script_module("gitlab_pipeline")
+STATUS = import_script_module("lib.python.sys.status")
 
 
 def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -149,13 +150,13 @@ def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
     code = _invoke(kind, selector, project=project)
     evidence = json.loads(capsys.readouterr().out)
 
-    assert code == 0
-    assert evidence["status"] == "DRY_RUN"
+    assert code == STATUS.exit_code(STATUS.DRY_RUN)
+    assert evidence["status"] == STATUS.DRY_RUN
     expected_source = f"{source} -> binding:{binding.resolve()}"
     if named_profile:
         expected_source += f';{ROUTING_ARGV_PREFIX}{GITLAB_PROFILE_OPTION}="{GITLAB_LEGACY_PUBLIC_KEY}"'
     if kind == "action":
-        expected_source += ";target:gitlab.project"
+        expected_source += f";target:{GITLAB_AUTHORITY}.project"
     assert evidence["target_source"] == expected_source
     if kind in {"action", "access"}:
         assert evidence["target"]["reference"] == project
@@ -189,8 +190,8 @@ def test_missing_binding_blocks_without_falling_back_to_project_target(
     code = _invoke("action", [])
     evidence = json.loads(capsys.readouterr().out)
 
-    assert code == 2
-    assert evidence["status"] == "BLOCKED"
+    assert code == STATUS.exit_code(STATUS.BLOCKED)
+    assert evidence["status"] == STATUS.BLOCKED
     assert "binding_unavailable_or_invalid" in evidence["errors"][0]["reason"]
 
 
@@ -216,6 +217,6 @@ def test_conflicting_environment_selectors_block_without_target_fallback(
     code = _invoke("action", [])
     evidence = json.loads(capsys.readouterr().out)
 
-    assert code == 2
-    assert evidence["status"] == "BLOCKED"
+    assert code == STATUS.exit_code(STATUS.BLOCKED)
+    assert evidence["status"] == STATUS.BLOCKED
     assert evidence["errors"][0]["reason"] == "environment_selector_conflict"
