@@ -10,6 +10,7 @@ from typing import Final
 
 from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.git.mirroring import MirrorPolicy
+from lib.python.core.provenance import FUNCTIONAL_DIGEST_KEY
 
 KIND: Final = "gitlab_mirror"
 COMMAND: Final = "gitlab_mirror.py"
@@ -70,7 +71,8 @@ class Field(StrEnum):
 
     .. attribute :: FUNCTIONAL_DIGEST
 
-        Native token ``functional_digest``.
+        Key of the skill functional digest; ``FUNCTIONAL_DIGEST_KEY`` of
+        ``core/provenance.py``.
 
     .. attribute :: CREDENTIAL_DIGEST
 
@@ -210,7 +212,7 @@ class Field(StrEnum):
     DESTINATION_REFS = "destination_refs"
     MIRROR = "mirror"
     POLICY = "policy"
-    FUNCTIONAL_DIGEST = "functional_digest"
+    FUNCTIONAL_DIGEST = FUNCTIONAL_DIGEST_KEY
     CREDENTIAL_DIGEST = "credential_digest"
     COUNT = "count"
     SHA256 = "sha256"

@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -954,7 +955,7 @@ def test_apply_outcome_is_recorded_before_the_run_stops(
     """
     provider = FakeProvider()
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(inputs, ScriptedRunner(_results(overrides)), provider).run()
 
     ledger = _ledger(inputs)
@@ -974,7 +975,9 @@ def test_apply_outcome_is_recorded_before_the_run_stops(
             QUALIFY.MIRROR_DELETE_PENDING,
         ),
         (
-            lambda provider: setattr(provider, "mirror_delete_status", 500),
+            lambda provider: setattr(
+                provider, "mirror_delete_status", HTTPStatus.INTERNAL_SERVER_ERROR
+            ),
             "mirror_deletion_unverified",
             [MIRROR_DELETED],
             QUALIFY.MIRROR_DELETE_PENDING,
@@ -1056,7 +1059,7 @@ def test_cleanup_stops_when_an_identity_or_deletion_is_unproven(
     provider = FakeProvider()
     change(provider)
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
     assert provider.deletes == deletes
@@ -1108,7 +1111,7 @@ def test_absence_read_back_stops_on_a_present_object_or_moved_ref(
     provider = FakeProvider()
     change(provider)
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
     assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
@@ -1129,7 +1132,9 @@ def test_existing_ledger_blocks_a_second_run(inputs: object, mode: str) -> None:
     runner = ScriptedRunner(_results())
     qualification = _qualification(inputs, runner, FakeProvider())
 
-    with pytest.raises(QUALIFY.QualificationError, match=QUALIFY.ALLOCATION_EXISTS):
+    with pytest.raises(
+        QUALIFY.QualificationError, match=re.escape(QUALIFY.ALLOCATION_EXISTS)
+    ):
         getattr(qualification, mode)()
 
     assert runner.calls == []
@@ -1149,7 +1154,9 @@ def test_ledger_is_created_exclusively(inputs: object) -> None:
         },
     )
 
-    with pytest.raises(QUALIFY.QualificationError, match=QUALIFY.ALLOCATION_EXISTS):
+    with pytest.raises(
+        QUALIFY.QualificationError, match=re.escape(QUALIFY.ALLOCATION_EXISTS)
+    ):
         _qualification(inputs, runner, FakeProvider()).run()
 
     assert QUALIFY.APPLIED_STEP not in runner.labels
@@ -1179,7 +1186,8 @@ def test_ledger_write_failure_keeps_the_previous_ledger(
     provider = FakeProvider()
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^write_failed:{QUALIFY.ALLOCATION_FILE}$"
+        QUALIFY.QualificationError,
+        match=f"^write_failed:{re.escape(QUALIFY.ALLOCATION_FILE)}$",
     ):
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
@@ -1245,7 +1253,7 @@ def test_interrupt_at_the_apply_records_the_ledger_and_deletes_nothing(
             lambda: FakeProvider(mirror=False),
             [MIRROR_DELETED],
             [DESTINATION_DELETED],
-            404,
+            HTTPStatus.NOT_FOUND,
         ),
     ),
     ids=("before-mirror-delete", "after-mirror-delete"),
@@ -1303,7 +1311,8 @@ def test_interrupt_before_the_ledger_writes_nothing(inputs: object) -> None:
     runner = ScriptedRunner(_results(), hooks={QUALIFY.REJECTION_STEP: _interrupt})
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.INTERRUPTED_WITHOUT_LEDGER}$"
+        QUALIFY.QualificationError,
+        match=f"^{re.escape(QUALIFY.INTERRUPTED_WITHOUT_LEDGER)}$",
     ):
         _qualification(inputs, runner, FakeProvider()).plan()
 
@@ -1357,11 +1366,9 @@ def test_bound_status_tokens_drive_every_comparison(
         },
     )
     tokens = QUALIFY.installed_bindings(SKILL_ROOT).status
+    reason = f"{QUALIFY.LIVE_PLAN_STEP}_unexpected:{EXIT_OK}:{STATUS.planned}"
 
-    with pytest.raises(
-        QUALIFY.QualificationError,
-        match=f"^{QUALIFY.LIVE_PLAN_STEP}_unexpected:{EXIT_OK}:{STATUS.planned}$",
-    ):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(
             inputs, ScriptedRunner(_results()), FakeProvider(), tokens
         ).plan()
@@ -1384,10 +1391,8 @@ def test_bound_fields_drive_every_read_of_a_run(
     :returns: None; assertions verify the renamed keys pass, the lib's stop, and
         the cleanup record keeps this tool's own keys.
     """
-    with pytest.raises(
-        QUALIFY.QualificationError,
-        match=f"^{QUALIFY.LIVE_PLAN_STEP}_unexpected:{EXIT_OK}:None$",
-    ):
+    reason = f"{QUALIFY.LIVE_PLAN_STEP}_unexpected:{EXIT_OK}:None"
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(
             inputs, ScriptedRunner(_results()), FakeProvider(), fields=fake_fields
         ).plan()
@@ -1560,7 +1565,7 @@ def test_reconcile_without_a_ledger_is_blocked(inputs: object) -> None:
     provider = FakeProvider()
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.NOTHING_TO_RECONCILE}$"
+        QUALIFY.QualificationError, match=f"^{re.escape(QUALIFY.NOTHING_TO_RECONCILE)}$"
     ):
         _qualification(inputs, ScriptedRunner(_results()), provider).reconcile()
 
@@ -1578,7 +1583,7 @@ def test_reconcile_of_a_completed_ledger_is_blocked(inputs: object) -> None:
     reconciler = FakeProvider()
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.NOTHING_TO_RECONCILE}$"
+        QUALIFY.QualificationError, match=f"^{re.escape(QUALIFY.NOTHING_TO_RECONCILE)}$"
     ):
         _qualification(inputs, ScriptedRunner(_results()), reconciler).reconcile()
 
@@ -1662,8 +1667,8 @@ def test_reconcile_does_not_delete_objects_already_absent(inputs: object) -> Non
     assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
-        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 404,
-        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 404,
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: HTTPStatus.NOT_FOUND,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: HTTPStatus.NOT_FOUND,
     }
 
 
@@ -1804,7 +1809,7 @@ def test_reconcile_stops_when_ownership_is_unproven(
         change(provider)
     selected = dataclasses.replace(inputs, **(inputs_change or {}))
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         _qualification(selected, ScriptedRunner(_results()), provider).reconcile()
 
     assert provider.deletes == deletes
@@ -1925,7 +1930,7 @@ def test_installed_command_failures_become_stopping_reasons(
     :param reason: Exact stopping reason.
     :returns: None; assertions verify the reason.
     """
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.InstalledMirrorCommand(inputs, execute).run(
             QUALIFY.LIVE_PLAN_STEP, [QUALIFY.LIVE_PLAN_OPTION]
         )
@@ -2183,7 +2188,7 @@ def test_installed_bindings_refuse_a_lib_from_another_directory(
     monkeypatch.setattr(sys, "path", list(sys.path))
     reason = QUALIFY.INSTALLED_LIB_SHADOWED.format(name=QUALIFY.CATALOG_MODULE)
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.installed_bindings(tmp_path)
 
 
@@ -2203,7 +2208,7 @@ def test_installed_bindings_refuse_a_lib_without_a_bound_name(
     # Attribute name that installed_bindings reads first from installed catalog.
     reason = QUALIFY.INSTALLED_LIB_INCOMPATIBLE.format(name="GITLAB_TARGET_OPTION")
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.installed_bindings(tmp_path)
 
 
@@ -2237,7 +2242,7 @@ def test_installed_bindings_refuse_an_older_lib_without_a_newer_name(
     )
     reason = QUALIFY.INSTALLED_LIB_INCOMPATIBLE.format(name=name)
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.installed_bindings(SKILL_ROOT)
 
 
@@ -2333,7 +2338,8 @@ def test_native_provider_stops_on_a_malformed_mirror_url(
     )
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.REPOSITORY_URL_MALFORMED}$"
+        QUALIFY.QualificationError,
+        match=f"^{re.escape(QUALIFY.REPOSITORY_URL_MALFORMED)}$",
     ) as stopped:
         provider.mirror_targets(MIRROR_ID, DESTINATION_PATH)
 
@@ -2535,7 +2541,8 @@ def test_native_provider_keeps_a_mirror_that_targets_another_repository(
     )
 
     with pytest.raises(
-        QUALIFY.QualificationError, match=f"^{QUALIFY.MIRROR_IDENTITY_CHANGED}$"
+        QUALIFY.QualificationError,
+        match=f"^{re.escape(QUALIFY.MIRROR_IDENTITY_CHANGED)}$",
     ):
         provider.delete_mirror(MIRROR_ID, DESTINATION_PATH)
 
@@ -2587,7 +2594,7 @@ def test_native_provider_keeps_a_destination_with_another_id(
 
     with pytest.raises(
         QUALIFY.QualificationError,
-        match=f"^{QUALIFY.DESTINATION_IDENTITY_CHANGED}$",
+        match=f"^{re.escape(QUALIFY.DESTINATION_IDENTITY_CHANGED)}$",
     ):
         provider.delete_destination(DESTINATION_PATH, REPOSITORY_ID)
 
@@ -2714,8 +2721,10 @@ def test_native_provider_converts_a_pending_guard(
 
     with pytest.raises(
         QUALIFY.QualificationError,
-        match=QUALIFY.PROVIDER_FAILURE.format(
-            step=QUALIFY.MIRROR_DELETE, reason=PROVIDER_REASON
+        match=re.escape(
+            QUALIFY.PROVIDER_FAILURE.format(
+                step=QUALIFY.MIRROR_DELETE, reason=PROVIDER_REASON
+            )
         ),
     ):
         provider.delete_mirror(MIRROR_ID, DESTINATION_PATH)
@@ -2836,7 +2845,7 @@ def test_native_provider_bind_stops_when_the_live_plan_fails(
         bindings, mirror_parser=FakeParser, mirror_command=command
     )
 
-    with pytest.raises(QUALIFY.QualificationError, match=f"^{reason}$"):
+    with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.NativeMirrorProvider.bind(inputs, selected, QUALIFY.BASELINE_PLAN_STEP)
 
 

@@ -19,6 +19,7 @@ import pytest
 import yaml
 from conftest import (
     REPO_ROOT,
+    import_script_module,
     install_executable,
     load_module,
     read_journal,
@@ -37,6 +38,7 @@ POLICY: Final = ACCEPTANCE.load_policy(
     REPO_ROOT / ACCEPTANCE.POLICY_FILE, REPO_ROOT / ACCEPTANCE.POLICY_SCHEMA_FILE
 )
 CHECKER_COMMAND: Final = "python tools/check_live_acceptance.py"
+PROVENANCE: Final = import_script_module("lib.python.core.provenance")
 
 
 def _workflow_text() -> str:
@@ -296,7 +298,7 @@ def test_live_acceptance_publishes_verified_candidate_and_report(
     assert deployment["production_environment"] is False
     assert deployment["payload"] == {
         "report_url": LIVE_REPORT_URL,
-        "functional_digest": LIVE_DIGEST,
+        PROVENANCE.FUNCTIONAL_DIGEST_KEY: LIVE_DIGEST,
         "mode": "aggregate" if aggregate else "targeted",
         "tested_revision": LIVE_TESTED_REVISION,
     }
@@ -325,7 +327,7 @@ def test_failed_live_acceptance_makes_no_deployment_requests(
         "sha",
         "environment",
         "report_url",
-        "functional_digest",
+        PROVENANCE.FUNCTIONAL_DIGEST_KEY,
         "mode",
         "tested_revision",
         "state",
@@ -347,7 +349,7 @@ def test_live_acceptance_rejects_mismatched_deployment_readback(
         "sha",
         "environment",
         "report_url",
-        "functional_digest",
+        PROVENANCE.FUNCTIONAL_DIGEST_KEY,
         "mode",
         "tested_revision",
     }:

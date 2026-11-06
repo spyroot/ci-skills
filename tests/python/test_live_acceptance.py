@@ -36,7 +36,8 @@ from lib.python.core.endpoints import (
     GITLAB_AUTHORITY,
     KUBERNETES_AUTHORITY,
 )
-from lib.python.core.provenance import DIGEST_VALUE_KEY
+from lib.python.core.git.remote import GIT_EXECUTABLE
+from lib.python.core.provenance import DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY
 from test_gitlab_actions import _plan, _tag_output
 from test_gitlab_mirror import (
     MIRROR_APPLIED_FILE,
@@ -108,7 +109,7 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "tested_revision": "a" * 40,
         "skill": {
             DIGEST_VALUE_KEY: _digest(),
-            "functional_digest": _functional_digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         "targets": {
@@ -183,7 +184,7 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "skill": {
             DIGEST_VALUE_KEY: _digest(),
-            "functional_digest": _functional_digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         "identity": {"username": "runtime-gl", "id": 31},
@@ -232,7 +233,7 @@ def _base_operation(
         "tested_revision": revision["value"],
         "skill": {
             DIGEST_VALUE_KEY: _digest(),
-            "functional_digest": _functional_digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": revision,
         },
         "identity": {"username": context["username"], "id": context["identity_id"]},
@@ -277,7 +278,7 @@ def _runner_create(setup: Mapping[str, JSONObject]) -> MutableMapping[str, JSONV
     runner_id = receipt["readback"]["id"]
     receipt["smoke_cleanup"] = {
         "schema_version": "1.0",
-        "kind": "gitlab_runner_smoke_cleanup",
+        "kind": ACCEPTANCE.RUNNER_CLEANUP_KIND,
         "status": STATUS.PASS,
         "captured_at": receipt["captured_at"],
         "execution_host": context["execution_host"],
@@ -352,7 +353,7 @@ def _podman_receipt(setup: Mapping[str, JSONObject]) -> JSONObject:
     receipt["skill"].update(
         {
             DIGEST_VALUE_KEY: identity[DIGEST_VALUE_KEY],
-            "functional_digest": identity["functional_digest"],
+            FUNCTIONAL_DIGEST_KEY: identity[FUNCTIONAL_DIGEST_KEY],
         }
     )
     receipt["skill"]["revision"].update(identity["revision"])
@@ -387,7 +388,7 @@ def _candidate_delivery_receipts(
         receipt["skill"].update(
             {
                 DIGEST_VALUE_KEY: identity["skill"][DIGEST_VALUE_KEY],
-                "functional_digest": identity["skill"]["functional_digest"],
+                FUNCTIONAL_DIGEST_KEY: identity["skill"][FUNCTIONAL_DIGEST_KEY],
             }
         )
         receipt["skill"]["revision"].update(identity["skill"]["revision"])
@@ -468,7 +469,7 @@ def _consumer_action_receipt(
     )
     receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
     receipt["skill"].update(
-        {DIGEST_VALUE_KEY: _digest(), "functional_digest": _functional_digest()}
+        {DIGEST_VALUE_KEY: _digest(), FUNCTIONAL_DIGEST_KEY: _functional_digest()}
     )
     return PORTABLE.portable(receipt)
 
@@ -489,7 +490,7 @@ def _mirror_receipts(
         receipt["captured_at"] = (captured + timedelta(seconds=offset)).isoformat()
         receipt["execution_host"] = access["execution_host"]
         receipt["tested_revision"] = access["tested_revision"]
-        for key in (DIGEST_VALUE_KEY, "functional_digest"):
+        for key in (DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY):
             receipt["skill"][key] = access["skill"][key]
         receipt["skill"]["revision"].update(access["skill"]["revision"])
     applied_record = receipts[MIRROR_APPLIED_FILE]["records"][0]
@@ -501,7 +502,7 @@ def _mirror_receipts(
         "destination_id_http_status": HTTPStatus.NOT_FOUND,
     }
     noop["smoke_cleanup"] = {
-        "kind": "gitlab_mirror_smoke_cleanup",
+        "kind": ACCEPTANCE.MIRROR_CLEANUP_KIND,
         "status": STATUS.PASS,
         "captured_at": (captured + timedelta(seconds=len(receipts))).isoformat(),
         "execution_host": noop["execution_host"],
@@ -651,7 +652,7 @@ def test_required_podman_runtime_receipt_cannot_be_missing() -> None:
 @pytest.mark.parametrize(
     ("field", "value", "reason"),
     (
-        ("functional_digest", "b" * 64, "functional_digest_mismatch"),
+        (FUNCTIONAL_DIGEST_KEY, "b" * 64, "functional_digest_mismatch"),
         ("nested_runtime_ready", False, "runtime_readback_unproven"),
         ("exit_code", 7, "runtime_readback_unproven"),
         ("rows", [], "runtime_checks_incomplete"),
@@ -681,7 +682,7 @@ def test_podman_receipt_requires_current_runtime_and_cleanup_proof(
         if record["callback"] == "RunPodmanProbe"
     )
     targets = {
-        "functional_digest": receipt["skill"],
+        FUNCTIONAL_DIGEST_KEY: receipt["skill"],
         "nested_runtime_ready": probe,
         "exit_code": probe["pod"],
         "rows": probe,
@@ -1011,7 +1012,7 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
         result_action=STATUS.APPLIED,
         skill={
             DIGEST_VALUE_KEY: _digest(),
-            "functional_digest": _functional_digest(),
+            FUNCTIONAL_DIGEST_KEY: _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         identity={"username": "runtime-gl", "id": 31},
@@ -1063,11 +1064,11 @@ def _commit_current_index(repository: Path, message: str) -> str:
     :returns: SHA of the created commit, without changing the checked-out tree.
     """
     tree = subprocess.check_output(
-        ["git", "-C", str(repository), "write-tree"], text=True
+        [GIT_EXECUTABLE, "-C", str(repository), "write-tree"], text=True
     ).strip()
     return subprocess.check_output(
         [
-            "git",
+            GIT_EXECUTABLE,
             "-C",
             str(repository),
             "-c",
@@ -1096,7 +1097,7 @@ def _candidate_identity_receipt(revision: str, skill_root: Path) -> JSONObject:
         "tested_revision": revision,
         "skill": {
             **tree_digest(skill_root),
-            "functional_digest": functional_digest(skill_root),
+            FUNCTIONAL_DIGEST_KEY: functional_digest(skill_root),
             "revision": {"value": revision, "verified": True},
         },
     }
@@ -1120,16 +1121,25 @@ def _sibling_skill_commits(tmp_path: Path) -> tuple[Path, Path, str, str]:
     (bin_root / "fixture.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     (lib_root / "fixture.py").write_text("VALUE = 1\n", encoding="utf-8")
     (schema_root / "fixture.json").write_text('{"type":"object"}\n', encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
-    subprocess.run(["git", "-C", str(repository), "add", "ci-skills"], check=True)
+    subprocess.run([GIT_EXECUTABLE, "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        [GIT_EXECUTABLE, "-C", str(repository), "add", "ci-skills"], check=True
+    )
     tested = _commit_current_index(repository, "tested skill")
     candidate = _commit_current_index(repository, "squash candidate")
     subprocess.run(
-        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        [
+            GIT_EXECUTABLE,
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/heads/main",
+            candidate,
+        ],
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "checkout", "-q", candidate], check=True
     )
     return repository, skill_root, tested, candidate
 
@@ -1148,7 +1158,7 @@ def test_candidate_identity_accepts_document_change_from_nonancestor_commit(
     assert (
         subprocess.run(
             [
-                "git",
+                GIT_EXECUTABLE,
                 "-C",
                 str(repository),
                 "merge-base",
@@ -1165,14 +1175,23 @@ def test_candidate_identity_accepts_document_change_from_nonancestor_commit(
     test_file = skill_root / "tests" / "python" / "test_fixture.py"
     test_file.parent.mkdir(parents=True)
     test_file.write_text("def test_fixture() -> None:\n    pass\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repository), "add", "ci-skills"], check=True)
+    subprocess.run(
+        [GIT_EXECUTABLE, "-C", str(repository), "add", "ci-skills"], check=True
+    )
     candidate = _commit_current_index(repository, "documentation and test updates")
     subprocess.run(
-        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        [
+            GIT_EXECUTABLE,
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/heads/main",
+            candidate,
+        ],
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "checkout", "-q", candidate], check=True
     )
     assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == []
 
@@ -1192,15 +1211,23 @@ def test_candidate_identity_rejects_runtime_change(
         "#!/bin/sh\necho different\n", encoding="utf-8"
     )
     subprocess.run(
-        ["git", "-C", str(repository), "add", "ci-skills/bin/fixture.sh"], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "add", "ci-skills/bin/fixture.sh"],
+        check=True,
     )
     candidate = _commit_current_index(repository, "different skill")
     subprocess.run(
-        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        [
+            GIT_EXECUTABLE,
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/heads/main",
+            candidate,
+        ],
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+        [GIT_EXECUTABLE, "-C", str(repository), "checkout", "-q", candidate], check=True
     )
     assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == [
         "candidate_functional_digest_mismatch"
@@ -1220,7 +1247,7 @@ def test_candidate_identity_accepts_source_absent_from_fresh_clone(
     candidate_repository = tmp_path / "candidate"
     subprocess.run(
         [
-            "git",
+            GIT_EXECUTABLE,
             "clone",
             "--quiet",
             "--no-local",
@@ -1236,7 +1263,7 @@ def test_candidate_identity_accepts_source_absent_from_fresh_clone(
     assert (
         subprocess.run(
             [
-                "git",
+                GIT_EXECUTABLE,
                 "-C",
                 str(candidate_repository),
                 "cat-file",
@@ -1286,7 +1313,7 @@ def test_acceptance_requires_recorded_functional_digest() -> None:
     """
     setup = _access_setup()
     receipts = _complete_receipts(setup)
-    del setup["access.json"]["skill"]["functional_digest"]
+    del setup["access.json"]["skill"][FUNCTIONAL_DIGEST_KEY]
 
     result = _evaluate(setup, receipts)
 
@@ -1790,7 +1817,7 @@ def test_targeted_iso_verification_requires_matching_readbacks_and_reader_cleanu
     receipt["skill"].update(
         {
             DIGEST_VALUE_KEY: identity["skill"][DIGEST_VALUE_KEY],
-            "functional_digest": identity["skill"]["functional_digest"],
+            FUNCTIONAL_DIGEST_KEY: identity["skill"][FUNCTIONAL_DIGEST_KEY],
         }
     )
     receipt["skill"]["revision"].update(identity["skill"]["revision"])
@@ -1841,7 +1868,7 @@ def test_targeted_acceptance_still_rejects_other_candidate_bytes() -> None:
     :returns: None after verifying that an unrelated digest cannot pass.
     """
     receipt = _podman_receipt(_access_setup())
-    receipt["skill"]["functional_digest"] = "b" * 64
+    receipt["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     result = ACCEPTANCE.evaluate(
         {},
         {"probe.json": receipt},
@@ -1881,7 +1908,7 @@ def test_recorded_identity_verifies_original_source_after_candidate_changes(
         "candidate_functional_digest_mismatch"
     ]
     assert ACCEPTANCE.check_recorded_identity(receipt, skill_root) == []
-    receipt["skill"]["functional_digest"] = "b" * 64
+    receipt["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     assert ACCEPTANCE.check_recorded_identity(receipt, skill_root) == [
         "recorded_functional_digest_mismatch"
     ]
@@ -2078,7 +2105,7 @@ def test_rejected_behavior_receipt_cannot_satisfy_policy_coverage(
     if failure == "missing":
         del receipts["podman-probe.json"]
     elif failure == "functional-digest":
-        receipts["podman-probe.json"]["skill"]["functional_digest"] = "b" * 64
+        receipts["podman-probe.json"]["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     elif failure == "failed-status":
         receipts["podman-probe.json"]["status"] = STATUS.BLOCKED
     else:
@@ -2301,7 +2328,7 @@ def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evide
     elif failure == "same-capture-time":
         noop["captured_at"] = receipts[MIRROR_APPLIED_FILE]["captured_at"]
     elif failure == "rejected-receipt":
-        noop["skill"]["functional_digest"] = "b" * 64
+        noop["skill"][FUNCTIONAL_DIGEST_KEY] = "b" * 64
     else:
         receipts = setup
 

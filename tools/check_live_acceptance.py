@@ -76,31 +76,36 @@ from lib.python.core.kubernetes.podman_evidence import (
     parse_probe_markers,
 )
 from lib.python.core.logging import add_log_arguments, log_event
-from lib.python.core.provenance import DIGEST_VALUE_KEY
+from lib.python.core.provenance import DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, exit_code
 from skillkit.mirror_qualification import (
     AFTER_FIELD,
     BEFORE_FIELD,
-    CAPTURED_AT_FIELD,
     DELETE_FIELD,
     DESTINATION_FIELD,
     DESTINATION_HTTP_STATUS_FIELD,
     DESTINATION_ID_HTTP_STATUS_FIELD,
-    EXECUTION_HOST_FIELD,
-    KIND_FIELD,
     MIRROR_ABSENT_FIELD,
     MIRROR_HTTP_STATUS_FIELD,
     MIRROR_ID_FIELD,
     MUTATED_FIELD,
     REPEAT_FIELD,
-    SKILL_DIGEST_FIELD,
-    SMOKE_CLEANUP_FIELD,
     SOURCE_FIELD,
+)
+from skillkit.smoke_cleanup import (
+    CAPTURED_AT_FIELD,
+    EXECUTION_HOST_FIELD,
+    KIND_FIELD,
+    MIRROR_CLEANUP_KIND,
+    REVISION_FIELD,
+    RUNNER_CLEANUP_KIND,
+    SKILL_DIGEST_FIELD,
+    SKILL_FIELD,
+    SMOKE_CLEANUP_FIELD,
     STATUS_FIELD,
     TESTED_REVISION_FIELD,
 )
-from skillkit.mirror_qualification import CLEANUP_KIND as MIRROR_SMOKE_CLEANUP_KIND
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -518,7 +523,7 @@ def check_candidate_identity(receipt: JSONObject, skill_root: Path) -> Sequence[
         current = functional_digest(skill_root)
     except (ImportError, OSError, ValueError):
         return ["candidate_digest_unavailable"]
-    if _mapping(receipt.get("skill")).get("functional_digest") != current:
+    if _mapping(receipt.get("skill")).get(FUNCTIONAL_DIGEST_KEY) != current:
         return ["candidate_functional_digest_mismatch"]
     return []
 
@@ -577,7 +582,7 @@ def check_recorded_identity(receipt: JSONObject, skill_root: Path) -> Sequence[s
     original = _source_functional_digest(skill_root, json_string(revision))
     if original is None:
         return ["recorded_source_unavailable"]
-    if skill.get("functional_digest") != original:
+    if skill.get(FUNCTIONAL_DIGEST_KEY) != original:
         return ["recorded_functional_digest_mismatch"]
     return []
 
@@ -623,7 +628,7 @@ def _check_common(
     skill = _mapping(receipt.get("skill"))
     if not skill.get(DIGEST_VALUE_KEY):
         problems.append(f"{name}:skill_digest_absent")
-    reported = skill.get("functional_digest")
+    reported = skill.get(FUNCTIONAL_DIGEST_KEY)
     if not reported:
         problems.append(f"{name}:functional_digest_absent")
     elif reported != digest:
@@ -1199,12 +1204,12 @@ def _smoke_cleanup_matches_execution(
     :raises TypeError: Datetime comparisons reject mixed timezone awareness.
     """
     captured = _parse_time(cleanup.get(CAPTURED_AT_FIELD))
-    executed = _parse_time(receipt.get("captured_at"))
-    skill = _mapping(receipt.get("skill"))
-    revision = _mapping(skill.get("revision"))
+    executed = _parse_time(receipt.get(CAPTURED_AT_FIELD))
+    skill = _mapping(receipt.get(SKILL_FIELD))
+    revision = _mapping(skill.get(REVISION_FIELD))
     return (
         cleanup.get(STATUS_FIELD) == PASS
-        and cleanup.get(EXECUTION_HOST_FIELD) == receipt.get("execution_host")
+        and cleanup.get(EXECUTION_HOST_FIELD) == receipt.get(EXECUTION_HOST_FIELD)
         and cleanup.get(SKILL_DIGEST_FIELD) == skill.get(DIGEST_VALUE_KEY)
         and revision.get("verified") is True
         and isinstance(revision.get("value"), str)
@@ -1243,7 +1248,7 @@ def _mirror_smoke_cleanup_verified(
     before = _mapping(cleanup.get(BEFORE_FIELD))
     deletion = _mapping(cleanup.get(DELETE_FIELD))
     if (
-        cleanup.get(KIND_FIELD) != MIRROR_SMOKE_CLEANUP_KIND
+        cleanup.get(KIND_FIELD) != MIRROR_CLEANUP_KIND
         or not _smoke_cleanup_matches_execution(noop, cleanup, now, max_age_days)
         or created.get(MirrorReceiptField.REPOSITORY) is not True
         or created.get(MirrorReceiptField.MIRROR) is not True
@@ -1284,7 +1289,7 @@ def _runner_smoke_cleanup_verified(
     :returns: True only when the exact created runner is absent afterward.
     :raises TypeError: If now is naive while receipt timestamps are timezone-aware.
     """  # noqa: DOC502 - Datetime comparisons reject mixed timezone awareness.
-    cleanup = receipt.get("smoke_cleanup")
+    cleanup = receipt.get(SMOKE_CLEANUP_FIELD)
     if not isinstance(cleanup, dict):
         return False
     runner_id = _mapping(receipt.get("readback")).get("id")
@@ -1293,7 +1298,7 @@ def _runner_smoke_cleanup_verified(
     after = cleanup.get("after")
     if (
         cleanup.get("schema_version") != SCHEMA_VERSION
-        or cleanup.get("kind") != "gitlab_runner_smoke_cleanup"
+        or cleanup.get(KIND_FIELD) != RUNNER_CLEANUP_KIND
         or not _smoke_cleanup_matches_execution(receipt, cleanup, now, max_age_days)
         or cleanup.get("origin") != receipt.get("origin")
         or cleanup.get("credential_source") != receipt.get("credential_source")
@@ -1307,7 +1312,7 @@ def _runner_smoke_cleanup_verified(
         or deletion.get("endpoint") != f"runners/{runner_id}"
         or deletion.get("exit_code") != 0
         or not isinstance(after, dict)
-        or after.get("global_get_http_status") != 404
+        or after.get("global_get_http_status") != HTTPStatus.NOT_FOUND
         or type(after.get("global_get_exit_code")) is not int
         or after["global_get_exit_code"] == 0
     ):
@@ -1647,8 +1652,8 @@ class AcceptanceReview:
             "schema_version": SCHEMA_VERSION,
             "kind": "live_acceptance",
             "status": PASS if not self.problems else BLOCKED,
-            "skill_digest": self.digest,
-            "functional_digest": self.functional_digest,
+            SKILL_DIGEST_FIELD: self.digest,
+            FUNCTIONAL_DIGEST_KEY: self.functional_digest,
             "accepted": sorted(self.accepted),
             "problems": sorted(self.problems),
         }

@@ -43,6 +43,8 @@ INSTALLATION_IDENTITY_SCHEMA_VERSION = "1.0"
 INSTALLATION_IDENTITY_KIND = "skill_install"
 INSTALLATION_IDENTITY_STATUS = PASS
 FUNCTIONAL_ROOTS = ("bin", "lib", "schemas")
+# Key of the FUNCTIONAL_ROOTS digest in the identity that ``skill_identity`` returns.
+FUNCTIONAL_DIGEST_KEY: Final = "functional_digest"
 FUNCTIONAL_EXCLUDED_DIRECTORIES = ("docs", "references", "tests")
 FUNCTIONAL_EXCLUDED_SUFFIXES = (".md",)
 
@@ -455,7 +457,7 @@ def skill_identity(
             revision = {"value": None, "source": None, "verified": False}
     return {
         **digest,
-        "functional_digest": runtime_digest,
+        FUNCTIONAL_DIGEST_KEY: runtime_digest,
         "revision": revision,
         "consuming_project": consuming_project(environ),
     }

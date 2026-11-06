@@ -124,7 +124,9 @@ def test_matching_installer_record_verifies_an_installed_copy(installed: Path) -
     identity = provenance.skill_identity(installed, None)
 
     assert identity["digest"] == digest["digest"]
-    assert identity["functional_digest"] == provenance.functional_digest(installed)
+    assert identity[provenance.FUNCTIONAL_DIGEST_KEY] == provenance.functional_digest(
+        installed
+    )
     assert identity["revision"] == {
         "value": "a" * 40,
         "source": "installer_record",
@@ -286,7 +288,7 @@ def test_an_installed_copy_inside_an_unrelated_repository_claims_nothing(
     identity = provenance.skill_identity(copy, None)
 
     assert identity["revision"]["value"] is None
-    assert identity["functional_digest"] == hashlib.sha256(b"").hexdigest()
+    assert identity[provenance.FUNCTIONAL_DIGEST_KEY] == hashlib.sha256(b"").hexdigest()
 
 
 def test_the_digest_changes_when_one_executed_byte_changes(installed: Path) -> None:

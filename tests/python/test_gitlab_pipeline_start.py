@@ -21,6 +21,7 @@ API = import_script_module("lib.python.core.gitlab.gitlab_api")
 SCRIPT = import_script_module("gitlab_pipeline")
 SCHEMA = import_script_module("lib.python.core.schema")
 WORKFLOW = import_script_module("lib.python.core.gitlab.gitlab_action")
+PROVENANCE = import_script_module("lib.python.core.provenance")
 
 if TYPE_CHECKING:
     from lib.python.core.gitlab.callback import GitLabState
@@ -65,7 +66,7 @@ def _session() -> BoundGitLabSession:
         skill={
             "algorithm": "sha256-tree-v1",
             "digest": "d" * 64,
-            "functional_digest": "e" * 64,
+            PROVENANCE.FUNCTIONAL_DIGEST_KEY: "e" * 64,
             "file_count": 1,
             "revision": {"value": SHA, "source": "fixture", "verified": True},
             "consuming_project": {"commit": None, "source": None},

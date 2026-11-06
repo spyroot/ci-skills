@@ -27,7 +27,7 @@ from lib.python.core.kubernetes.pod_credential_models import PullSecretReference
 from lib.python.core.kubernetes.run_scope import validate_run_id
 from lib.python.core.kubernetes.tool_pod_models import ToolPodSpec
 from lib.python.core.paths import SKILL_ROOT
-from lib.python.core.provenance import functional_digest
+from lib.python.core.provenance import FUNCTIONAL_DIGEST_KEY, functional_digest
 from lib.python.core.target import Target, TargetError
 
 NODE_IMAGE_KIND: Final = "ocp_node_onboard"
@@ -348,7 +348,7 @@ def operation_plan(
         "kind": NODE_IMAGE_KIND,
         "operation": operation.value,
         "target": {"context": selected.context, "server": selected.server},
-        "functional_digest": functional_digest(SKILL_ROOT),
+        FUNCTIONAL_DIGEST_KEY: functional_digest(SKILL_ROOT),
         "run_id": args.run_id or "",
         "timeout_seconds": args.timeout,
         "inputs": inputs,

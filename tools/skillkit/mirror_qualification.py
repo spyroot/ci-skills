@@ -34,15 +34,17 @@ actions and exit codes (`InstalledStatus`), the result keys and the skill digest
 key (`InstalledFields`), and the repository URL comparison key
 (``repository_url_key``) from the installed copy; this module defines only the
 keys it writes and the GitLab keys the installed lib has no constant for.
+`tools/skillkit/smoke_cleanup.py` defines the cleanup record kind and the keys that
+the mirror and runner cleanup records share.
 
 ``run()`` writes the cleanup record to ``mirror-smoke-cleanup.json`` and as
 ``smoke_cleanup`` of ``mirror-noop-with-cleanup-receipt.json``; the ``*_FIELD``
-constants below name its keys. ``reconcile()`` writes it only to
-``mirror-smoke-cleanup.json``, with ``reconciled: true``, ``null`` for an object the
-run did not create and 404 for an owned object already absent. ``reconcile()`` never
-merges that record into a NO_OP receipt, because the receipt schema's
-``smoke_cleanup`` has no ``reconciled`` field and `tools/check_live_acceptance.py`
-requires two 204 deletes.
+constants below and in `tools/skillkit/smoke_cleanup.py` name its keys.
+``reconcile()`` writes it only to ``mirror-smoke-cleanup.json``, with
+``reconciled: true``, ``null`` for an object the run did not create and 404 for an
+owned object already absent. ``reconcile()`` never merges that record into a NO_OP
+receipt, because the receipt schema's ``smoke_cleanup`` has no ``reconciled`` field
+and `tools/check_live_acceptance.py` requires two 204 deletes.
 
 SIGINT, and SIGTERM inside ``terminate_as_interrupt()``, stop a mode without
 starting a deletion; ``_interruptible`` raises the stopping reasons, and
@@ -75,13 +77,22 @@ from types import FrameType, ModuleType
 from typing import Any, Final, Optional, TypeVar
 from urllib.parse import quote
 
+from skillkit.smoke_cleanup import (
+    CAPTURED_AT_FIELD,
+    EXECUTION_HOST_FIELD,
+    KIND_FIELD,
+    MIRROR_CLEANUP_KIND,
+    SKILL_DIGEST_FIELD,
+    SMOKE_CLEANUP_FIELD,
+    STATUS_FIELD,
+    TESTED_REVISION_FIELD,
+)
+
 ALLOCATION_FILE: Final = "mirror-live-allocation.json"
 APPLIED_RECEIPT: Final = "mirror-applied-receipt.json"
 NOOP_RECEIPT: Final = "mirror-noop-receipt.json"
 NOOP_WITH_CLEANUP: Final = "mirror-noop-with-cleanup-receipt.json"
 CLEANUP_RECORD: Final = "mirror-smoke-cleanup.json"
-# Defined once here; tools/check_live_acceptance.py imports it.
-CLEANUP_KIND: Final = "gitlab_mirror_smoke_cleanup"
 INSTALLATION_FILE: Final = "INSTALLATION.json"
 MIRROR_SCRIPT: Final = Path("bin") / "gitlab_mirror.py"
 WRONG_DIGEST: Final = "0" * 64
@@ -112,14 +123,7 @@ LEDGER_MIRROR_FIELD: Final = "mirror"
 LEDGER_CREATED_FIELD: Final = "created"
 LEDGER_STATE_FIELD: Final = "cleanup"
 
-# Cleanup record fields; tools/check_live_acceptance.py imports them.
-SMOKE_CLEANUP_FIELD: Final = "smoke_cleanup"
-KIND_FIELD: Final = "kind"
-STATUS_FIELD: Final = "status"
-CAPTURED_AT_FIELD: Final = "captured_at"
-EXECUTION_HOST_FIELD: Final = "execution_host"
-SKILL_DIGEST_FIELD: Final = "skill_digest"
-TESTED_REVISION_FIELD: Final = "tested_revision"
+# Mirror cleanup record fields; tools/check_live_acceptance.py imports them.
 BEFORE_FIELD: Final = "before"
 DELETE_FIELD: Final = "delete"
 AFTER_FIELD: Final = "after"
@@ -1464,7 +1468,7 @@ class MirrorQualification:
         fields = self.fields
         skill = _object(receipt.get(fields.skill))
         return {
-            KIND_FIELD: CLEANUP_KIND,
+            KIND_FIELD: MIRROR_CLEANUP_KIND,
             STATUS_FIELD: self.status.passed,
             CAPTURED_AT_FIELD: self.clock().isoformat(),
             EXECUTION_HOST_FIELD: receipt.get(fields.execution_host),

@@ -46,7 +46,7 @@ from lib.python.core.kubernetes.tool_pod_workflow import prepare_tool_pod_callba
 from lib.python.core.kubernetes.workflow_report import workflow_result
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.project_binding import resolve_target
-from lib.python.core.provenance import functional_digest
+from lib.python.core.provenance import FUNCTIONAL_DIGEST_KEY, functional_digest
 from lib.python.core.report import emit_result, plan_digest
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import Target, TargetError
@@ -151,7 +151,7 @@ def operation_plan(args: argparse.Namespace, target: Target) -> JSONObject:
         "kind": TOOL_POD_KIND,
         "operation": operation.value,
         "target": {"context": selected.context, "server": selected.server},
-        "functional_digest": functional_digest(SKILL_ROOT),
+        FUNCTIONAL_DIGEST_KEY: functional_digest(SKILL_ROOT),
         "run_id": args.run_id or "",
         "timeout_seconds": args.timeout,
         "spec": ToolPodSpec.load(Path(args.spec)).as_dict() if args.spec else {},
