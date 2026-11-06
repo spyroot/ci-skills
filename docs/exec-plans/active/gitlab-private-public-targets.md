@@ -217,29 +217,29 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   added.
   Status: PROPOSED
   Rationale: One routing authority. Per GitLab instance:
-  - Agent and KAS identity: an agent belongs to the selected instance. It is registered in a configuration project of
-    that instance (`--project`). Its agentk installation runs in the cluster that
+  - GitLab Agent and KAS identity: a GitLab Agent belongs to the selected instance. It is registered in a
+    configuration project of that instance (`--project`). Its agentk installation runs in the cluster that
     `[gitlab_routing].<instance>.kubernetes` names and connects to that instance's KAS, whose address is discovered
-    from the selected GitLab (CI14-M2: "Discover ... KAS prerequisites"). Agents of the private and public instance can
-    share one cluster; each has its own agent name and installation and reaches the cluster only through its own
-    instance's KAS.
+    from the selected GitLab (CI14-M2: "Discover ... KAS prerequisites"). GitLab Agents of the private and public
+    instance can share one cluster; each has its own agent name and installation and reaches the cluster only
+    through its own instance's KAS.
   - Runners on Kubernetes: `gitlab_runner_manager.py` and `image_build_readiness.py chain` resolve `gitlab`,
     `kubernetes` and `harbor` with the same `--gitlab` selection. The runner registers with the selected instance,
-    runs in the routed cluster and pulls from the routed Harbor. It reaches GitLab with its own runner token, not
-    through an agent. An agent and a runner of the same instance land in the same cluster because they read the same
-    row. Today both read the single `[kubernetes]` and `[harbor]` tables, which are the only tables a row can name.
-  - What the target carries: `[gitlab_routing]` holds table names only. The agent name, the configuration project and
-    the authorized projects come from the request (`--project`, an agent-name option, a repeatable CI-access project
-    option); CI14 D3 has not settled those flags.
-  - What results carry: an Agent result would add the agent context `<configuration project path>:<agent-name>` to
+    runs in the routed cluster and pulls from the routed Harbor (DEC-18). It reaches GitLab with its own runner
+    token, not through a GitLab Agent. A GitLab Agent and a runner of the same instance land in the same cluster
+    because they read the same row.
+  - What the target carries: `[gitlab_routing]` holds table names only. The GitLab Agent name, the configuration
+    project and the authorized projects come from the request (`--project`, an agent-name option, a repeatable
+    CI-access project option); CI14 D3 has not settled those flags.
+  - What results carry: a GitLab Agent result would add the context `<configuration project path>:<agent-name>` to
     the `routing` object. That adds an optional field to `gitlab-runner-tag.schema.json#/$defs/routing` and needs
-    approval together with CI14 D3. This change adds nothing for the Agent.
+    approval together with CI14 D3. This change adds nothing for the GitLab Agent.
   - How CI14 reads routing: `gitlab_agent.py` passes `GitLabSelection.from_args` to the shared resolver and reads
     `Target.routing.kubernetes`. It adds no cluster selector of its own, so CI14 does not get a second routing
     authority.
   Conflict, recorded and not resolved: `docs/phases/CI14-GITLAB-CONNECTIONS.md:76` says "No new target key is
-  authorized by this phase." DEC-14 adds no target key. A later change that adds an agent key to `[gitlab_routing]`,
-  for example `gitlab_routing.<instance>.agent`, falls under that line and needs approval.
+  authorized by this phase." DEC-14 adds no target key. A later change that adds a GitLab Agent key to
+  `[gitlab_routing]`, for example `gitlab_routing.<instance>.agent`, falls under that line and needs approval.
   Governing Ref: [CI14-M2](ci14-gitlab-connections.md#ci14-m2-resolve-d2-and-deliver-the-agent-workflow);
   `docs/phases/CI14-GITLAB-CONNECTIONS.md:66-67,76`; docs.gitlab.com `user/clusters/agent/install`,
   `user/clusters/agent/ci_cd_workflow`, `api/cluster_agents`.
@@ -316,23 +316,53 @@ Three commands combine GitLab with other authorities:
 These commands need to know which Kubernetes cluster and which Harbor registry belong to the selected GitLab. That is
 the routing this plan adds; DEC-18 makes the runner manager and the chain read their tables through it.
 
-The GitLab Agent for Kubernetes is the other way a GitLab project reaches a cluster. It is planned in
-[CI14-M2](ci14-gitlab-connections.md#ci14-m2-resolve-d2-and-deliver-the-agent-workflow) and not delivered. An agent
-is registered in one GitLab project, its configuration project, through the cluster agents API
+A person with their own GitLab (self-managed or gitlab.com) and their own Kubernetes cluster (home lab, staging,
+production) installs CI Skills. They ask their AI agent to attach one of their GitLab projects to one of their
+clusters. The AI agent finds the command in the installed catalog, gets a plan, shows it, and on confirmation applies
+it; CI Skills makes the GitLab and Kubernetes calls and returns one bounded result. The ci-skills repository is never
+attached to a cluster: the project and the cluster are the person's, named in the person's own
+`~/.ci-skills/target.toml` and in the request.
+
+    Person with their own GitLab and their own Kubernetes cluster
+      |  "attach my project group/app to my lab cluster"
+      v
+    AI agent (Claude, Codex, ...) with CI Skills installed
+      |  1. gitlab_agent.py --describe                 flags, modes, result schema; no credentials
+      |  2. gitlab_agent.py attach --gitlab private --project group/app --agent-name lab --live-plan
+      |                                                reads only; returns the plan and its digest
+      |  3. shows the plan to the person; the person confirms
+      |  4. same command with --apply --confirm-plan <digest>
+      v
+    CI Skills (installed copy) reads the person's ~/.ci-skills/target.toml
+      [gitlab_routing]  --gitlab private -> [gitlab_private] + its kubernetes table
+      |-- their GitLab   register agent "lab" in group/app; .gitlab/agents/lab/config.yaml (ci_access)
+      |-- their cluster  install agentk (gitlab/gitlab-agent chart, token, KAS address read from GitLab)
+      `-- read back      agent connected; CI jobs in group/app get context group/app:lab
+      v
+    One bounded JSON result -> AI agent -> person
+      PASS | BLOCKED <reason and missing prerequisite> | PARTIAL <what exists, what is missing>
+
+The command name `gitlab_agent.py` and its flags are PROPOSED (CI14 D3); the modes follow the existing mirror pattern
+(`--live-plan`, `--apply`, `--confirm-plan`) and `--describe`.
+
+The GitLab Agent for Kubernetes is the other way a GitLab project reaches a cluster, besides a runner. It is planned
+in [CI14-M2](ci14-gitlab-connections.md#ci14-m2-resolve-d2-and-deliver-the-agent-workflow) and not delivered. A
+GitLab Agent is registered in one GitLab project, its configuration project, through the cluster agents API
 (`POST /projects/:id/cluster_agents`, as relayed from the GitLab API documentation). Its configuration file is
 `.gitlab/agents/<agent-name>/config.yaml` in that project. The `ci_access.projects` and `ci_access.groups` lists in
-that file name the projects whose CI jobs may use the agent, up to 500 each; they must share the configuration
+that file name the projects whose CI jobs may use the GitLab Agent, up to 500 each; they must share the configuration
 project's top-level group unless instance-level authorization is enabled. The cluster side, agentk, is installed with
-the `gitlab/gitlab-agent` Helm chart, given `config.token` and `config.kasAddress`; KAS is the GitLab service the agent
-connects to. A CI job in an authorized project then finds one kubeconfig context per shared agent, named
+the `gitlab/gitlab-agent` Helm chart, given `config.token` and `config.kasAddress`; KAS is the GitLab service agentk
+connects to. A CI job in an authorized project then finds one kubeconfig context per shared GitLab Agent, named
 `<path/to/configuration/project>:<agent-name>`. Sources: docs.gitlab.com `user/clusters/agent/install`,
 `user/clusters/agent/ci_cd_workflow` and `api/cluster_agents`.
 
-For ci-skills, attaching a cluster to a project would work like this. The caller names the GitLab with `--gitlab`,
-the project with `--project`, and the agent with an agent-name option. `[gitlab_routing]` names the cluster, by the
-`kubernetes` value of the selected instance's row; agentk is installed there and connects to the selected GitLab's
-KAS, whose address is read from that GitLab at run time. The projects allowed to use the agent come from the request,
-never from a default. DEC-14 records this proposal; the flag names are not settled.
+With CI Skills, an AI agent attaches the person's cluster to the person's project like this. The caller names the
+GitLab with `--gitlab`, the project with `--project`, and the GitLab Agent with an agent-name option.
+`[gitlab_routing]` names the cluster, by the `kubernetes` value of the selected instance's row; agentk is installed
+there and connects to the selected GitLab's KAS, whose address is read from that GitLab at run time. The projects
+allowed to use the GitLab Agent come from the request, never from a default. DEC-14 records this proposal; the flag
+names are not settled.
 
 Live acceptance is a CI check that compares committed receipts with the code under review. A receipt is a JSON result
 a real host produced. The check is `tools/check_live_acceptance.py`, with policy in
