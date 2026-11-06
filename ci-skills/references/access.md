@@ -80,10 +80,14 @@ gitlab_public = {}
 
 [gitlab_private]
 url = "https://gitlab.example.test"
+# ci-skills reads this file for --gitlab private, or no option; a relative path resolves beside target.toml.
+# Without token_file, ci-skills uses the first of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN that is
+# set, and without those the glab credential store for this url's host.
 token_file = "gitlab-private.token"
 
 [gitlab_public]
 url = "https://gitlab.second.example.test"
+# ci-skills reads this file only when the command runs with --gitlab public.
 token_file = "gitlab-public.token"
 
 [kubernetes]
@@ -220,6 +224,8 @@ gitlab_private = { kubernetes = "kubernetes" }
 
 [gitlab_private]
 url = "https://gitlab.example.com"
+# ci-skills reads token_file when it is set; otherwise the first set GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or
+# OAUTH_TOKEN, then the glab credential store for this url's host.
 # token_file = "/home/user/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]

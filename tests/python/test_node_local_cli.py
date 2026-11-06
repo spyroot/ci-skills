@@ -18,6 +18,8 @@ import pytest
 import yaml
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject, JSONValue
     from lib.python.core.target import Target
@@ -34,12 +36,12 @@ def _selected_existing_pods(monkeypatch: pytest.MonkeyPatch, target_file: Path) 
     """
     target_file.write_text(
         target_file.read_text(encoding="utf-8")
-        + "\n[kubernetes.node_diagnostics]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics]\n"
         + 'node = "node-a"\n'
-        + "\n[kubernetes.node_diagnostics.cilium]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.cilium]\n"
         + 'namespace = "cilium"\nselector = "app=cilium"\n'
         + 'container = "cilium-agent"\n'
-        + "\n[kubernetes.node_diagnostics.journal]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.journal]\n"
         + 'namespace = "diagnostics"\nselector = "app=journal"\n'
         + 'container = "journal-reader"\n'
         + 'directory = "/host-journal"\nhost_path = "/var/log/journal"\n',
@@ -160,7 +162,14 @@ def test_node_adapter_uses_the_selected_project_binding(
     )
 
     assert status == 0
-    assert calls == [(None, "/project/.ci-skills/binding.toml", True, ("kubernetes",))]
+    assert calls == [
+        (
+            None,
+            "/project/.ci-skills/binding.toml",
+            True,
+            (ENDPOINTS.KUBERNETES_AUTHORITY,),
+        )
+    ]
     assert json.loads(capsys.readouterr().out)["status"] == "DRY_RUN"
 
 
@@ -491,5 +500,5 @@ def test_node_local_describe_needs_no_linux_runtime_or_credentials(
 
     assert exit_status == 0
     assert contract["command"] == f"{kind}.py"
-    assert contract["requires_authorities"] == ["kubernetes"]
+    assert contract["requires_authorities"] == [ENDPOINTS.KUBERNETES_AUTHORITY]
     assert contract["target_protocol"]

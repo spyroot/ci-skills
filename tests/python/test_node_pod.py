@@ -24,6 +24,7 @@ from conftest import import_script_module
 PODS = import_script_module("lib.python.core.kubernetes.node_pod")
 TARGET = import_script_module("lib.python.core.target")
 RUNTIME = import_script_module("lib.python.core.runtime")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 @pytest.fixture
@@ -35,12 +36,12 @@ def node_target(target_file: Path) -> Target:
     """
     target_file.write_text(
         target_file.read_text(encoding="utf-8")
-        + "\n[kubernetes.node_diagnostics]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics]\n"
         + 'node = "node-a"\n'
-        + "\n[kubernetes.node_diagnostics.cilium]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.cilium]\n"
         + 'namespace = "cilium"\nselector = "app=cilium"\n'
         + 'container = "cilium-agent"\n'
-        + "\n[kubernetes.node_diagnostics.journal]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.journal]\n"
         + 'namespace = "diagnostics"\nselector = "app=journal"\n'
         + 'container = "journal-reader"\n'
         + 'directory = "/host-journal"\nhost_path = "/var/log/journal"\n',

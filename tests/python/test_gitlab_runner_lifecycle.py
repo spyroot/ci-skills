@@ -27,6 +27,8 @@ RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 REPORT = import_script_module("lib.python.core.report")
 SCHEMA = import_script_module("lib.python.core.schema")
 RUNNER = import_script_module("gitlab_runner")
+STATUS = import_script_module("lib.python.sys.status")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 ROOT = Path(__file__).parents[2]
 VERIFIED_SKILL = {
     "algorithm": "sha256-tree-v1",
@@ -85,7 +87,7 @@ def _plan(
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{ENDPOINTS.GITLAB_AUTHORITY}.project",
         body=body,
         resource_id=resource_id,
         runner_snapshot=runner_snapshot,
@@ -244,7 +246,7 @@ def test_get_from_failed_job_resolves_runner_relation_without_raw_payload() -> N
 
     rendered = ACTION._result(
         plan,
-        "PASS",
+        STATUS.PASS,
         phase="READ",
         mutated=False,
         records=result.records,
@@ -338,16 +340,16 @@ def test_delete_requires_scope_and_global_404_readback(
     assert planned == snapshot
     plan = replace(plan, runner_snapshot=planned)
     record = RUNNERS.apply(api, object(), plan, 42)
-    assert record["action"] == "APPLIED"
+    assert record["action"] == STATUS.APPLIED
     assert record["after"]["global_get_status"] == 404
     assert record["after"]["scoped_absent"] is True
     assert api.calls.index(("DELETE", "runners/23")) > api.calls.index(("GET", _list()))
     rendered = ACTION._result(
         plan,
-        "PASS",
+        STATUS.PASS,
         phase="APPLY",
         mutated=True,
-        result_action="APPLIED",
+        result_action=STATUS.APPLIED,
         records=[record],
         readback=record,
         identity=VERIFIED_IDENTITY,
@@ -386,7 +388,7 @@ def test_repeat_delete_is_verified_no_op_without_write(
         }
     )
     record = RUNNERS.apply(api, object(), plan, 42)
-    assert record["action"] == "NO_OP"
+    assert record["action"] == STATUS.NO_OP
     assert record["mutated"] is False
     assert all(method == "GET" for method, _ in api.calls)
 
@@ -520,9 +522,9 @@ def test_runner_live_operation_refuses_unverified_skill_before_api(
         "GlabAPIClient",
         lambda **kw: pytest.fail("API client must not run"),
     )
-    assert RUNNER.main(arguments) == 2
+    assert RUNNER.main(arguments) == STATUS.exit_code(STATUS.BLOCKED)
     output = json.loads(capsys.readouterr().out)
-    assert output["status"] == "BLOCKED"
+    assert output["status"] == STATUS.BLOCKED
     assert output["errors"][0]["reason"] == "skill_revision_unverified"
 
 
@@ -551,7 +553,7 @@ def test_runner_read_cli_writes_portable_live_receipt(
         GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda *a, **kw: {
-            "status": "PASS",
+            "status": STATUS.PASS,
             "identity": VERIFIED_IDENTITY,
             "target": VERIFIED_TARGET,
         },
@@ -575,12 +577,9 @@ def test_runner_read_cli_writes_portable_live_receipt(
 
     monkeypatch.setattr(RUNNERS.ReadRunner, "run", read_runner)
     receipt_path = tmp_path / "runner-get.json"
-    assert (
-        RUNNER.main(
-            ["get", "--runner-id", "23", "--receipt-out", str(receipt_path), "--json"],
-        )
-        == 0
-    )
+    assert RUNNER.main(
+        ["get", "--runner-id", "23", "--receipt-out", str(receipt_path), "--json"],
+    ) == STATUS.exit_code(STATUS.PASS)
     stdout = json.loads(capsys.readouterr().out)
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert stdout["target_file"] == "/selected/target.toml"
@@ -599,7 +598,7 @@ def test_runner_live_result_schemas_reject_unverified_skill_and_empty_identity()
     plan = _plan("get", {"description": None}, resource_id=23)
     result = ACTION._result(
         plan,
-        "PASS",
+        STATUS.PASS,
         phase="READ",
         mutated=False,
         records=[RUNNERS._record(_runner())],
@@ -639,7 +638,7 @@ def test_runner_delete_live_plan_binds_assignments_in_digest() -> None:
     assert planned.public()["confirmation_ready"] is True
     result = ACTION._result(
         planned,
-        "PLANNED",
+        STATUS.PLANNED,
         phase="LIVE_PLAN",
         mutated=False,
         readback={"verified": True, "runner_snapshot": snapshot},
@@ -687,7 +686,7 @@ def test_runner_delete_partial_requires_verified_context_and_readback() -> None:
     }
     result = ACTION._result(
         plan,
-        "PARTIAL",
+        STATUS.PARTIAL,
         phase="APPLY",
         mutated=None,
         result_action="UNVERIFIED",
@@ -734,7 +733,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
         runner_snapshot=snapshot,
     )
     deleted = {
-        "action": "APPLIED",
+        "action": STATUS.APPLIED,
         "id": 23,
         "verified": True,
         "mutated": True,
@@ -784,14 +783,16 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
         (
             "read_dry_run",
             READ_VALIDATOR,
-            ACTION._result(read_plan, "DRY_RUN", phase="OFFLINE_PLAN", mutated=False),
+            ACTION._result(
+                read_plan, STATUS.DRY_RUN, phase="OFFLINE_PLAN", mutated=False
+            ),
         ),
         (
             "read_pass",
             READ_VALIDATOR,
             ACTION._result(
                 read_plan,
-                "PASS",
+                STATUS.PASS,
                 phase="READ",
                 mutated=False,
                 records=[RUNNERS._record(_runner())],
@@ -805,7 +806,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             READ_VALIDATOR,
             ACTION._result(
                 read_plan,
-                "BLOCKED",
+                STATUS.BLOCKED,
                 phase="ACCESS",
                 mutated=False,
                 readback={"verified": False},
@@ -818,7 +819,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             DELETE_VALIDATOR,
             ACTION._result(
                 _plan("delete", {"description": None}, resource_id=23),
-                "DRY_RUN",
+                STATUS.DRY_RUN,
                 phase="OFFLINE_PLAN",
                 mutated=False,
             ),
@@ -828,7 +829,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             DELETE_VALIDATOR,
             ACTION._result(
                 delete_plan,
-                "PLANNED",
+                STATUS.PLANNED,
                 phase="LIVE_PLAN",
                 mutated=False,
                 readback={"verified": True, "runner_snapshot": snapshot},
@@ -840,10 +841,10 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             DELETE_VALIDATOR,
             ACTION._result(
                 delete_plan,
-                "PASS",
+                STATUS.PASS,
                 phase="APPLY",
                 mutated=True,
-                result_action="APPLIED",
+                result_action=STATUS.APPLIED,
                 records=[deleted],
                 readback=deleted,
                 cleanup={"status": "NOT_APPLICABLE"},
@@ -855,7 +856,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             DELETE_VALIDATOR,
             ACTION._result(
                 delete_plan,
-                "PARTIAL",
+                STATUS.PARTIAL,
                 phase="APPLY",
                 mutated=None,
                 result_action="UNVERIFIED",
@@ -876,7 +877,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             DELETE_VALIDATOR,
             ACTION._result(
                 delete_plan,
-                "BLOCKED",
+                STATUS.BLOCKED,
                 phase="ACCESS",
                 mutated=False,
                 readback={"verified": False},
@@ -887,7 +888,9 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
         (
             "tag_dry_run",
             TAG_VALIDATOR,
-            ACTION._result(tag_plan, "DRY_RUN", phase="OFFLINE_PLAN", mutated=False),
+            ACTION._result(
+                tag_plan, STATUS.DRY_RUN, phase="OFFLINE_PLAN", mutated=False
+            ),
         ),
         ("tag_pass", TAG_VALIDATOR, tag_pass),
         (
@@ -895,7 +898,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             TAG_VALIDATOR,
             ACTION._result(
                 tag_plan,
-                "PARTIAL",
+                STATUS.PARTIAL,
                 phase="APPLY",
                 mutated=None,
                 result_action="UNVERIFIED",
@@ -913,7 +916,7 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             TAG_VALIDATOR,
             ACTION._result(
                 tag_plan,
-                "BLOCKED",
+                STATUS.BLOCKED,
                 phase="ACCESS",
                 mutated=False,
                 readback={"verified": False},
@@ -933,11 +936,11 @@ def test_runner_result_schemas_close_every_status_shape() -> None:
             validator.validate(unknown)
         missing = deepcopy(result)
         required = {
-            "DRY_RUN": "plan",
-            "PLANNED": "readback",
-            "PASS": "readback",
-            "PARTIAL": "cleanup",
-            "BLOCKED": "errors",
+            STATUS.DRY_RUN: "plan",
+            STATUS.PLANNED: "readback",
+            STATUS.PASS: "readback",
+            STATUS.PARTIAL: "cleanup",
+            STATUS.BLOCKED: "errors",
         }[result["status"]]
         del missing[required]
         with pytest.raises(ValidationError):

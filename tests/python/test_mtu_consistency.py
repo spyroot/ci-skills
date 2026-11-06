@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 MTU = import_script_module("lib.python.core.kubernetes.mtu_consistency")
 RUNTIME = import_script_module("lib.python.core.runtime")
 TARGET = import_script_module("lib.python.core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 def _link(name: str, mtu: int, *, bus: str = "pci", family: str = "inet") -> JSONObject:
@@ -59,7 +60,7 @@ def _target(tmp_path: Path) -> Target:
     """
     path = tmp_path / "target.toml"
     path.write_text(
-        '[kubernetes]\ncontext = "selected"\n'
+        f'[{ENDPOINTS.KUBERNETES_AUTHORITY}]\ncontext = "selected"\n'
         'server = "https://api.example.test:6443"\n',
         encoding="utf-8",
     )
@@ -69,7 +70,7 @@ def _target(tmp_path: Path) -> Target:
         TARGET.KubernetesTarget(
             "selected", "https://api.example.test:6443", tmp_path / "config"
         ),
-        active_surfaces=("kubernetes",),
+        active_surfaces=(ENDPOINTS.KUBERNETES_AUTHORITY,),
         source_file=path,
         source_kind="env:CI_SKILLS_TARGET",
         target_reference=f"cli:{path}",

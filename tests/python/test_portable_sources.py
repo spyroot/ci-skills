@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 
 def test_project_source_and_recorded_query_paths_are_portable() -> None:
     """Keep source schemes and argv digest while tokenizing private paths.
@@ -19,7 +21,7 @@ def test_project_source_and_recorded_query_paths_are_portable() -> None:
     local = {
         "target_selection": "env:CI_SKILLS_TARGET -> file:/private/project/target.toml",
         "credential_sources": {
-            "kubernetes": (
+            ENDPOINTS.KUBERNETES_AUTHORITY: (
                 "binding:/private/project/source.toml#2:"
                 f"command:/private/project/get-cluster#argv-sha256:{argv_digest}"
                 " -> file:/private/kube/config"
@@ -39,10 +41,20 @@ def test_project_source_and_recorded_query_paths_are_portable() -> None:
     rendered = portable.portable(local)
 
     assert rendered["target_selection"].startswith("env:CI_SKILLS_TARGET -> file:path:")
-    assert rendered["credential_sources"]["kubernetes"].startswith("binding:path:")
-    assert "command:path:" in rendered["credential_sources"]["kubernetes"]
-    assert f"#argv-sha256:{argv_digest}" in rendered["credential_sources"]["kubernetes"]
-    assert "file:path:" in rendered["credential_sources"]["kubernetes"]
+    assert rendered["credential_sources"][ENDPOINTS.KUBERNETES_AUTHORITY].startswith(
+        "binding:path:"
+    )
+    assert (
+        "command:path:"
+        in rendered["credential_sources"][ENDPOINTS.KUBERNETES_AUTHORITY]
+    )
+    assert (
+        f"#argv-sha256:{argv_digest}"
+        in rendered["credential_sources"][ENDPOINTS.KUBERNETES_AUTHORITY]
+    )
+    assert (
+        "file:path:" in rendered["credential_sources"][ENDPOINTS.KUBERNETES_AUTHORITY]
+    )
     assert rendered["queries"]["pods"][2].startswith("path:")
     assert "/private/" not in str(rendered)
     assert portable.portable(rendered) == rendered
@@ -54,7 +66,11 @@ def test_portable_nested_logical_binding_source_remains_unchanged() -> None:
     """
     portable = import_script_module("lib.python.core.portable")
     description = {
-        "access_protocol": {"kubernetes": [{"source": "binding:kubernetes.sources"}]}
+        "access_protocol": {
+            ENDPOINTS.KUBERNETES_AUTHORITY: [
+                {"source": f"binding:{ENDPOINTS.KUBERNETES_AUTHORITY}.sources"}
+            ]
+        }
     }
 
     rendered = portable.portable(description)

@@ -15,6 +15,7 @@ import pytest
 from conftest import import_script_module
 
 REPORT = import_script_module("lib.python.core.report")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 if TYPE_CHECKING:
@@ -63,7 +64,7 @@ if TYPE_CHECKING:
                 "kind": "access_check",
                 "status": "PASS",
                 "surfaces": {
-                    "gitlab": {
+                    ENDPOINTS.GITLAB_AUTHORITY: {
                         "status": "PASS",
                         "target": "https://gitlab.example.test",
                         "reason": "authenticated",
@@ -236,7 +237,9 @@ def _access_report() -> JSONObject:
     return {
         "kind": "access_check",
         "status": "PASS",
-        "surfaces": {"github": {"status": "PASS", "target": "unit/repo"}},
+        "surfaces": {
+            ENDPOINTS.GITHUB_AUTHORITY: {"status": "PASS", "target": "unit/repo"}
+        },
     }
 
 

@@ -39,6 +39,7 @@ from lib.python.core.cli_api import (
     response_decoder,
     validate_endpoint,
 )
+from lib.python.core.endpoints import GITHUB_AUTHORITY, GITLAB_AUTHORITY
 from lib.python.core.github.github import GitHubAPIClient
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.json_types import JSONObject, JSONValue
@@ -174,7 +175,10 @@ class ApiCheckAction(ApiProviderAction):
 
 
 ENDPOINT_EXAMPLES: Final[Mapping[str, str]] = MappingProxyType(
-    {"github": "user/repos?per_page=100", "gitlab": "projects?membership=true"}
+    {
+        GITHUB_AUTHORITY: "user/repos?per_page=100",
+        GITLAB_AUTHORITY: "projects?membership=true",
+    }
 )
 
 

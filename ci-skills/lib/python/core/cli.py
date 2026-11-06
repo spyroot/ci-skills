@@ -36,7 +36,12 @@ from lib.python.core.catalog import (
     missing_required_options,
     supports_gitlab_selection,
 )
-from lib.python.core.endpoints import GITLAB_SELECTORS
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    GITLAB_SELECTORS,
+    KUBERNETES_AUTHORITY,
+)
 from lib.python.core.help import CommandHelp, CommandHelpFormatter
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json_object
 from lib.python.core.logging import add_log_arguments, log_event
@@ -420,9 +425,9 @@ def _diagnostic_target(args: argparse.Namespace, script: Optional[str]) -> Targe
     optional = tuple(command.get("optional_requires", ())) if command else ()
     if script == COMMAND_BY_KIND[ACCESS_CHECK_KIND]:
         extensions = {
-            "publication": "github",
-            "job_url": "gitlab",
-            "ceph_namespace": "kubernetes",
+            "publication": GITHUB_AUTHORITY,
+            "job_url": GITLAB_AUTHORITY,
+            "ceph_namespace": KUBERNETES_AUTHORITY,
         }
         required += tuple(
             name

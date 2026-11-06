@@ -30,6 +30,7 @@ MODELS = import_script_module("lib.python.core.kubernetes.tool_pod_models")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 RUNTIME = import_script_module("lib.python.core.runtime")
 TARGET = import_script_module("lib.python.core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 @pytest.fixture
@@ -44,7 +45,7 @@ def pod_file_state() -> MODELS.ToolPodState:
         kubernetes=TARGET.KubernetesTarget(
             "unit-context", "https://api.example.test:6443", None
         ),
-        active_surfaces=("kubernetes",),
+        active_surfaces=(ENDPOINTS.KUBERNETES_AUTHORITY,),
     )
     state = MODELS.ToolPodState()
     state.kubernetes = KUBERNETES.KubernetesService(target)

@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 import pytest
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 
 def _live() -> tuple[ModuleType, ModuleType]:
     """Load live-check gate and shared status modules.
@@ -295,7 +297,10 @@ def test_no_extra_collectors_preserve_the_provider_access_result(
     live, _status = _live()
     target_mod = import_script_module("lib.python.core.target")
     target = target_mod.Target(
-        github=None, gitlab=None, kubernetes=None, active_surfaces=("gitlab",)
+        github=None,
+        gitlab=None,
+        kubernetes=None,
+        active_surfaces=(ENDPOINTS.GITLAB_AUTHORITY,),
     )
     collector = Mock(side_effect=AssertionError("unselected collector was called"))
     for name in ("storage", "events", "cilium", "gitlab_job", "ceph_cluster"):

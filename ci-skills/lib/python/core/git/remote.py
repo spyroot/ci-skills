@@ -14,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from lib.python.core.cli_api import APIError, CommandRunner, RequestDeadline
 from lib.python.core.git.refs import RefSnapshot
+from lib.python.core.runner_identity import GIT_SUFFIX
 from lib.python.core.runtime import error_class, run_command_bounded
 
 GIT_EXECUTABLE: Final = "git"
@@ -57,7 +58,7 @@ def repository_url_key(url: str) -> str:
     parsed = urlsplit(normalized)
     if parsed.scheme != HTTPS_SCHEME:
         return normalized
-    path = parsed.path.rstrip("/").removesuffix(".git")
+    path = parsed.path.rstrip("/").removesuffix(GIT_SUFFIX)
     return urlunsplit(
         (parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment)
     )

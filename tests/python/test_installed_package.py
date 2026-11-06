@@ -22,6 +22,8 @@ from conftest import REPO_ROOT, import_script_module, install_executable, load_m
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 SKILL_ROOT = REPO_ROOT / "ci-skills"
 
 
@@ -454,23 +456,23 @@ def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
     target = tmp_path / "target.toml"
     target.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f'kubeconfig = "{kubeconfig}"\n'
-            "\n[kubernetes.node_diagnostics]\n"
+            f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics]\n"
             'node = "worker-a"\n'
-            "\n[kubernetes.node_diagnostics.cilium]\n"
+            f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.cilium]\n"
             'namespace = "cilium"\nselector = "app=cilium"\n'
             'container = "cilium-agent"\n'
-            "\n[kubernetes.node_diagnostics.journal]\n"
+            f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.journal]\n"
             'namespace = "diagnostics"\nselector = "app=journal"\n'
             'container = "journal-reader"\n'
             'directory = "/host-journal"\nhost_path = "/var/log/journal"\n'
@@ -539,14 +541,14 @@ def _write_target_with_kubeconfigs(
     target = tmp_path / "target-kubeconfigs.toml"
     target.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             "kubeconfigs = ["
@@ -796,7 +798,7 @@ def test_installed_bash_entrypoints_run_from_unrelated_directory(
             str(installed / "bin" / "ci-api"),
             "get",
             "--provider",
-            "github",
+            ENDPOINTS.GITHUB_AUTHORITY,
             "--endpoint",
             "repos/unit/repo",
             "--field",
@@ -1146,7 +1148,9 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
     assert result.returncode == 0
     assert data["kind"] == "access_check"
     assert data["status"] == "PASS"
-    assert data["credential_sources"]["kubernetes"] == ("target:kubernetes.kubeconfigs")
+    assert data["credential_sources"][ENDPOINTS.KUBERNETES_AUTHORITY] == (
+        f"target:{ENDPOINTS.KUBERNETES_AUTHORITY}.kubeconfigs"
+    )
     assert str(REPO_ROOT) not in result.stdout
 
 

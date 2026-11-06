@@ -17,6 +17,7 @@ from lib.python.access.shared import Surface, _blocked, _json, _token_file
 from lib.python.access.sources import Sources
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import GITLAB_VARIABLES
+from lib.python.core.endpoints import GITLAB_AUTHORITY
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 from lib.python.core.json_types import (
@@ -91,7 +92,7 @@ def gitlab_access(target: Target) -> Surface:
         credential = gitlab_env(target)
     except ValueError as exc:
         return _blocked(
-            "gitlab",
+            GITLAB_AUTHORITY,
             selected.url,
             observed,
             str(exc),
@@ -103,7 +104,7 @@ def gitlab_access(target: Target) -> Surface:
     auth = run_command(["glab", "auth", "status", "--hostname", host], env=credential)
     if auth.returncode:
         return _blocked(
-            "gitlab",
+            GITLAB_AUTHORITY,
             selected.url,
             observed,
             error_class(auth),
@@ -129,7 +130,7 @@ def gitlab_access(target: Target) -> Surface:
             raise TypeError("runner_api_invalid_response")
     except (ValueError, TypeError) as exc:
         return _blocked(
-            "gitlab",
+            GITLAB_AUTHORITY,
             selected.url,
             observed,
             str(exc),
@@ -138,7 +139,7 @@ def gitlab_access(target: Target) -> Surface:
         )
     observed.append("instance_runner_api_read")
     return Surface(
-        "gitlab",
+        GITLAB_AUTHORITY,
         PASS,
         identity,
         selected.url,

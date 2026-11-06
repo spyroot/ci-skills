@@ -15,6 +15,7 @@ from lib.python.access.kubernetes_credentials import assert_kubeconfig_unchanged
 from lib.python.access.shared import Surface, _blocked, _json
 from lib.python.access.sources import Sources
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -454,7 +455,7 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
         AttributeError,
     ) as exc:
         return _blocked(
-            "kubernetes",
+            KUBERNETES_AUTHORITY,
             selected,
             probe.observed,
             str(exc),
@@ -463,7 +464,7 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
             source,
         )
     return Surface(
-        "kubernetes",
+        KUBERNETES_AUTHORITY,
         PASS,
         identity,
         selected,

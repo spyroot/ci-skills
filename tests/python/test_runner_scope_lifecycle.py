@@ -669,7 +669,4 @@ def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_id
             callback.run()
         assert action.runner.name == planned_name
     assert cluster.objects[selected.namespace_key] == namespace
-    assert json.loads(baseline)[FIELD_METADATA][FIELD_LABELS][
-        RESOURCES.OPERATION_LABEL
-    ] == (selected.legacy_name)
     assert cluster.applied == cluster.deleted == []

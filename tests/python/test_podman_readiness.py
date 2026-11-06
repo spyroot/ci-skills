@@ -42,6 +42,8 @@ RUNTIME = import_script_module("lib.python.core.runtime")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 TARGET = import_script_module("lib.python.core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+STATUS = import_script_module("lib.python.sys.status")
 
 if TYPE_CHECKING:
     from lib.python.core.executor import WorkflowExecutor
@@ -71,7 +73,7 @@ def _target(tmp_path: Path) -> Target:
             kubeconfig=tmp_path / "kubeconfig",
         ),
         harbor=None,
-        active_surfaces=("kubernetes",),
+        active_surfaces=(ENDPOINTS.KUBERNETES_AUTHORITY,),
     )
 
 
@@ -880,7 +882,7 @@ def test_marker_parser_proves_nested_run_exit_propagation_and_cleanup() -> None:
     assert checks == list(PODMAN_EVIDENCE.REQUIRED_MARKERS)
     assert len(checks) == 8
     assert "probe_exit" not in checks
-    assert all(row["status"] == "PASS" for row in evidence.rows)
+    assert all(row["status"] == STATUS.PASS for row in evidence.rows)
     assert evidence.values["expected_exit"] == "7"
     assert evidence.values["remaining_containers"] == "none"
 
@@ -902,10 +904,10 @@ def test_marker_parser_exposes_missing_and_failed_evidence_as_rows() -> None:
     assert evidence.verified is False
     assert rows["bind_readback"] == {
         "check": "bind_readback",
-        "status": "BLOCKED",
+        "status": STATUS.BLOCKED,
         "observed": "missing",
     }
-    assert rows["remaining_containers"]["status"] == "BLOCKED"
+    assert rows["remaining_containers"]["status"] == STATUS.BLOCKED
     assert rows["remaining_containers"]["observed"] == "leaked-id"
 
 
@@ -1007,7 +1009,7 @@ def test_confirm_mismatch_blocks_before_any_resource_mutation(
     with pytest.raises(ValueError, match="confirm_plan_mismatch_rerun_live_plan"):
         executor.run()
 
-    assert _reported_apply_status(executor.state) == "BLOCKED"
+    assert _reported_apply_status(executor.state) == STATUS.BLOCKED
     assert service.mutations == []
     assert service.deletions == []
     assert service.resources == {}
@@ -1076,7 +1078,7 @@ def test_apply_verifies_probe_then_cleans_job_before_namespace(tmp_path: Path) -
         "kernelVersion": "6.8.0-unit",
         "osImage": "Unit Linux",
     }
-    assert _reported_apply_status(state) == "PASS"
+    assert _reported_apply_status(state) == STATUS.PASS
     pod = state.probe_record["pod"]
     assert isinstance(pod, dict)
     assert pod["exit_code"] == 0
@@ -1137,8 +1139,8 @@ def test_emitted_apply_report_matches_shipped_result_schema(
     )
     Draft202012Validator(schema, registry=registry).validate(output)
 
-    assert exit_code == (2 if scc_rejected else 0)
-    assert output["status"] == ("BLOCKED" if scc_rejected else "PASS")
+    expected = STATUS.BLOCKED if scc_rejected else STATUS.PASS
+    assert (exit_code, output["status"]) == (STATUS.exit_code(expected), expected)
     probe_records = [
         item for item in output["records"] if item.get("callback") == "RunPodmanProbe"
     ]
@@ -1146,7 +1148,7 @@ def test_emitted_apply_report_matches_shipped_result_schema(
     record = probe_records[0]
     assert record["outcome"] == ("scc_required" if scc_rejected else "ready")
     assert record["verified"] is (not scc_rejected)
-    assert output["cleanup"]["status"] == "PASS"
+    assert output["cleanup"]["status"] == STATUS.PASS
     assert service.resources == {}
 
 
@@ -1203,7 +1205,7 @@ def test_probe_failure_still_cleans_every_created_resource(
     pod = executor.state.probe_record["pod"]
     assert isinstance(pod, dict)
     assert pod["exit_code"] == pod_exit
-    assert _reported_apply_status(executor.state) == "PARTIAL"
+    assert _reported_apply_status(executor.state) == STATUS.PARTIAL
     assert service.resources == {}
 
 
@@ -1229,7 +1231,7 @@ def test_scc_access_reuses_existing_authorization_without_binding(
         for callback, value in executor.state.results.items()
         if isinstance(callback, SCC_ACCESS.EnsureSCCAccess)
     )
-    assert permission["action"] == "NO_OP"
+    assert permission["action"] == STATUS.NO_OP
     assert permission["permission_source"] == "existing"
     assert not any(kind == "RoleBinding" for kind, _name, _ns in service.mutations)
     assert not any(kind == "RoleBinding" for kind, _name, _ns in service.deletions)
@@ -1257,7 +1259,7 @@ def test_scc_access_is_not_applicable_only_when_api_is_absent(
         for callback, value in executor.state.results.items()
         if isinstance(callback, SCC_ACCESS.EnsureSCCAccess)
     )
-    assert access["action"] == "NO_OP"
+    assert access["action"] == STATUS.NO_OP
     assert access["outcome"] == "scc_not_available"
     assert access["permission_source"] == "not_applicable"
     assert not any(kind == "RoleBinding" for kind, _name, _ns in service.mutations)
@@ -1281,7 +1283,7 @@ def test_scc_access_creates_reads_and_removes_only_run_binding(
         for callback, value in executor.state.results.items()
         if isinstance(callback, SCC_ACCESS.EnsureSCCAccess)
     )
-    assert permission["action"] == "APPLIED"
+    assert permission["action"] == STATUS.APPLIED
     assert permission["permission_source"] == "temporary_role_binding"
     assert permission["role_binding"]["uid"] == "rolebinding-uid"
     assert [kind for kind, _name, _namespace in service.mutations] == [
@@ -1475,7 +1477,7 @@ def test_terminal_job_failure_observes_once_more_without_waiting_for_timeout(
         "ready" if final_termination else "job_failed_without_termination"
     )
     assert _reported_apply_status(executor.state) == (
-        "PASS" if final_termination else "BLOCKED"
+        STATUS.PASS if final_termination else STATUS.BLOCKED
     )
     assert service.resources == {}
 
@@ -1508,7 +1510,7 @@ def test_pretermination_failure_cleans_without_claiming_runtime_readiness(
 
     assert executor.state.probe_record["outcome"] == outcome
     assert executor.state.probe_record["verified"] is False
-    assert _reported_apply_status(executor.state) == "BLOCKED"
+    assert _reported_apply_status(executor.state) == STATUS.BLOCKED
     assert service.resources == {}
 
 
@@ -1573,7 +1575,7 @@ def test_cleanup_failure_blocks_success_but_continues_namespace_cleanup(
     assert not any(key[0] == "namespace" for key in service.resources)
     assert any(key[0] == "job" for key in service.resources)
     assert executor.state.cleanup_failures[0]["callback"] == "RunPodmanProbe"
-    assert _reported_apply_status(executor.state) == "BLOCKED"
+    assert _reported_apply_status(executor.state) == STATUS.BLOCKED
 
 
 def test_probe_help_and_describe_need_no_target_or_native_tools() -> None:
@@ -1590,7 +1592,7 @@ def test_probe_help_and_describe_need_no_target_or_native_tools() -> None:
     assert describe_result.returncode == 0
     description = parse_json_output(describe_result)
     assert description["command"] == "image_build_readiness.py"
-    assert description["requires_authorities"] == ["kubernetes"]
+    assert description["requires_authorities"] == [ENDPOINTS.KUBERNETES_AUTHORITY]
 
 
 @pytest.mark.parametrize("output_name", (None, "requested-reports"))
@@ -1644,10 +1646,12 @@ def test_offline_plan_contacts_no_provider_and_uses_only_requested_output(
 
     monkeypatch.setattr(READINESS, "emit_result", emit)
 
-    assert READINESS.ImageBuildReadiness(args).execute() == 0
+    assert READINESS.ImageBuildReadiness(args).execute() == STATUS.exit_code(
+        STATUS.DRY_RUN
+    )
     assert len(emitted) == 1
     data, selected_output = emitted[0]
-    assert data["status"] == "DRY_RUN"
+    assert data["status"] == STATUS.DRY_RUN
     plan = data["plan"]
     assert isinstance(plan, dict)
     assert plan["selected_node"] == "auto"
@@ -1670,8 +1674,8 @@ def test_offline_probe_rejects_receipt_without_persisting_it(
     result = READINESS.main(["--dry-run", "--receipt-out", str(receipt), "--json"])
     output = json.loads(capsys.readouterr().out)
 
-    assert result == 2
-    assert output["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert output["status"] == STATUS.BLOCKED
     assert output["errors"] == [
         {
             "source": "arguments",
@@ -1697,7 +1701,7 @@ def _target_file_result(
     :returns: Kubernetes-only target.
     """
     assert dry_run is True
-    assert tuple(required_surfaces) == ("kubernetes",)
+    assert tuple(required_surfaces) == (ENDPOINTS.KUBERNETES_AUTHORITY,)
     assert gitlab_selection is None or not gitlab_selection.requested
     return _target(tmp_path)
 

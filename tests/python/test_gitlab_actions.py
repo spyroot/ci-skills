@@ -56,6 +56,7 @@ ISSUE = import_script_module("gitlab_issue")
 MILESTONE = import_script_module("gitlab_milestone")
 RUNNER = import_script_module("gitlab_runner")
 WIKI = import_script_module("gitlab_wiki")
+STATUS = import_script_module("lib.python.sys.status")
 
 ENTRYPOINTS = {
     "gitlab_issue": ISSUE,
@@ -111,13 +112,13 @@ def test_committed_runner_tag_receipts_match_live_contract() -> None:
         for tag in applied["plan"]["requested_tags"]
         if tag not in applied["readback"]["before_tags"]
     ]
-    assert applied["result_action"] == "APPLIED"
+    assert applied["result_action"] == STATUS.APPLIED
     assert applied["readback"]["added_tags"] == added
     assert set(applied["readback"]["before_tags"]).isdisjoint(added)
     assert set(applied["readback"]["before_tags"] + added) <= set(
         applied["readback"]["after_tags"]
     )
-    assert repeated["result_action"] == "NO_OP"
+    assert repeated["result_action"] == STATUS.NO_OP
     assert repeated["readback"]["mutated"] is False
     assert applied["plan_digest"] == repeated["plan_digest"]
     assert applied["readback"]["id"] == repeated["readback"]["id"]
@@ -186,7 +187,7 @@ def _plan(
         target_kind=target_kind,
         target_reference="team/repo" if target_kind == "project" else "team",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{GITLAB_AUTHORITY}.project",
         body=body,
         resource_id=resource_id,
         token_out=str(token_out) if token_out else None,
@@ -212,7 +213,7 @@ def _live_action_dependencies(
         plan, skill={"revision": {"value": None, "verified": False}}
     )
     access = {
-        "status": "PASS",
+        "status": STATUS.PASS,
         "identity": {"username": "unit"},
         "target": {"kind": plan.target_kind, "id": 42},
     }
@@ -380,7 +381,7 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
 
         """
         invoked.append(kind)
-        return {"action": "NO_OP", "verified": True, "mutated": False}
+        return {"action": STATUS.NO_OP, "verified": True, "mutated": False}
 
     if kind == "gitlab_milestone":
         monkeypatch.setattr(MILESTONES.CreateMilestone, "run", lambda _self: complete())
@@ -400,9 +401,9 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     )
     report = json.loads(capsys.readouterr().out)
 
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.PASS)
     assert invoked == [kind]
-    assert report["status"] == "PASS"
+    assert report["status"] == STATUS.PASS
     assert report["operation"] == operation
 
 
@@ -461,9 +462,9 @@ def test_cli_failure_preserves_primary_and_every_cleanup_failure(
     )
     report = json.loads(capsys.readouterr().out)
 
-    assert result == 2
-    assert report["status"] == "BLOCKED"
-    assert report["cleanup"]["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert report["status"] == STATUS.BLOCKED
+    assert report["cleanup"]["status"] == STATUS.BLOCKED
     assert report["errors"] == [
         {"source": "gitlab_action", "reason": "operation failed"},
         {"source": "cleanup.FailingOperation", "reason": "operation cleanup"},
@@ -502,8 +503,8 @@ def test_entrypoint_reports_operation_factory_failure(
     )
     report = json.loads(capsys.readouterr().out)
 
-    assert result == 2
-    assert report["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert report["status"] == STATUS.BLOCKED
     assert report["errors"] == [{"source": "gitlab_action", "reason": FACTORY_FAILURE}]
 
 
@@ -528,7 +529,7 @@ def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
 
             :returns: NO_OP action record.
             """
-            return {"id": 42, "action": "NO_OP", "verified": True}
+            return {"id": 42, "action": STATUS.NO_OP, "verified": True}
 
         def cleanup(self) -> JSONObject:
             """Fail after the passing report has already been attached.
@@ -548,11 +549,11 @@ def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
     )
     report = json.loads(capsys.readouterr().out)
 
-    assert result == 2
-    assert report["status"] == "BLOCKED"
-    assert report["records"] == [{"id": 42, "action": "NO_OP", "verified": True}]
-    assert report["readback"] == {"id": 42, "action": "NO_OP", "verified": True}
-    assert report["cleanup"]["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert report["status"] == STATUS.BLOCKED
+    assert report["records"] == [{"id": 42, "action": STATUS.NO_OP, "verified": True}]
+    assert report["readback"] == {"id": 42, "action": STATUS.NO_OP, "verified": True}
+    assert report["cleanup"]["status"] == STATUS.BLOCKED
     assert report["errors"][-1] == {
         "source": "cleanup.CompletedOperation",
         "reason": "post-success cleanup",
@@ -581,7 +582,7 @@ def _tag_output(plan: ActionPlan, record: JSONObject) -> JSONObject:
     ]
     data = ACTION._result(
         plan,
-        "PASS" if record["verified"] else "PARTIAL",
+        STATUS.PASS if record["verified"] else STATUS.PARTIAL,
         phase="APPLY",
         mutated=record["mutated"],
         result_action=record["action"],
@@ -654,7 +655,7 @@ def test_action_uses_project_target_before_user_target_without_selector(
     ):
         path.parent.mkdir(parents=True)
         path.write_text(
-            f'[gitlab]\nurl = "https://gitlab.example.test"\nproject = "{reference}"\n',
+            f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nproject = "{reference}"\n',
             encoding="utf-8",
         )
     monkeypatch.setenv("HOME", str(home))
@@ -663,16 +664,16 @@ def test_action_uses_project_target_before_user_target_without_selector(
 
     result = ISSUE.main(["open-bug", "--title", "selected", "--json"])
     project_plan = json.loads(capsys.readouterr().out)
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.DRY_RUN)
     assert project_plan["target"]["reference"] == "project/repo"
-    assert project_plan["target_source"] == "project;target:gitlab.project"
+    assert project_plan["target_source"] == f"project;target:{GITLAB_AUTHORITY}.project"
 
     project_target.unlink()
     result = ISSUE.main(["open-bug", "--title", "selected", "--json"])
     user_plan = json.loads(capsys.readouterr().out)
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.DRY_RUN)
     assert user_plan["target"]["reference"] == "user/repo"
-    assert user_plan["target_source"] == "user;target:gitlab.project"
+    assert user_plan["target_source"] == f"user;target:{GITLAB_AUTHORITY}.project"
     assert user_plan["plan_digest"] != project_plan["plan_digest"]
 
 
@@ -691,7 +692,7 @@ def test_group_action_uses_selected_target_without_group_flag(
     target = home / ".ci-skills" / "target.toml"
     target.parent.mkdir(parents=True)
     target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\ngroup = "platform/team"\n',
+        f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\ngroup = "platform/team"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(home))
@@ -701,9 +702,9 @@ def test_group_action_uses_selected_target_without_group_flag(
     result = RUNNER.main(["assign", "--runner-id", "9", "--json"])
     plan = json.loads(capsys.readouterr().out)
 
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.DRY_RUN)
     assert plan["target"] == {"kind": "group", "reference": "platform/team"}
-    assert plan["target_source"] == "user;target:gitlab.group"
+    assert plan["target_source"] == f"user;target:{GITLAB_AUTHORITY}.group"
 
 
 def test_declared_project_override_replaces_selected_target_for_one_action(
@@ -718,7 +719,7 @@ def test_declared_project_override_replaces_selected_target_for_one_action(
     """
     target = tmp_path / "selected.toml"
     target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "stored/repo"\n',
+        f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nproject = "stored/repo"\n',
         encoding="utf-8",
     )
 
@@ -736,7 +737,7 @@ def test_declared_project_override_replaces_selected_target_for_one_action(
     )
     plan = json.loads(capsys.readouterr().out)
 
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.DRY_RUN)
     assert plan["target"]["reference"] == "override/repo"
     assert plan["target_source"] == "env:CI_SKILLS_TARGET;argv:--project"
 
@@ -766,7 +767,7 @@ def test_milestone_create_reads_back_numeric_id() -> None:
     )
     result = MILESTONES.apply(api, object(), plan, 42)
     assert result == {
-        "action": "APPLIED",
+        "action": STATUS.APPLIED,
         "id": 5,
         "verified": True,
         "title": "release",
@@ -864,9 +865,9 @@ def test_milestone_close_readback_reports_dates_and_state(
     )
     report = json.loads(capsys.readouterr().out)
 
-    assert result == 0
+    assert result == STATUS.exit_code(STATUS.PASS)
     assert report["readback"] == {
-        "action": "APPLIED",
+        "action": STATUS.APPLIED,
         "id": 9,
         "verified": True,
         "title": "release",
@@ -903,7 +904,7 @@ def test_issue_reuses_exact_open_title_only_after_independent_get() -> None:
         }
     )
     result = ISSUES.apply(api, object(), plan, 42)
-    assert result == {"action": "NO_OP", "iid": 8, "verified": True}
+    assert result == {"action": STATUS.NO_OP, "iid": 8, "verified": True}
     assert all(method == "GET" for method, _, _ in api.calls)
 
 
@@ -946,12 +947,12 @@ def test_issue_create_accepts_provider_trimmed_terminal_description_newline(
     repeated = ISSUES.apply(api, object(), plan, 42)
 
     assert applied == {
-        "action": "APPLIED",
+        "action": STATUS.APPLIED,
         "iid": 8,
         "verified": True,
         "web_url": None,
     }
-    assert repeated == {"action": "NO_OP", "iid": 8, "verified": True}
+    assert repeated == {"action": STATUS.NO_OP, "iid": 8, "verified": True}
     assert [method for method, _endpoint, _body in api.calls].count("POST") == 1
 
 
@@ -1021,7 +1022,7 @@ def test_issue_create_rejects_changes_beyond_terminal_description_newline(
 
     result = ISSUES.apply(api, object(), plan, 42)
 
-    assert result["action"] == "APPLIED"
+    assert result["action"] == STATUS.APPLIED
     assert result["verified"] is False
     assert result["errors"] == [{"project_id": 42, "reason": "issue_readback_mismatch"}]
 
@@ -1114,8 +1115,8 @@ def test_wiki_create_accepts_provider_normalized_title_and_reuses_page(
     )
     first = WIKIS.apply(api, object(), plan, 42)
     second = WIKIS.apply(api, object(), plan, 42)
-    assert first["action"] == "APPLIED" and first["verified"] is True
-    assert second["action"] == "NO_OP" and second["verified"] is True
+    assert first["action"] == STATUS.APPLIED and first["verified"] is True
+    assert second["action"] == STATUS.NO_OP and second["verified"] is True
     assert [call[0] for call in api.calls].count("POST") == 1
 
 
@@ -1146,7 +1147,7 @@ def test_wiki_update_accepts_provider_normalized_title() -> None:
         }
     )
     result = WIKIS.apply(api, object(), plan, 42)
-    assert result["action"] == "APPLIED" and result["verified"] is True
+    assert result["action"] == STATUS.APPLIED and result["verified"] is True
 
 
 def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
@@ -1183,10 +1184,10 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
     )
     result = RUNNERS.apply(api, object(), plan, 42)
     assert result["verified"] is False
-    assert result["action"] == "PARTIAL"
+    assert result["action"] == STATUS.PARTIAL
     assert [item["project_id"] for item in result["projects"]] == [11]
     assert result["errors"][0]["project_id"] == 12
-    assert result["cleanup"]["status"] == "PASS"
+    assert result["cleanup"]["status"] == STATUS.PASS
     assert result["projects"][0]["action"] == "ROLLED_BACK"
     assert result["mutated"] is False
 
@@ -1228,7 +1229,7 @@ def test_runner_create_saves_token_0600_without_reporting_it(
         }
     )
     result = RUNNERS.apply(api, object(), plan, 42)
-    assert result["action"] == "APPLIED"
+    assert result["action"] == STATUS.APPLIED
     assert result["id"] == 23
     assert result["verified"] is True
     assert result["sink_persisted"] is True
@@ -1264,7 +1265,7 @@ def test_runner_tag_adds_to_selected_runner_and_reads_back() -> None:
     )
     result = RUNNERS.apply(api, object(), plan, 42)
     assert result == {
-        "action": "APPLIED",
+        "action": STATUS.APPLIED,
         "id": 23,
         "verified": True,
         "mutated": True,
@@ -1333,7 +1334,7 @@ def test_runner_tag_is_no_op_when_tag_already_exists() -> None:
         }
     )
     result = RUNNERS.apply(api, object(), plan, 42)
-    assert result["action"] == "NO_OP"
+    assert result["action"] == STATUS.NO_OP
     assert result["mutated"] is False
     assert all(call[0] != "PUT" for call in api.calls)
     TAG_VALIDATOR.validate(_tag_output(plan, result))
@@ -1521,17 +1522,17 @@ def test_runner_tag_dry_run_and_refusal_match_schema(
     """
     target = tmp_path / "target.toml"
     target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n',
+        f'[{GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
     common = ["tag", "--runner-id", "23", "--json"]
-    assert RUNNER.main([*common, "--tag", "new"]) == 0
+    assert RUNNER.main([*common, "--tag", "new"]) == STATUS.exit_code(STATUS.DRY_RUN)
     dry_run = json.loads(capsys.readouterr().out)
     TAG_VALIDATOR.validate(dry_run)
-    assert dry_run["status"] == "DRY_RUN"
+    assert dry_run["status"] == STATUS.DRY_RUN
 
-    assert RUNNER.main(common) != 0
+    assert RUNNER.main(common) != STATUS.exit_code(STATUS.PASS)
     blocked = json.loads(capsys.readouterr().out)
     TAG_VALIDATOR.validate(blocked)
     assert blocked["errors"][0]["reason"] == "tag_requires_tag"
@@ -1563,9 +1564,9 @@ def test_runner_create_uncertain_provider_result_leaves_no_token_file(
         }
     )
     result = RUNNERS.apply(api, object(), plan, 42)
-    assert result["action"] == "PARTIAL"
+    assert result["action"] == STATUS.PARTIAL
     assert result["mutated"] is None
-    assert result["cleanup"]["status"] == "BLOCKED"
+    assert result["cleanup"]["status"] == STATUS.BLOCKED
     assert not destination.exists()
     assert "provider_5xx" not in str(api.calls)
     assert [call[0] for call in api.calls] == ["GET", "POST"]
@@ -1586,8 +1587,8 @@ def test_receipt_is_portable_and_has_no_token_out_path(tmp_path: Path) -> None:
     )
     data = ACTION._result(
         plan,
-        "PASS",
-        records=[{"id": 23, "action": "APPLIED", "verified": True}],
+        STATUS.PASS,
+        records=[{"id": 23, "action": STATUS.APPLIED, "verified": True}],
         credential_source="file:/private/operator/token",
     )
     output = tmp_path / "receipt.json"
@@ -1673,7 +1674,7 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
         GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda _session, api_client: {
-            "status": "PASS",
+            "status": STATUS.PASS,
             "identity": {"username": "operator"},
             "target": {"kind": "project", "id": 42},
         },
@@ -1690,8 +1691,8 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
         ],
     )
     data = json.loads(capsys.readouterr().out)
-    assert result == 2
-    assert data["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert data["status"] == STATUS.BLOCKED
     assert data["kind"] == "gitlab_issue"
     assert data["errors"] == [
         {"source": "gitlab_action", "reason": "list_response_invalid_shape"}
@@ -1735,7 +1736,7 @@ def test_action_access_failure_preserves_the_failed_subcheck(
         GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda _session, api_client: {
-            "status": "BLOCKED",
+            "status": STATUS.BLOCKED,
             "errors": [{"source": subcheck, "reason": reason}],
         },
     )
@@ -1758,8 +1759,8 @@ def test_action_access_failure_preserves_the_failed_subcheck(
     )
     data = json.loads(capsys.readouterr().out)
 
-    assert result == 2
-    assert data["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert data["status"] == STATUS.BLOCKED
     assert data["errors"] == [{"source": f"gitlab_access.{subcheck}", "reason": reason}]
     assert data["plan_digest"] == plan.digest
     assert data["phase"] == "ACCESS"
@@ -1781,7 +1782,7 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
     receipt_out = tmp_path / "blocked-receipt.json"
     session = _bound_session(plan, skill={"digest": "unit"})
     access = {
-        "status": "PASS",
+        "status": STATUS.PASS,
         "identity": {"username": "operator"},
         "target": {"kind": "project", "id": 42, "full_path": "team/repo"},
     }
@@ -1831,8 +1832,8 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
     report = json.loads(capsys.readouterr().out)
     receipt = json.loads(receipt_out.read_text(encoding="utf-8"))
 
-    assert result == 2
-    assert report["status"] == receipt["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert report["status"] == receipt["status"] == STATUS.BLOCKED
     assert report["phase"] == receipt["phase"] == "APPLY"
     assert report["plan_digest"] == receipt["plan_digest"] == plan.digest
     assert report["verified_target"] == receipt["verified_target"] == access["target"]
@@ -1840,7 +1841,7 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
     assert report["identity"] == access["identity"]
     assert report["mutated"] is receipt["mutated"] is None
     assert report["readback"]["verified"] is False
-    assert report["cleanup"]["status"] == "BLOCKED"
+    assert report["cleanup"]["status"] == STATUS.BLOCKED
     assert receipt["target_file"].startswith("path:")
     assert report["errors"] == [
         {
@@ -1877,8 +1878,8 @@ def test_action_plan_rejects_output_paths_without_creating_files(
         ],
     )
     report = json.loads(capsys.readouterr().out)
-    assert result == 2
-    assert report["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert report["status"] == STATUS.BLOCKED
     assert report["errors"][0]["reason"] == "dry_run_cannot_write_output"
     assert not output.exists()
 
@@ -1909,8 +1910,8 @@ def test_action_plan_rejects_log_file_without_creating_it(
         ],
     )
     report = json.loads(capsys.readouterr().out)
-    assert result == 2
-    assert report["status"] == "BLOCKED"
+    assert result == STATUS.exit_code(STATUS.BLOCKED)
+    assert report["status"] == STATUS.BLOCKED
     assert report["errors"][0]["reason"] == "dry_run_cannot_write_output"
     assert not output.exists()
 
@@ -2023,11 +2024,11 @@ def test_action_plan_json_diagnostic_is_separate_from_machine_result(
     emitted = capsys.readouterr()
     report = json.loads(emitted.out)
     diagnostics = [json.loads(line) for line in emitted.err.splitlines()]
-    assert result == 0
-    assert report["status"] == "DRY_RUN"
+    assert result == STATUS.exit_code(STATUS.DRY_RUN)
+    assert report["status"] == STATUS.DRY_RUN
     assert {diagnostic["run_id"] for diagnostic in diagnostics} == {"unit-run"}
     events = [diagnostic["event"] for diagnostic in diagnostics]
     assert events.count(GITLAB_DEPRECATION_EVENT) == deprecations
     (diagnostic,) = (item for item in diagnostics if item["event"] == "result")
     assert diagnostic["mode"] == "dry_run"
-    assert diagnostic["result"] == "DRY_RUN"
+    assert diagnostic["result"] == STATUS.DRY_RUN

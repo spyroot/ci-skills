@@ -1550,7 +1550,7 @@ def test_api_selection_conflict_rejects_before_any_provider_call(
         env={**providers, TARGET_ENV: str(target_path)},
     )
 
-    assert result.returncode != 0
+    assert result.returncode != STATUS.exit_code(STATUS.PASS)
     assert read_journal(call_journal) == []
 
 

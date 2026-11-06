@@ -15,6 +15,12 @@ from typing import TYPE_CHECKING, Final
 import pytest
 from conftest import REPO_ROOT, import_script_module, load_module
 from jsonschema import Draft202012Validator, ValidationError
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONValue
@@ -522,21 +528,21 @@ def test_portability_schema_rejects_one_invalid_result_invariant(
         portability_schema.validate(record)
 
 
-TARGET_HEREDOC: Final[str] = """#!/usr/bin/env bash
+TARGET_HEREDOC: Final[str] = f"""#!/usr/bin/env bash
 set -euo pipefail
 target_file="$(mktemp)"
 cat >"$target_file" <<TOML
-[github]
+[{GITHUB_AUTHORITY}]
 host = "$GITHUB_HOST"
 repository = "$GITHUB_REPOSITORY"
-[gitlab]
+[{GITLAB_AUTHORITY}]
 url = "$GITLAB_URL"
 project = "$GITLAB_PROJECT"
 token_file = "$TOKEN_FILE"
-[kubernetes]
+[{KUBERNETES_AUTHORITY}]
 context = "$KUBE_CONTEXT"
 server = "$KUBERNETES_SERVER"
-[harbor]
+[{HARBOR_AUTHORITY}]
 url = "$HARBOR_URL"
 project = "$HARBOR_PROJECT"
 TOML

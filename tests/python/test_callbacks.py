@@ -23,6 +23,10 @@ from typing import TYPE_CHECKING, Optional, TypeAlias, Union
 
 import pytest
 from conftest import SKILL_ROOT, import_script_module
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+)
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 CALLBACKS = import_script_module("lib.python.core.abstract.callback")
@@ -1772,7 +1776,7 @@ def test_api_callbacks_build_one_concrete_operation_order(
     """
     args = Namespace(
         action=action,
-        provider="github",
+        provider=GITHUB_AUTHORITY,
         gitlab_profile=None,
         endpoint="repos/unit/repo" if action == "get" else None,
         field=None,
@@ -1813,7 +1817,7 @@ def test_api_check_rejects_transforms_before_action_construction(
     )
     args = Namespace(
         action="check",
-        provider="github",
+        provider=GITHUB_AUTHORITY,
         gitlab_profile=None,
         endpoint=None,
         field="login",
@@ -1834,19 +1838,19 @@ def test_api_check_rejects_transforms_before_action_construction(
     (
         (
             "/projects?membership=true",
-            "gitlab",
+            GITLAB_AUTHORITY,
             "without a leading slash is required, such as projects?membership=true",
             "no scheme",
         ),
         (
             "https://gitlab.example.test/api/v4/projects",
-            "gitlab",
+            GITLAB_AUTHORITY,
             "projects?membership=true; no scheme, host, fragment or dot segments",
             "leading slash",
         ),
         (
             "repos/../user",
-            "github",
+            GITHUB_AUTHORITY,
             "user/repos?per_page=100; no scheme, host, fragment or dot segments",
             "leading slash",
         ),
@@ -1896,7 +1900,7 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
     assert context.payload == {
         "mode": "dry-run",
         "operation": "get",
-        "provider": "github",
+        "provider": GITHUB_AUTHORITY,
         "host": "github.example.test",
         "endpoint": "repos/unit/repo",
         "raw": False,
@@ -1912,7 +1916,7 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
     assert context.payload == {
         "mode": "dry-run",
         "operation": "check",
-        "provider": "github",
+        "provider": GITHUB_AUTHORITY,
         "host": "github.example.test",
         "endpoint": "user",
         "raw": False,
@@ -1929,7 +1933,7 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
         (
             API_READ.ApiOutput.JSON,
             {
-                "provider": "github",
+                "provider": GITHUB_AUTHORITY,
                 "host": "github.example.test",
                 "authenticated": True,
                 "user": "octo",
@@ -2112,7 +2116,7 @@ def test_read_runner_uses_the_real_composed_callback_operation() -> None:
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{GITLAB_AUTHORITY}.project",
         body={"description": None, "limit": 10, "filters": []},
     )
 

@@ -25,6 +25,11 @@ from lib.python.core.catalog import (
     GITLAB_VARIABLES,
     github_variables,
 )
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
 from lib.python.core.target import (
     Target,
     TargetError,
@@ -42,7 +47,7 @@ def bind_sources(target: Target, *, revision: Optional[str] = None) -> Target:
         or installed skill identity cannot be resolved.
     """
     github = None
-    if "github" in target.active_surfaces:
+    if GITHUB_AUTHORITY in target.active_surfaces:
         if target.github is None:
             raise TargetError("github_target_missing")
         github = _token_source(
@@ -52,7 +57,7 @@ def bind_sources(target: Target, *, revision: Optional[str] = None) -> Target:
             clear_names=GITHUB_TOKEN_VARIABLES,
         )
     gitlab = None
-    if "gitlab" in target.active_surfaces:
+    if GITLAB_AUTHORITY in target.active_surfaces:
         if target.gitlab is None:
             raise TargetError("gitlab_target_missing")
         gitlab = _token_source(
@@ -62,7 +67,7 @@ def bind_sources(target: Target, *, revision: Optional[str] = None) -> Target:
         )
     kube, files = (
         _kubernetes_source(target)
-        if "kubernetes" in target.active_surfaces
+        if KUBERNETES_AUTHORITY in target.active_surfaces
         else (None, ())
     )
     sources = Sources(

@@ -361,6 +361,15 @@ a GitLab dry-run with and without `--gitlab public` and compare the `routing` ob
   Rationale: One meaning per name, defined in code; a reader of a target or a result learns the host from `url` and
   `origin`, not from the key.
   Governing Ref: team answer "remember it just a key it has meaning if we define meaning in coe"; DEC-07.
+- Decision DEC-20: PR #138 (`nero/ci14-ci15-completion`) is folded into this PR with a `--no-ff` merge (`c696009`),
+  which keeps its five commits: `9d93978` (mirror verification and runner identity compatibility), `84a81d0` (mirror
+  confirmation stable across equivalent clone URLs), `a41791d` (native mirror IDs in partial recovery reports),
+  `848840e` (regression cases for mirror and runner compatibility) and `12ddee8` (regression baseline). The merge had
+  no conflicts. The candidate receipts are captured once, on the combined head.
+  Status: ACCEPTED
+  Rationale: Both PRs change `ci-skills/lib`, so each change invalidates the other's receipts; one combined head needs
+  one receipt set. The design review (B01) recommended integrating #138 first.
+  Governing Ref: team answers "because we suppose to had integrate 138 and after 141 no ?" and "use"; review B01.
 
 ## Outcomes & Retrospective
 
@@ -801,10 +810,13 @@ Acceptance is the installed behavior against a target of this shape:
 
     [gitlab_private]
     url = "https://gitlab.example.test"
+    # ci-skills reads this file for --gitlab private or no option. Without token_file it uses the first set
+    # GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN, then the glab credential store for this url's host.
     token_file = "gitlab-private.token"
 
     [gitlab_public]
     url = "https://gitlab.second.example.test"
+    # ci-skills reads this file only when the command runs with --gitlab public.
     token_file = "gitlab-public.token"
 
     [kubernetes]

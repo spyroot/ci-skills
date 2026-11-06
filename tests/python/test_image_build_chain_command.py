@@ -17,7 +17,12 @@ from typing import TYPE_CHECKING, Optional
 import pytest
 from conftest import SKILL_ROOT, import_script_module
 from jsonschema import Draft202012Validator
-from lib.python.core.endpoints import GITLAB_PUBLIC_SELECTOR
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    GITLAB_PUBLIC_SELECTOR,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
 from referencing import Registry, Resource
 from test_image_build_chain import (
     ABSTRACT_CALLBACKS,
@@ -43,6 +48,7 @@ from test_image_build_chain import (
 COMMAND = import_script_module("lib.python.core.kubernetes.image_build_chain.command")
 GitLabSelection = import_script_module("lib.python.core.target").GitLabSelection
 MODEL = import_script_module("lib.python.core.kubernetes.image_build_chain.model")
+STATUS = import_script_module("lib.python.sys.status")
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
@@ -131,10 +137,10 @@ def test_chain_emits_schema_valid_runner_delivery_or_classified_failure(
         outcome="failed-manager" if outcome == "cleanup-failure" else outcome,
         cleanup_failure=outcome == "cleanup-failure",
     )
-    assert status == (0 if outcome == "success" else 2)
-    assert output["status"] == ("PASS" if outcome == "success" else "BLOCKED")
+    expected = STATUS.PASS if outcome == "success" else STATUS.BLOCKED
+    assert (status, output["status"]) == (STATUS.exit_code(expected), expected)
     assert output["cleanup"]["status"] == (
-        "BLOCKED" if outcome == "cleanup-failure" else "PASS"
+        STATUS.BLOCKED if outcome == "cleanup-failure" else STATUS.PASS
     )
     if outcome == "success":
         proof = next(
@@ -331,17 +337,18 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
 
     monkeypatch.setattr(COMMAND, "workflow", workflow)
     command = COMMAND.ImageBuildChain(args)
-    assert command.execute() == 0
+    status = STATUS.DRY_RUN if explicit else STATUS.PLANNED
+    assert command.execute() == STATUS.exit_code(status)
     output = json.loads(capsys.readouterr().out)
     _validator().validate(output)
-    assert output["status"] == ("DRY_RUN" if explicit else "PLANNED")
+    assert output["status"] == status
     assert output["confirmable"] is not explicit
     assert output["errors"] == []
     assert "cleanup" not in output
     assert resolutions == [
         (
             explicit,
-            ("gitlab", "kubernetes", "harbor"),
+            (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY),
             GitLabSelection(gitlab_selector, gitlab_profile),
         )
     ]
@@ -413,7 +420,7 @@ def test_chain_describe_never_constructs_execution_or_reads_target(
     ("apply", "dry_run", "live_plan", "confirm", "expected"),
     (
         (False, False, False, False, "LIVE_PLAN"),
-        (False, True, False, False, "DRY_RUN"),
+        (False, True, False, False, STATUS.DRY_RUN),
         (False, False, True, False, "LIVE_PLAN"),
         (True, False, False, True, "APPLY"),
     ),
@@ -487,7 +494,7 @@ def test_both_commands_reject_invalid_mode_before_target_setup(
     monkeypatch.setattr(
         READINESS, "emit_result", lambda data, _args: print(json.dumps(data)) or 2
     )
-    assert command.execute() == 2
+    assert command.execute() == STATUS.exit_code(STATUS.BLOCKED)
     output = json.loads(capsys.readouterr().out)
-    assert output["status"] == "BLOCKED"
+    assert output["status"] == STATUS.BLOCKED
     assert output["errors"]

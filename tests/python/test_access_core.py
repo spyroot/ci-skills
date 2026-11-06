@@ -18,6 +18,9 @@ from typing import IO, TYPE_CHECKING, Optional, Protocol, TypedDict, Union, Unpa
 import pytest
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+STATUS = import_script_module("lib.python.sys.status")
+
 TEST_REVISION = "a" * 40
 GitLabSelection = import_script_module("lib.python.core.target").GitLabSelection
 
@@ -309,15 +312,15 @@ def _write_token_target(tmp_path: Path, token_file: Path) -> Path:
     path = tmp_path / "target-with-token.toml"
     path.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             f'token_file = "{token_file}"\n'
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
         ),
@@ -347,16 +350,16 @@ def _write_full_target(
     kubeconfig_line = f'kubeconfig = "{kubeconfig}"\n' if kubeconfig else ""
     path.write_text(
         (
-            "[github]\n"
+            f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             f"{github_token}"
             "\n"
-            "[gitlab]\n"
+            f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
             'url = "https://gitlab.example.test"\n'
             f"{gitlab_token}"
             "\n"
-            "[kubernetes]\n"
+            f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f"{kubeconfig_line}"
@@ -638,10 +641,15 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
         :param _args: Parsed command arguments accepted by the collector double.
         :returns: Minimal passing Ceph report.
         """
-        return {"kind": "ceph_cluster", "status": "PASS", "records": [], "errors": []}
+        return {
+            "kind": "ceph_cluster",
+            "status": STATUS.PASS,
+            "records": [],
+            "errors": [],
+        }
 
-    assert cli.execute(args, collect_ceph_cluster) == 0
-    assert json.loads(capsys.readouterr().out)["status"] == "PASS"
+    assert cli.execute(args, collect_ceph_cluster) == STATUS.exit_code(STATUS.PASS)
+    assert json.loads(capsys.readouterr().out)["status"] == STATUS.PASS
     assert not any("daemonsets" in call for call in calls)
 
     def collect_cilium(_target: Target, _args: argparse.Namespace) -> None:
@@ -654,9 +662,9 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
         """
         pytest.fail("Cilium collection must wait for its live access gate")
 
-    assert cli.execute(args, collect_cilium) == 2
+    assert cli.execute(args, collect_cilium) == STATUS.exit_code(STATUS.BLOCKED)
     blocked = json.loads(capsys.readouterr().out)
-    assert blocked["surfaces"]["kubernetes"]["reason"] == (
+    assert blocked["surfaces"][ENDPOINTS.KUBERNETES_AUTHORITY]["reason"] == (
         "cilium_namespace_not_unique"
     )
     assert any("daemonsets" in call for call in calls)
@@ -678,18 +686,29 @@ def test_check_access_passes_when_all_three_authorities_are_admin(
 
     report = access.check_access(_load_target(target_file))
 
-    assert report["status"] == "PASS"
-    assert set(report["surfaces"]) == {"github", "gitlab", "kubernetes"}
-    assert report["surfaces"]["github"]["identity"] == "unit-gh"
-    assert report["surfaces"]["gitlab"]["observed_capability"] == [
+    assert report["status"] == STATUS.PASS
+    assert set(report["surfaces"]) == {
+        ENDPOINTS.GITHUB_AUTHORITY,
+        ENDPOINTS.GITLAB_AUTHORITY,
+        ENDPOINTS.KUBERNETES_AUTHORITY,
+    }
+    assert report["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["identity"] == "unit-gh"
+    assert report["surfaces"][ENDPOINTS.GITLAB_AUTHORITY]["observed_capability"] == [
         "authenticated_host",
         "instance_admin_identity",
         "instance_runner_api_read",
     ]
-    assert "cluster_wildcard" in report["surfaces"]["kubernetes"]["observed_capability"]
-    assert "cilium_pods_exec" in report["surfaces"]["kubernetes"]["observed_capability"]
     assert (
-        "cilium_health_exec" in report["surfaces"]["kubernetes"]["observed_capability"]
+        "cluster_wildcard"
+        in report["surfaces"][ENDPOINTS.KUBERNETES_AUTHORITY]["observed_capability"]
+    )
+    assert (
+        "cilium_pods_exec"
+        in report["surfaces"][ENDPOINTS.KUBERNETES_AUTHORITY]["observed_capability"]
+    )
+    assert (
+        "cilium_health_exec"
+        in report["surfaces"][ENDPOINTS.KUBERNETES_AUTHORITY]["observed_capability"]
     )
     assert any(
         call[:4] == ("glab", "api", "--hostname", "gitlab.example.test")
@@ -725,7 +744,7 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
         _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig)),
     )
 
-    assert report["status"] == "PASS"
+    assert report["status"] == STATUS.PASS
     assert report["execution_host"]
     assert report["captured_at"]
     # Running inside this checkout, the revision comes from Git and is marked
@@ -744,21 +763,24 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     assert consuming["source"] is None or consuming["source"].startswith("env:")
     assert report["skill"]["revision"]["source"] == "git_head"
     assert report["targets"] == {
-        "github": "github.example.test/unit/repo",
-        "gitlab": "https://gitlab.example.test",
-        "kubernetes": {
+        ENDPOINTS.GITHUB_AUTHORITY: "github.example.test/unit/repo",
+        ENDPOINTS.GITLAB_AUTHORITY: "https://gitlab.example.test",
+        ENDPOINTS.KUBERNETES_AUTHORITY: {
             "context": "unit-context",
             "server": "https://api.cluster.example.test:6443",
         },
     }
-    assert report["credential_sources"]["github"] == (
+    assert report["credential_sources"][ENDPOINTS.GITHUB_AUTHORITY] == (
         "gh-credential-store:github.example.test"
     )
-    assert report["credential_sources"]["gitlab"] == (
+    assert report["credential_sources"][ENDPOINTS.GITLAB_AUTHORITY] == (
         "glab-credential-store:gitlab.example.test"
     )
-    assert report["credential_sources"]["kubernetes"] == f"file:{kubeconfig.resolve()}"
-    kubernetes = report["surfaces"]["kubernetes"]
+    assert (
+        report["credential_sources"][ENDPOINTS.KUBERNETES_AUTHORITY]
+        == f"file:{kubeconfig.resolve()}"
+    )
+    kubernetes = report["surfaces"][ENDPOINTS.KUBERNETES_AUTHORITY]
     assert kubernetes["credential_source"] == f"file:{kubeconfig.resolve()}"
     assert kubernetes["details"]["kubeconfig_files"] == [str(kubeconfig.resolve())]
     assert kubernetes["details"]["context"] == "unit-context"
@@ -797,9 +819,15 @@ def test_check_access_resolves_ambient_token_environment_sources(
         _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig)),
     )
 
-    assert report["status"] == "PASS"
-    assert report["credential_sources"]["github"] == "env:GH_ENTERPRISE_TOKEN"
-    assert report["credential_sources"]["gitlab"] == "env:GITLAB_ACCESS_TOKEN"
+    assert report["status"] == STATUS.PASS
+    assert (
+        report["credential_sources"][ENDPOINTS.GITHUB_AUTHORITY]
+        == "env:GH_ENTERPRISE_TOKEN"
+    )
+    assert (
+        report["credential_sources"][ENDPOINTS.GITLAB_AUTHORITY]
+        == "env:GITLAB_ACCESS_TOKEN"
+    )
     assert token not in json.dumps(report)
 
 
@@ -853,9 +881,15 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
 
     report = access.check_access(target)
 
-    assert report["status"] == "PASS"
-    assert report["credential_sources"]["github"] == f"file:{github_token.resolve()}"
-    assert report["credential_sources"]["gitlab"] == f"file:{gitlab_token.resolve()}"
+    assert report["status"] == STATUS.PASS
+    assert (
+        report["credential_sources"][ENDPOINTS.GITHUB_AUTHORITY]
+        == f"file:{github_token.resolve()}"
+    )
+    assert (
+        report["credential_sources"][ENDPOINTS.GITLAB_AUTHORITY]
+        == f"file:{gitlab_token.resolve()}"
+    )
     gh_envs = [env for env in observed_envs if env and "GH_ENTERPRISE_TOKEN" in env]
     gl_envs = [env for env in observed_envs if env and "GITLAB_TOKEN" in env]
     assert gh_envs and all(
@@ -978,9 +1012,12 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
         _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig)),
     )
 
-    assert report["status"] == "PASS"
-    assert report["credential_sources"]["kubernetes"] == f"file:{kubeconfig.resolve()}"
-    details = report["surfaces"]["kubernetes"]["details"]
+    assert report["status"] == STATUS.PASS
+    assert (
+        report["credential_sources"][ENDPOINTS.KUBERNETES_AUTHORITY]
+        == f"file:{kubeconfig.resolve()}"
+    )
+    details = report["surfaces"][ENDPOINTS.KUBERNETES_AUTHORITY]["details"]
     assert details["kubeconfig_files"] == [str(kubeconfig.resolve())]
     assert details["context"] == "unit-context"
     assert details["user_entry"] == "admin-user"
@@ -1039,16 +1076,20 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
 @pytest.mark.parametrize(
     ("scenario", "surface", "reason"),
     (
-        ("github_auth_failed", "github", "authentication"),
-        ("github_api_failed", "github", "authentication"),
-        ("gitlab_auth_wrong_host", "gitlab", "authentication"),
-        ("gitlab_non_admin", "gitlab", "instance_admin_required"),
-        ("gitlab_identity_wrong_host", "gitlab", "host_mismatch"),
-        ("gitlab_runner_denied", "gitlab", "authorization"),
-        ("k8s_wrong_server", "kubernetes", "api_server_mismatch"),
-        ("k8s_not_admin", "kubernetes", "cluster_wildcard_denied"),
-        ("k8s_exec_denied", "kubernetes", "pods_exec_denied"),
-        ("k8s_health_failed", "kubernetes", "cilium_health_exec_failed"),
+        ("github_auth_failed", ENDPOINTS.GITHUB_AUTHORITY, "authentication"),
+        ("github_api_failed", ENDPOINTS.GITHUB_AUTHORITY, "authentication"),
+        ("gitlab_auth_wrong_host", ENDPOINTS.GITLAB_AUTHORITY, "authentication"),
+        ("gitlab_non_admin", ENDPOINTS.GITLAB_AUTHORITY, "instance_admin_required"),
+        ("gitlab_identity_wrong_host", ENDPOINTS.GITLAB_AUTHORITY, "host_mismatch"),
+        ("gitlab_runner_denied", ENDPOINTS.GITLAB_AUTHORITY, "authorization"),
+        ("k8s_wrong_server", ENDPOINTS.KUBERNETES_AUTHORITY, "api_server_mismatch"),
+        ("k8s_not_admin", ENDPOINTS.KUBERNETES_AUTHORITY, "cluster_wildcard_denied"),
+        ("k8s_exec_denied", ENDPOINTS.KUBERNETES_AUTHORITY, "pods_exec_denied"),
+        (
+            "k8s_health_failed",
+            ENDPOINTS.KUBERNETES_AUTHORITY,
+            "cilium_health_exec_failed",
+        ),
     ),
 )
 def test_check_access_blocks_each_required_surface(
@@ -1074,8 +1115,8 @@ def test_check_access_blocks_each_required_surface(
 
     report = access.check_access(_load_target(target_file))
 
-    assert report["status"] == "BLOCKED"
-    assert report["surfaces"][surface]["status"] == "BLOCKED"
+    assert report["status"] == STATUS.BLOCKED
+    assert report["surfaces"][surface]["status"] == STATUS.BLOCKED
     assert report["surfaces"][surface]["reason"] == reason
     assert report["surfaces"][surface]["next_step"]
 
@@ -1108,14 +1149,16 @@ def test_dry_run_access_lists_probes_without_calling_live_tools(
     _patch_provider_commands(monkeypatch, fail_if_called)
     report = access.dry_run_access(_load_target(target_file))
 
-    assert report["status"] == "DRY_RUN"
-    assert report["surfaces"]["github"]["probes"] == [
+    assert report["status"] == STATUS.DRY_RUN
+    assert report["surfaces"][ENDPOINTS.GITHUB_AUTHORITY]["probes"] == [
         "gh auth status",
         "gh api user",
         "gh api repository",
     ]
-    assert "GET /user is_admin" in report["surfaces"]["gitlab"]["probes"]
-    assert "pods/exec" in report["surfaces"]["kubernetes"]["probes"]
+    assert (
+        "GET /user is_admin" in report["surfaces"][ENDPOINTS.GITLAB_AUTHORITY]["probes"]
+    )
+    assert "pods/exec" in report["surfaces"][ENDPOINTS.KUBERNETES_AUTHORITY]["probes"]
 
 
 def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
@@ -1176,7 +1219,7 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
 
     surface = gitlab.gitlab_access(target)
 
-    assert surface.status == "PASS"
+    assert surface.status == STATUS.PASS
     assert observed_envs
     assert all(env and env.get("GITLAB_TOKEN") == token for env in observed_envs)
     assert token not in json.dumps(surface.as_dict())
@@ -1233,7 +1276,7 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
 
     surface = gitlab.gitlab_access(_load_target(target_file))
 
-    assert surface.status == "PASS"
+    assert surface.status == STATUS.PASS
     assert all(not env or "GITLAB_TOKEN" not in env for env in observed_envs)
 
 
@@ -1320,7 +1363,7 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
 
     surface = gitlab.gitlab_access(target)
 
-    assert surface.status == "BLOCKED"
+    assert surface.status == STATUS.BLOCKED
     assert surface.reason == expected_reason
     assert surface.identity is None
     assert calls == []

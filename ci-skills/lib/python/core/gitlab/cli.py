@@ -22,6 +22,7 @@ from lib.python.core.catalog import (
     missing_required_options,
 )
 from lib.python.core.cli import _failure, output_mode
+from lib.python.core.endpoints import GITLAB_AUTHORITY
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 from lib.python.core.json_types import (
@@ -72,7 +73,7 @@ def resolve_gitlab_target(
         explicit_target,
         explicit_binding,
         dry_run=dry_run,
-        required_surfaces=("gitlab",),
+        required_surfaces=(GITLAB_AUTHORITY,),
         gitlab_selection=gitlab_selection,
     )
     if selected.gitlab is None or selected.source_file is None:

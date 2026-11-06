@@ -26,6 +26,7 @@ ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 ISSUES = import_script_module("lib.python.core.gitlab.gitlab_issues")
 MILESTONES = import_script_module("lib.python.core.gitlab.gitlab_milestones")
 WIKIS = import_script_module("lib.python.core.gitlab.gitlab_wikis")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 class ScriptedAPI:
@@ -115,7 +116,7 @@ def _plan(kind: str, title: str, *, content: Optional[str] = None) -> ActionPlan
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{ENDPOINTS.GITLAB_AUTHORITY}.project",
         body=body,
         resource_id=None,
         token_out=None,
@@ -611,7 +612,7 @@ def test_milestone_put_timeout_reconciles_by_id_without_reposting() -> None:
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{ENDPOINTS.GITLAB_AUTHORITY}.project",
         body={"due_date": "2026-10-31"},
         resource_id=9,
         token_out=None,
@@ -647,7 +648,7 @@ def test_wiki_rename_put_timeout_reconciles_by_new_title_without_reposting() -> 
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{ENDPOINTS.GITLAB_AUTHORITY}.project",
         body={"title": "New", "content": "new body"},
         resource_id="Old",
         token_out=None,
@@ -681,7 +682,7 @@ def test_successful_milestone_put_with_stale_readback_returns_partial_record() -
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{ENDPOINTS.GITLAB_AUTHORITY}.project",
         body={"due_date": "2026-10-31"},
         resource_id=9,
         token_out=None,
@@ -718,7 +719,7 @@ def test_successful_wiki_put_with_stale_readback_returns_partial_record() -> Non
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
+        target_source=f"env:CI_SKILLS_TARGET;target:{ENDPOINTS.GITLAB_AUTHORITY}.project",
         body={"content": "new"},
         resource_id="Guide",
         token_out=None,

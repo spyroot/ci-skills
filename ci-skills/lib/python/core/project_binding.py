@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Final, Optional, TypeAlias, Union
 
 from lib.python.core.catalog import DEFAULT_AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.runtime import error_class, run_command_tail
 from lib.python.core.target import GitLabSelection, Target, TargetError, load_target
 
@@ -308,11 +309,11 @@ def load_project_binding(
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise TargetError(f"binding_unavailable_or_invalid:{binding}") from exc
     if (
-        set(data) != {"schema_version", "target", "kubernetes"}
+        set(data) != {"schema_version", "target", KUBERNETES_AUTHORITY}
         or data.get("schema_version") != "1.0"
     ):
         raise TargetError("binding_shape_invalid")
-    kube = data["kubernetes"]
+    kube = data[KUBERNETES_AUTHORITY]
     if not isinstance(kube, dict) or set(kube) != {"sources"}:
         raise TargetError("binding_kubernetes_invalid")
     sources = kube["sources"]
@@ -325,7 +326,7 @@ def load_project_binding(
         optional_surfaces=optional_surfaces,
         **_gitlab_keywords(gitlab_selection),
     )
-    if "kubernetes" not in target.active_surfaces:
+    if KUBERNETES_AUTHORITY not in target.active_surfaces:
         return replace(
             target,
             target_reference=target.selection_source(f"binding:{binding}"),

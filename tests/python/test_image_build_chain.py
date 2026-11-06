@@ -44,6 +44,7 @@ VERIFICATION = import_script_module(
     "lib.python.core.kubernetes.image_build_chain.verification"
 )
 WORKFLOW = import_script_module("lib.python.core.kubernetes.image_build_chain.workflow")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -236,7 +237,11 @@ def _target() -> TARGET.Target:
             server="https://api.cluster.example.test:6443",
             kubeconfig=None,
         ),
-        active_surfaces=("gitlab", "kubernetes", "harbor"),
+        active_surfaces=(
+            ENDPOINTS.GITLAB_AUTHORITY,
+            ENDPOINTS.KUBERNETES_AUTHORITY,
+            ENDPOINTS.HARBOR_AUTHORITY,
+        ),
         tested_revision="c" * 40,
         source_file=Path("/unit/target.toml"),
         source_kind="fixture",
@@ -838,7 +843,7 @@ def test_chain_retains_delivery_and_cleans_failures_timeouts_and_signals(
     assert stages.index("harbor-push") < stages.index("manager")
     assert stages.index("manager") < stages.index("manager-deploy")
     assert cleanup == ([] if outcome == "success" else ["manager", "scc", "runner"])
-    assert state.chain_cleanup["status"] == "PASS"
+    assert state.chain_cleanup["status"] == STATUS.PASS
     if outcome == "success":
         assert state.created_runner_id == RUNNER_ID
         assert state.deployment_result["verified"] is True
@@ -1019,7 +1024,7 @@ def test_chain_runner_cleanup_uses_delete_plan_and_restores_execution_context(
         assert len(records) == 1
         record = records[0]
         assert record["callback"] == "DeleteRunner"
-        assert record["action"] == "APPLIED"
+        assert record["action"] == STATUS.APPLIED
         assert record["id"] == RUNNER_ID
         assert record["verified"] is True
         assert record["after"]["global_get_status"] == 404
@@ -1033,11 +1038,11 @@ def _verified_project_access() -> JSONObject:
     :returns: Fresh verified target mapping matching the selected numeric project.
     """
     return {
-        FIELD_STATUS: STATUS.PASS,
-        "target": {
+        IDENTITY.ACCESS_STATUS: STATUS.PASS,
+        IDENTITY.ACCESS_TARGET: {
             **runner_lifecycle.VERIFIED_TARGET,
-            "id": PROJECT_ID,
-            "full_path": PROJECT_PATH,
+            IDENTITY.TARGET_ID: PROJECT_ID,
+            IDENTITY.TARGET_PATH: PROJECT_PATH,
         },
     }
 
@@ -1054,7 +1059,7 @@ def test_numeric_project_chain_prepares_inner_manager_from_verified_access(
     action = _prepared_action(apply=True)
     action.args.project = str(PROJECT_ID)
     action.args.namespace = None
-    action.gitlab_selection = ("project", str(PROJECT_ID))
+    action.gitlab_selection = (IDENTITY.TARGET_PROJECT, str(PROJECT_ID))
     action.repository_identity = IDENTITY.RepositoryIdentity(
         None, IDENTITY.RepositorySource.UNKNOWN
     )

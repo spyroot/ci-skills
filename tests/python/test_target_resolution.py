@@ -31,16 +31,17 @@ CLI = import_script_module("lib.python.core.cli")
 CATALOG = import_script_module("lib.python.core.catalog")
 TARGET = import_script_module("lib.python.core.target")
 PROJECT_BINDING = import_script_module("lib.python.core.project_binding")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 TARGET_BODY = (
-    "[github]\n"
+    f"[{ENDPOINTS.GITHUB_AUTHORITY}]\n"
     'host = "github.example.test"\n'
     'repository = "unit/repo"\n'
     "\n"
-    "[gitlab]\n"
+    f"[{ENDPOINTS.GITLAB_AUTHORITY}]\n"
     'url = "https://gitlab.example.test"\n'
     "\n"
-    "[kubernetes]\n"
+    f"[{ENDPOINTS.KUBERNETES_AUTHORITY}]\n"
     'context = "unit-context"\n'
     'server = "https://api.cluster.example.test:6443"\n'
 )
@@ -194,12 +195,12 @@ def test_node_diagnostic_routes_are_optional_but_strict(tmp_path: Path) -> None:
 
     path.write_text(
         TARGET_BODY
-        + "\n[kubernetes.node_diagnostics]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics]\n"
         + 'node = "node-a"\n'
-        + "\n[kubernetes.node_diagnostics.cilium]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.cilium]\n"
         + 'namespace = "cilium"\nselector = "app=cilium"\n'
         + 'container = "cilium-agent"\n'
-        + "\n[kubernetes.node_diagnostics.journal]\n"
+        + f"\n[{ENDPOINTS.KUBERNETES_AUTHORITY}.node_diagnostics.journal]\n"
         + 'namespace = "diagnostics"\nselector = "app=journal"\n'
         + 'container = "journal-reader"\n'
         + 'directory = "/host-journal"\n'

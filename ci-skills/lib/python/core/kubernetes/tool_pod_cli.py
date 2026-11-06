@@ -26,6 +26,7 @@ from lib.python.core.action_modes import (
 from lib.python.core.catalog import describe
 from lib.python.core.cli import parser
 from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.endpoints import KUBERNETES_AUTHORITY
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.json_types import JSONObject, JSONValue, json_object
 from lib.python.core.kubernetes.kubernetes import K8SAuth, KubernetesError
@@ -240,7 +241,7 @@ def execute(args: argparse.Namespace) -> int:
             args.target,
             args.binding,
             dry_run=mode == ActionMode.OFFLINE,
-            required_surfaces=("kubernetes",),
+            required_surfaces=(KUBERNETES_AUTHORITY,),
         )
         if mode != ActionMode.OFFLINE:
             target = bind_sources(target, revision=args.revision)

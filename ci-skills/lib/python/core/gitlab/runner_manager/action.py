@@ -12,6 +12,11 @@ from typing import Final, Optional
 
 from lib.python.access.credentials import bind_sources
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.endpoints import (
+    GITLAB_AUTHORITY,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
 from lib.python.core.gitlab.gitlab_runners import RunnerRecord
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabService
 from lib.python.core.json_types import JSONObject, copy_json
@@ -430,9 +435,9 @@ class GitLabRunnerManagerAction(WorkflowAction):
         self.context.args = self.args
         self.explicit_tags = tuple(getattr(self.args, "tag", ()))
         surfaces = (
-            ("gitlab", "kubernetes", "harbor")
+            (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY)
             if self.args.action == "deploy"
-            else ("gitlab", "kubernetes")
+            else (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY)
         )
         self.target = resolve_target(
             self.args.target,
@@ -614,18 +619,18 @@ class GitLabRunnerManagerAction(WorkflowAction):
                 "target_source": self.target.gitlab.selection_source(
                     self.target.source_kind or "target"
                 ),
-                "gitlab": {
+                GITLAB_AUTHORITY: {
                     "origin": self.target.gitlab.url,
                     "session": self._session_evidence(),
                     "runner": self._runner_evidence(),
                 },
-                "kubernetes": {
+                KUBERNETES_AUTHORITY: {
                     "context": self.target.kubernetes.context,
                     "server": self.target.kubernetes.server,
                 }
                 if self.target.kubernetes
                 else None,
-                "harbor": {
+                HARBOR_AUTHORITY: {
                     "url": self.target.harbor.url,
                     "project": self.target.harbor.project,
                 }

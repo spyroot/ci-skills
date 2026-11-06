@@ -88,20 +88,27 @@ url = "https://gitlab.example.com"
 # group = "group"
 # runner_id = 123
 
-# Optional: a private token file instead of the `glab` credential store.
-# Relative paths resolve beside this target file.
+# ci-skills reads this token file when a command selects this instance:
+# --gitlab private, or no option while [gitlab_routing].default names it.
+# A relative path resolves beside this target file. Without token_file,
+# ci-skills uses the first of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN
+# that is set, and without those the glab credential store for the host in
+# url. An environment token is not tied to a host: ci-skills sends it to
+# whichever instance the command selects, so each instance declares its own
+# token_file.
 # The full diagnostics access check needs an instance administrator identity.
 # The GitLab-only check proves identity and target read access; an action's
 # apply and read-back establish whether that action is authorized.
-# token_file = "/home/user/.ci-skills/credentials/gitlab-private.token"
+token_file = "gitlab-private.token"
 
 [gitlab_public]
 # A second GitLab, read with --gitlab public. It supplies its own fields; no
 # field is inherited from [gitlab_private]. Remove this table and its
 # [gitlab_routing] row when there is only one GitLab.
 url = "https://gitlab.second.example.com"
-# Declare a token file per instance: an ambient GITLAB_TOKEN is used for
-# whichever instance is selected when that instance has no token_file.
+# ci-skills reads this token file only when a command runs with
+# --gitlab public. Without it, ci-skills uses the same order as for
+# [gitlab_private], so an environment token would reach this host too.
 token_file = "gitlab-public.token"
 
 [kubernetes]

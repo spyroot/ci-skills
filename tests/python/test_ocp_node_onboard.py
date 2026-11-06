@@ -28,6 +28,7 @@ PLAN = import_script_module("lib.python.core.report")
 SCHEMA = import_script_module("lib.python.core.schema")
 BUILD_WORKFLOW = import_script_module("lib.python.core.kubernetes.ocp_build_workflow")
 RUNTIME = import_script_module("lib.python.core.runtime")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
 
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ def caller_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CallerInpu
     """
     target = tmp_path / "target.toml"
     target.write_text(
-        '[kubernetes]\ncontext = "unit-context"\n'
+        f'[{ENDPOINTS.KUBERNETES_AUTHORITY}]\ncontext = "unit-context"\n'
         'server = "https://api.cluster.example.test:6443"\n',
         encoding="utf-8",
     )
@@ -165,7 +166,9 @@ def bind_provider(monkeypatch: pytest.MonkeyPatch, cluster: PlanningCluster) -> 
 
     def authenticate(callback: KUBERNETES.K8SAuth) -> dict[str, object]:
         callback.state.kubernetes = cluster
-        callback.state.access_evidence["kubernetes"] = {"identity": "unit-user"}
+        callback.state.access_evidence[ENDPOINTS.KUBERNETES_AUTHORITY] = {
+            "identity": "unit-user"
+        }
         return {"identity": "unit-user"}
 
     def publication(url: str, timeout: int) -> str:

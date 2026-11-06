@@ -7,6 +7,13 @@ spyroot@gmail.com
 
 from enum import StrEnum
 
+from lib.python.core.endpoints import (
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    HARBOR_AUTHORITY,
+    KUBERNETES_AUTHORITY,
+)
+
 
 class SkillPluginType(StrEnum):
     """Identify the plugin that owns a callback's configuration and utilities.
@@ -32,8 +39,8 @@ class SkillPluginType(StrEnum):
         Local actions whose inputs require no provider configuration.
     """
 
-    GITLAB = "gitlab"
-    GITHUB = "github"
-    KUBERNETES = "kubernetes"
-    HARBOR = "harbor"
+    GITLAB = GITLAB_AUTHORITY
+    GITHUB = GITHUB_AUTHORITY
+    KUBERNETES = KUBERNETES_AUTHORITY
+    HARBOR = HARBOR_AUTHORITY
     LOCAL = "local"

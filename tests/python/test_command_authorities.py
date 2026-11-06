@@ -16,6 +16,8 @@ from unittest.mock import Mock
 import pytest
 from conftest import import_script_module
 
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
     from lib.python.core.target import Target
@@ -103,7 +105,7 @@ def test_ceph_collector_uses_only_kubernetes_authority(
     sources = import_script_module("lib.python.access.sources")
     path = _target(
         tmp_path,
-        '[kubernetes]\ncontext = "unit"\n'
+        f'[{ENDPOINTS.KUBERNETES_AUTHORITY}]\ncontext = "unit"\n'
         'server = "https://api.cluster.example.test:6443"\n',
     )
     monkeypatch.setattr(access, "github_access", _unexpected())
@@ -123,7 +125,12 @@ def test_ceph_collector_uses_only_kubernetes_authority(
         access,
         "kubernetes_access",
         lambda _target, *, cilium=False: shared.Surface(
-            "kubernetes", "PASS", "unit-admin", "unit -> api", ["live-read"], None
+            ENDPOINTS.KUBERNETES_AUTHORITY,
+            "PASS",
+            "unit-admin",
+            "unit -> api",
+            ["live-read"],
+            None,
         ),
     )
     seen = []
@@ -141,11 +148,13 @@ def test_ceph_collector_uses_only_kubernetes_authority(
     assert cli.execute(_args(path, namespace="storage"), collect_ceph_cluster) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["access"]["credential_sources"] == {
-        "kubernetes": "file:/unit/kubeconfig"
+        ENDPOINTS.KUBERNETES_AUTHORITY: "file:/unit/kubeconfig"
     }
-    assert data["access"]["identities"] == {"kubernetes": "unit-admin"}
+    assert data["access"]["identities"] == {
+        ENDPOINTS.KUBERNETES_AUTHORITY: "unit-admin"
+    }
     assert len(seen) == 1
-    assert seen[0].active_surfaces == ("kubernetes",)
+    assert seen[0].active_surfaces == (ENDPOINTS.KUBERNETES_AUTHORITY,)
     assert seen[0].github is None and seen[0].gitlab is None
 
 
@@ -165,7 +174,10 @@ def test_gitlab_job_does_not_require_cluster_or_github(
     shared = import_script_module("lib.python.access.shared")
     credentials = import_script_module("lib.python.access.credentials")
     sources = import_script_module("lib.python.access.sources")
-    path = _target(tmp_path, '[gitlab]\nurl = "https://gitlab.example.test"\n')
+    path = _target(
+        tmp_path,
+        f'[{ENDPOINTS.GITLAB_AUTHORITY}]\nurl = "https://gitlab.example.test"\n',
+    )
     monkeypatch.setattr(access, "github_access", _unexpected())
     monkeypatch.setattr(access, "kubernetes_access", _unexpected())
     monkeypatch.setattr(credentials, "_kubernetes_source", _unexpected())
@@ -183,7 +195,12 @@ def test_gitlab_job_does_not_require_cluster_or_github(
         access,
         "gitlab_access",
         lambda _target: shared.Surface(
-            "gitlab", "PASS", "unit-admin", "gitlab.example.test", ["live-read"], None
+            ENDPOINTS.GITLAB_AUTHORITY,
+            "PASS",
+            "unit-admin",
+            "gitlab.example.test",
+            ["live-read"],
+            None,
         ),
     )
 
@@ -205,8 +222,10 @@ def test_gitlab_job_does_not_require_cluster_or_github(
         == 0
     )
     data = json.loads(capsys.readouterr().out)
-    assert data["access"]["credential_sources"] == {"gitlab": "env:GITLAB_TOKEN"}
-    assert data["access"]["identities"] == {"gitlab": "unit-admin"}
+    assert data["access"]["credential_sources"] == {
+        ENDPOINTS.GITLAB_AUTHORITY: "env:GITLAB_TOKEN"
+    }
+    assert data["access"]["identities"] == {ENDPOINTS.GITLAB_AUTHORITY: "unit-admin"}
 
 
 def test_selected_target_malformed_blocks_without_fallback(
@@ -222,7 +241,7 @@ def test_selected_target_malformed_blocks_without_fallback(
     cli = import_script_module("lib.python.core.cli")
     path = _target(
         tmp_path,
-        '[kubernetes]\ncontext = "unit"\n'
+        f'[{ENDPOINTS.KUBERNETES_AUTHORITY}]\ncontext = "unit"\n'
         'server = "http://api.cluster.example.test:6443"\n',
     )
 
@@ -259,7 +278,7 @@ def test_load_target_default_still_requires_all_three_targets(tmp_path: Path) ->
     target = import_script_module("lib.python.core.target")
     path = _target(
         tmp_path,
-        '[kubernetes]\ncontext = "unit"\n'
+        f'[{ENDPOINTS.KUBERNETES_AUTHORITY}]\ncontext = "unit"\n'
         'server = "https://api.cluster.example.test:6443"\n',
     )
     with pytest.raises(

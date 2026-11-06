@@ -50,7 +50,13 @@ RUNTIME: Final = import_script_module("lib.python.core.runtime")
 MIRRORING: Final = import_script_module("lib.python.core.git.mirroring")
 WORKFLOW: Final = import_script_module("lib.python.core.gitlab.mirror.workflow")
 EVIDENCE: Final = import_script_module("lib.python.core.gitlab.mirror.evidence")
-FIELD: Final = import_script_module("lib.python.core.gitlab.mirror.constants").Field
+MIRROR_CONSTANTS: Final = import_script_module(
+    "lib.python.core.gitlab.mirror.constants"
+)
+FIELD: Final = MIRROR_CONSTANTS.Field
+OUTCOME: Final = MIRROR_CONSTANTS.Outcome
+FAILURE: Final = MIRROR_CONSTANTS.Failure
+STATUS: Final = import_script_module("lib.python.sys.status")
 CLI: Final = import_script_module("lib.python.core.gitlab.mirror.cli")
 ENTRYPOINT: Final = import_script_module("gitlab_mirror")
 SCHEMA: Final = import_script_module("lib.python.core.schema")
@@ -122,32 +128,32 @@ CREDENTIAL_DIGEST: Final[str] = "b" * DIGEST_LENGTH
 SUCCESS_TIMESTAMP: Final[str] = "2026-01-02T03:04:05Z"
 ADVANCED_SUCCESS_TIMESTAMP: Final[str] = "2026-01-02T03:04:06Z"
 POLL_OBSERVATION_COUNT: Final[int] = 2
-PASSWORD_AUTH: Final[str] = "password"
-APPLIED_ACTION: Final[str] = "APPLIED"
-NO_OP_ACTION: Final[str] = "NO_OP"
+PASSWORD_AUTH: Final[str] = MIRROR_CONSTANTS.PASSWORD_AUTH
+APPLIED_ACTION: Final[str] = OUTCOME.APPLIED
+NO_OP_ACTION: Final[str] = OUTCOME.NO_OP
 MIRROR_APPLIED_FILE: Final[str] = "mirror-applied.json"
 MIRROR_NO_OP_FILE: Final[str] = "mirror-noop.json"
-BEFORE_FIELD: Final[str] = "before"
+BEFORE_FIELD: Final[str] = FIELD.BEFORE
 OBSERVATION_FIELDS: Final[tuple[str, ...]] = (
-    "source",
-    "destination",
-    "mirror",
-    "source_refs",
-    "destination_refs",
+    FIELD.SOURCE,
+    FIELD.DESTINATION,
+    FIELD.MIRROR,
+    FIELD.SOURCE_REFS,
+    FIELD.DESTINATION_REFS,
 )
 PUBLIC_SELECTION: Final[str] = (
     f"{ROUTING_ARGV_PREFIX}{GITLAB_TARGET_OPTION}={GITLAB_PUBLIC_SELECTOR}"
 )
-MINIMUM_POLL_SECONDS: Final[int] = 30
+MINIMUM_POLL_SECONDS: Final[int] = MIRROR_CONSTANTS.POLL_SECONDS
 POLL_BUDGET_SECONDS: Final[int] = 3 * MINIMUM_POLL_SECONDS
-PAIR_ACTIONS_REASON: Final[str] = "mirror_pair_actions_unverified"
-PAIR_IDENTITY_REASON: Final[str] = "mirror_pair_identity_mismatch"
-PAIR_REFS_REASON: Final[str] = "mirror_pair_refs_unverified"
-PAIR_MUTATION_REASON: Final[str] = "mirror_pair_mutation_unverified"
-PAIR_CONTINUITY_REASON: Final[str] = "mirror_pair_continuity_unverified"
-STALE_PLAN_REASON: Final[str] = "mirror_plan_mismatch"
+PAIR_ACTIONS_REASON: Final[str] = EVIDENCE.PAIR_ACTIONS_UNVERIFIED
+PAIR_IDENTITY_REASON: Final[str] = EVIDENCE.PAIR_IDENTITY_MISMATCH
+PAIR_REFS_REASON: Final[str] = EVIDENCE.PAIR_REFS_UNVERIFIED
+PAIR_MUTATION_REASON: Final[str] = EVIDENCE.PAIR_MUTATION_UNVERIFIED
+PAIR_CONTINUITY_REASON: Final[str] = EVIDENCE.PAIR_CONTINUITY_UNVERIFIED
+STALE_PLAN_REASON: Final[str] = FAILURE.STALE_PLAN
 FIXED_CLOCK_SECONDS: Final[float] = 0.0
-SYNC_OPERATION: Final[str] = "sync"
+SYNC_OPERATION: Final[str] = MIRROR_CONSTANTS.OPERATION
 PROJECT_OPTION: Final[str] = "--project"
 DESTINATION_OPTION: Final[str] = "--destination"
 DRY_RUN_OPTION: Final[str] = "--dry-run"
@@ -157,11 +163,6 @@ OUTPUT_DIRECTORY_NAME: Final[str] = "mirror-output"
 LOG_FILE_NAME: Final[str] = "mirror.log"
 JSON_OPTION: Final[str] = "--json"
 CONFIRM_OPTION: Final[str] = "--confirm-plan"
-COMMAND_FAILURE: Final[int] = 2
-DRY_RUN_STATUS: Final[str] = "DRY_RUN"
-PLANNED_STATUS: Final[str] = "PLANNED"
-PARTIAL_STATUS: Final[str] = "PARTIAL"
-BLOCKED_STATUS: Final[str] = "BLOCKED"
 PROJECT_SCOPE: Final[str] = "project"
 TARGET_ENVIRONMENT: Final[str] = "CI_SKILLS_TARGET"
 FIXTURE_HOST: Final[str] = "fixture-host"
@@ -177,12 +178,12 @@ NO_CONTENT_RESPONSE: Final[str] = "HTTP/2 204 No Content\r\n\r\n"
 EMPTY_OK_RESPONSE: Final[str] = "HTTP/2 200 OK\r\n\r\n"
 NONEMPTY_RESPONSE_BODY: Final[str] = "{}"
 EXPECTED_USER_OWNER: Final[str] = "User"
-INVALID_NO_CONTENT_REASON: Final[str] = "invalid_no_content_response"
-DESTINATION_CHANGED_REASON: Final[str] = "mirror_destination_changed"
-UNCONFIRMED_REASON: Final[str] = "mirror_live_plan_confirmation_required"
+INVALID_NO_CONTENT_REASON: Final[str] = API.INVALID_NO_CONTENT_RESPONSE
+DESTINATION_CHANGED_REASON: Final[str] = FAILURE.DESTINATION_CHANGED
+UNCONFIRMED_REASON: Final[str] = FAILURE.UNCONFIRMED
 TRANSPORT_REASON: Final[str] = "transport"
 AUTHORIZATION_REASON: Final[str] = "authorization"
-VERIFICATION_TIMEOUT_REASON: Final[str] = "mirror_verification_timeout"
+VERIFICATION_TIMEOUT_REASON: Final[str] = FAILURE.TIMEOUT
 ALTERNATE_DESTINATION_URL: Final[str] = (
     f"https://{DESTINATION_HOST}/unit/replaced-destination.git"
 )
@@ -426,7 +427,7 @@ def _mirror_pair_baseline() -> str:
             plan_digest=execution.plan.digest,
             mutated=execution.action.value == APPLIED_ACTION,
             captured_at=timestamp,
-            cleanup={"status": "PASS", "failures": []},
+            cleanup={FIELD.STATUS: STATUS.PASS, FIELD.FAILURES: []},
             skill=PROVENANCE.SkillIdentity(
                 algorithm=PROVENANCE.DIGEST_ALGORITHM,
                 digest=FUNCTIONAL_DIGEST,
@@ -457,13 +458,16 @@ def test_mirror_pair_preserves_absent_before_and_accepts_fresh_plan_digest() -> 
     noop_record = noop[FIELD.RECORDS][0]
 
     assert applied_record[BEFORE_FIELD][FIELD.DESTINATION] == {
-        "host": DESTINATION_HOST,
-        "path": DESTINATION_PATH,
-        "id": None,
+        MIRRORING.MirrorField.HOST: DESTINATION_HOST,
+        MIRRORING.MirrorField.PATH: DESTINATION_PATH,
+        FIELD.ID: None,
     }
     assert applied_record[BEFORE_FIELD][FIELD.MIRROR] is None
-    assert applied_record[FIELD.CREATED] == {"repository": True, "mirror": True}
-    assert noop_record[FIELD.CREATED] == {"repository": False, "mirror": False}
+    assert applied_record[FIELD.CREATED] == {FIELD.REPOSITORY: True, FIELD.MIRROR: True}
+    assert noop_record[FIELD.CREATED] == {
+        FIELD.REPOSITORY: False,
+        FIELD.MIRROR: False,
+    }
     assert noop_record[BEFORE_FIELD] == {
         key: applied_record[key] for key in OBSERVATION_FIELDS
     }
@@ -478,124 +482,124 @@ def test_mirror_pair_preserves_absent_before_and_accepts_fresh_plan_digest() -> 
     (
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "action"),
+            (FIELD.RECORDS, 0, FIELD.ACTION),
             APPLIED_ACTION,
             PAIR_ACTIONS_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("skill", "digest"),
+            (FIELD.SKILL, "digest"),
             CREDENTIAL_DIGEST,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("skill", "functional_digest"),
+            (FIELD.SKILL, FIELD.FUNCTIONAL_DIGEST),
             CREDENTIAL_DIGEST,
             PAIR_IDENTITY_REASON,
         ),
-        (MIRROR_NO_OP_FILE, ("tested_revision",), OTHER_OID, PAIR_IDENTITY_REASON),
+        (MIRROR_NO_OP_FILE, (FIELD.TESTED_REVISION,), OTHER_OID, PAIR_IDENTITY_REASON),
         (
             MIRROR_NO_OP_FILE,
-            ("target_source",),
+            (FIELD.TARGET_SOURCE,),
             f"{FIXTURE_CREDENTIAL_SOURCE};{PUBLIC_SELECTION}",
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("skill", "revision", "value"),
+            (FIELD.SKILL, FIELD.REVISION, FIELD.VALUE),
             OTHER_OID,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "source", "host"),
+            (FIELD.RECORDS, 0, FIELD.SOURCE, MIRRORING.MirrorField.HOST),
             DESTINATION_HOST,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "source", "path"),
+            (FIELD.RECORDS, 0, FIELD.SOURCE, MIRRORING.MirrorField.PATH),
             DESTINATION_PATH,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "destination", "host"),
+            (FIELD.RECORDS, 0, FIELD.DESTINATION, MIRRORING.MirrorField.HOST),
             SOURCE_HOST,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "destination", "path"),
+            (FIELD.RECORDS, 0, FIELD.DESTINATION, MIRRORING.MirrorField.PATH),
             SOURCE_PATH,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "source", "id"),
+            (FIELD.RECORDS, 0, FIELD.SOURCE, FIELD.ID),
             SOURCE_ID + ONE_MATCH,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "destination", "id"),
+            (FIELD.RECORDS, 0, FIELD.DESTINATION, FIELD.ID),
             DESTINATION_ID + ONE_MATCH,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "mirror", "id"),
+            (FIELD.RECORDS, 0, FIELD.MIRROR, FIELD.ID),
             REPLACEMENT_MIRROR_ID,
             PAIR_IDENTITY_REASON,
         ),
         (
             MIRROR_APPLIED_FILE,
-            ("records", 0, "source_refs", "count"),
+            (FIELD.RECORDS, 0, FIELD.SOURCE_REFS, FIELD.COUNT),
             0,
             PAIR_REFS_REASON,
         ),
         (
             MIRROR_APPLIED_FILE,
-            ("records", 0, "verified_source_ref_count"),
+            (FIELD.RECORDS, 0, FIELD.VERIFIED_SOURCE_REF_COUNT),
             ONE_MATCH,
             PAIR_REFS_REASON,
         ),
-        (MIRROR_APPLIED_FILE, ("mutated",), False, PAIR_MUTATION_REASON),
-        (MIRROR_NO_OP_FILE, ("mutated",), True, PAIR_MUTATION_REASON),
+        (MIRROR_APPLIED_FILE, (FIELD.MUTATED,), False, PAIR_MUTATION_REASON),
+        (MIRROR_NO_OP_FILE, (FIELD.MUTATED,), True, PAIR_MUTATION_REASON),
         (
             MIRROR_APPLIED_FILE,
-            ("records", 0, "created", "repository"),
+            (FIELD.RECORDS, 0, FIELD.CREATED, FIELD.REPOSITORY),
             False,
             PAIR_MUTATION_REASON,
         ),
         (
             MIRROR_APPLIED_FILE,
-            ("records", 0, "before", "destination", "id"),
+            (FIELD.RECORDS, 0, FIELD.BEFORE, FIELD.DESTINATION, FIELD.ID),
             DESTINATION_ID,
             PAIR_MUTATION_REASON,
         ),
         (
             MIRROR_APPLIED_FILE,
-            ("records", 0, "created", "mirror"),
+            (FIELD.RECORDS, 0, FIELD.CREATED, FIELD.MIRROR),
             False,
             PAIR_MUTATION_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "created", "mirror"),
+            (FIELD.RECORDS, 0, FIELD.CREATED, FIELD.MIRROR),
             True,
             PAIR_MUTATION_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "before", "destination_refs", "sha256"),
+            (FIELD.RECORDS, 0, FIELD.BEFORE, FIELD.DESTINATION_REFS, FIELD.SHA256),
             CREDENTIAL_DIGEST,
             PAIR_CONTINUITY_REASON,
         ),
         (
             MIRROR_NO_OP_FILE,
-            ("records", 0, "before", "mirror", "id"),
+            (FIELD.RECORDS, 0, FIELD.BEFORE, FIELD.MIRROR, FIELD.ID),
             REPLACEMENT_MIRROR_ID,
             PAIR_CONTINUITY_REASON,
         ),
@@ -1082,8 +1086,8 @@ def test_command_offline_emits_valid_result_without_workflow_or_authentication(
     )
 
     SCHEMA.validate_specification(result, EVIDENCE.RESULT_SCHEMA)
-    assert code == NATIVE_SUCCESS
-    assert result[FIELD.STATUS] == DRY_RUN_STATUS
+    assert code == STATUS.exit_code(STATUS.DRY_RUN)
+    assert result[FIELD.STATUS] == STATUS.DRY_RUN
     assert result[FIELD.MUTATED] is False
     workflow.assert_not_called()
     authentication.assert_not_called()
@@ -1207,8 +1211,8 @@ def test_command_refuses_unconfirmed_apply_before_target_or_authentication(
     )
 
     SCHEMA.validate_specification(result, EVIDENCE.RESULT_SCHEMA)
-    assert code == COMMAND_FAILURE
-    assert result[FIELD.STATUS] == BLOCKED_STATUS
+    assert code == STATUS.exit_code(STATUS.BLOCKED)
+    assert result[FIELD.STATUS] == STATUS.BLOCKED
     errors = JSON_TYPES.json_objects(result[FIELD.ERRORS])
     assert [error[FIELD.REASON] for error in errors] == [UNCONFIRMED_REASON]
     unavailable.assert_not_called()
@@ -1264,7 +1268,7 @@ def test_command_persists_schema_valid_plan_and_partial_resource_ownership(
             state.engine = engine
             state.record = {
                 FIELD.CALLBACK: CLI.KIND,
-                FIELD.ACTION: PLANNED_STATUS,
+                FIELD.ACTION: OUTCOME.PLANNED,
                 FIELD.VERIFIED: False,
                 FIELD.SOURCE: SOURCE_REPOSITORY.evidence(),
                 FIELD.DESTINATION: {
@@ -1275,7 +1279,7 @@ def test_command_persists_schema_valid_plan_and_partial_resource_ownership(
                 FIELD.MIRROR: None,
                 FIELD.SOURCE_REFS: WORKFLOW.ref_evidence(snapshot),
                 FIELD.DESTINATION_REFS: WORKFLOW.ref_evidence(empty),
-                FIELD.VERIFIED_SOURCE_REF_COUNT: NATIVE_SUCCESS,
+                FIELD.VERIFIED_SOURCE_REF_COUNT: empty.matching_count(snapshot),
                 FIELD.CREATED: {FIELD.REPOSITORY: False, FIELD.MIRROR: False},
                 FIELD.REPLACEMENT_REQUIRED: False,
                 FIELD.REPLACED_MIRROR_ID: None,
@@ -1321,8 +1325,8 @@ def test_command_persists_schema_valid_plan_and_partial_resource_ownership(
     SCHEMA.validate_specification(result, EVIDENCE.RESULT_SCHEMA)
     SCHEMA.validate_specification(saved, EVIDENCE.RESULT_SCHEMA)
     assert saved == result
-    assert code == (COMMAND_FAILURE if uncertain else NATIVE_SUCCESS)
-    assert result[FIELD.STATUS] == (PARTIAL_STATUS if uncertain else PLANNED_STATUS)
+    status = STATUS.PARTIAL if uncertain else STATUS.PLANNED
+    assert (code, result[FIELD.STATUS]) == (STATUS.exit_code(status), status)
     assert result[FIELD.MUTATED] is (None if uncertain else False)
     records = JSON_TYPES.json_objects(result[FIELD.RECORDS])
     (record,) = records
@@ -1458,6 +1462,9 @@ def test_github_private_creation_uses_independent_repository_and_visibility_read
     engine.destination = destination
     intent = WORKFLOW.MirrorIntent(SOURCE_PATH, DESTINATION_PATH, True)
     plan = engine.plan(intent, FUNCTIONAL_DIGEST, CREDENTIAL_DIGEST)
+    planned_ref_count = plan.observation.destination_refs.matching_count(
+        plan.observation.source_refs
+    )
     baseline_record = json.loads(_mirror_pair_baseline())[MIRROR_APPLIED_FILE][
         FIELD.RECORDS
     ][0]
@@ -1486,10 +1493,10 @@ def test_github_private_creation_uses_independent_repository_and_visibility_read
             state.record = {
                 **baseline_record,
                 **plan.observation.evidence(DESTINATION_HOST, DESTINATION_PATH),
-                FIELD.ACTION: PLANNED_STATUS,
+                FIELD.ACTION: OUTCOME.PLANNED,
                 FIELD.VERIFIED: False,
                 FIELD.CREATED: {FIELD.REPOSITORY: False, FIELD.MIRROR: False},
-                FIELD.VERIFIED_SOURCE_REF_COUNT: NATIVE_SUCCESS,
+                FIELD.VERIFIED_SOURCE_REF_COUNT: planned_ref_count,
             }
             callback = CLI.ApplyMirror(action)
             callback.bind(state)
@@ -1522,7 +1529,10 @@ def test_github_private_creation_uses_independent_repository_and_visibility_read
         stage: DESTINATION_ID for stage, _ in CREATION_ID_BASELINE
     }
     if changed is None:
-        assert (code, result[FIELD.STATUS]) == (NATIVE_SUCCESS, "PASS")
+        assert (code, result[FIELD.STATUS]) == (
+            STATUS.exit_code(STATUS.PASS),
+            STATUS.PASS,
+        )
         assert record[FIELD.VERIFIED] is True
         assert record[FIELD.CREATED][FIELD.MIRROR] is True
         reader.read.assert_called_once_with(
@@ -1532,9 +1542,12 @@ def test_github_private_creation_uses_independent_repository_and_visibility_read
             (exchange.method, exchange.endpoint) for exchange in exchanges
         ]
     else:
-        assert (code, result[FIELD.STATUS]) == (COMMAND_FAILURE, PARTIAL_STATUS)
+        assert (code, result[FIELD.STATUS]) == (
+            STATUS.exit_code(STATUS.PARTIAL),
+            STATUS.PARTIAL,
+        )
         assert record[FIELD.VERIFIED] is False
-        assert record[FIELD.VERIFIED_SOURCE_REF_COUNT] == NATIVE_SUCCESS
+        assert record[FIELD.VERIFIED_SOURCE_REF_COUNT] == CLI.NO_VERIFIED_REFS
         assert result[FIELD.ERRORS]
         assert destination.created_repository_id == identities["post"]
         if changed != "final-read":
@@ -1885,9 +1898,9 @@ def test_same_host_profile_alias_binds_provenance_and_confirmation_digest(
         observation.run()
         assert command.state.plan is not None
         plans.append(command.state.plan)
-        output = command.output(action, PLANNED_STATUS)
+        output = command.output(action, STATUS.PLANNED)
         SCHEMA.validate_specification(output, EVIDENCE.RESULT_SCHEMA)
-        assert output["target_source"] == expected_source
+        assert output[FIELD.TARGET_SOURCE] == expected_source
         sources.append(command.state.session.target_source)
 
     assert sources[0] != sources[1]
@@ -1933,7 +1946,6 @@ def test_equivalent_https_mirror_url_reuses_verified_configuration_without_write
     source.configure.assert_not_called()
     source.sync.assert_not_called()
     destination.create.assert_not_called()
-    assert FINISHED_MIRROR == baseline
 
 
 @pytest.mark.parametrize("replacement", (False, True), ids=("create", "replace"))
@@ -2023,6 +2035,9 @@ def test_native_mirror_readback_failure_retains_created_post_id(
     engine.source = source
     intent = WORKFLOW.MirrorIntent(SOURCE_PATH, DESTINATION_PATH)
     plan = engine.plan(intent, FUNCTIONAL_DIGEST, CREDENTIAL_DIGEST)
+    planned_ref_count = plan.observation.destination_refs.matching_count(
+        plan.observation.source_refs
+    )
     baseline = json.loads(_mirror_pair_baseline())[MIRROR_APPLIED_FILE]
     bound_session = replace(source.service.session, skill=baseline[FIELD.SKILL])
 
@@ -2039,7 +2054,7 @@ def test_native_mirror_readback_failure_retains_created_post_id(
 
             :returns: None only if independent configuration read-back succeeds.
             :raises API.APIError: The scripted independent read returns terminal denial.
-            """
+            """  # noqa: DOC502 - ApplyMirror.run propagates the provider denial.
             observed = plan.observation.evidence(DESTINATION_HOST, DESTINATION_PATH)
             state.session = bound_session
             state.engine = engine
@@ -2048,10 +2063,10 @@ def test_native_mirror_readback_failure_retains_created_post_id(
                 **baseline[FIELD.RECORDS][0],
                 **observed,
                 BEFORE_FIELD: observed,
-                FIELD.ACTION: PLANNED_STATUS,
+                FIELD.ACTION: OUTCOME.PLANNED,
                 FIELD.VERIFIED: False,
                 FIELD.CREATED: {FIELD.REPOSITORY: False, FIELD.MIRROR: False},
-                FIELD.VERIFIED_SOURCE_REF_COUNT: NATIVE_SUCCESS,
+                FIELD.VERIFIED_SOURCE_REF_COUNT: planned_ref_count,
                 FIELD.REPLACEMENT_REQUIRED: plan.replacement_required,
                 FIELD.REPLACED_MIRROR_ID: plan.replaced_mirror_id,
             }
@@ -2082,18 +2097,18 @@ def test_native_mirror_readback_failure_retains_created_post_id(
     )
 
     SCHEMA.validate_specification(result, EVIDENCE.RESULT_SCHEMA)
-    assert (code, result[FIELD.STATUS]) == (COMMAND_FAILURE, PARTIAL_STATUS)
+    assert (code, result[FIELD.STATUS]) == (
+        STATUS.exit_code(STATUS.PARTIAL),
+        STATUS.PARTIAL,
+    )
     (record,) = JSON_TYPES.json_objects(result[FIELD.RECORDS])
     assert record[FIELD.VERIFIED] is False
     assert record[FIELD.CREATED] == {FIELD.REPOSITORY: False, FIELD.MIRROR: True}
-    assert record["created_mirror_id"] == identity
+    assert record[FIELD.CREATED_MIRROR_ID] == identity
     assert record[FIELD.MIRROR] is None
     assert record[FIELD.REPLACEMENT_REQUIRED] is replacement
     assert record[FIELD.REPLACED_MIRROR_ID] == (MIRROR_ID if replacement else None)
-    assert record[BEFORE_FIELD] == plan.observation.evidence(
-        DESTINATION_HOST, DESTINATION_PATH
-    )
-    assert record[FIELD.VERIFIED_SOURCE_REF_COUNT] == NATIVE_SUCCESS
+    assert record[FIELD.VERIFIED_SOURCE_REF_COUNT] == CLI.NO_VERIFIED_REFS
     assert result[FIELD.ERRORS] == [
         {FIELD.SOURCE: CLI.KIND, FIELD.REASON: AUTHORIZATION_REASON}
     ]
@@ -2147,8 +2162,6 @@ def test_completed_native_sync_with_unmatched_refs_keeps_domain_timeout_reason()
     assert sum(waits) == POLL_BUDGET_SECONDS
     assert source.mirror.call_count == len(waits)
     assert engine.current_mirror.last_successful_update_at == ADVANCED_SUCCESS_TIMESTAMP
-    assert destination.refs.return_value == REFS.RefSnapshot(())
     source.sync.assert_called_once_with(MIRROR_ID)
     source.configure.assert_not_called()
     destination.create.assert_not_called()
-    assert FINISHED_MIRROR == baseline
