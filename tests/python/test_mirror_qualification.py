@@ -21,9 +21,11 @@ import sys
 from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from datetime import datetime, timedelta
 from enum import StrEnum
+from http import HTTPMethod
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import ClassVar, Final, NoReturn, Optional
+from urllib.parse import quote
 
 import pytest
 from conftest import REPO_ROOT, SKILL_ROOT, import_script_module, load_module
@@ -51,12 +53,16 @@ MIRROR_CLI = import_script_module(QUALIFY.MIRROR_CLI_MODULE)
 MIRRORING = import_script_module(QUALIFY.MIRRORING_MODULE)
 SCHEMA = import_script_module("lib.python.core.schema")
 EVIDENCE = import_script_module("lib.python.core.gitlab.mirror.evidence")
-PROVENANCE = import_script_module("lib.python.core.provenance")
+PROVENANCE = import_script_module(QUALIFY.PROVENANCE_MODULE)
+REMOTE = import_script_module(QUALIFY.REMOTE_MODULE)
 
 # The repository's own lib stands in for the installed copy.
 STATUS: Final = QUALIFY.InstalledStatus.bind(SYS_STATUS, MIRROR_CONSTANTS.Outcome)
 FIELDS: Final = QUALIFY.InstalledFields.bind(
-    MIRROR_CONSTANTS.Field, MIRROR_CLI.EnvelopeField, MIRRORING.MirrorField
+    MIRROR_CONSTANTS.Field,
+    MIRROR_CLI.EnvelopeField,
+    MIRRORING.MirrorField,
+    PROVENANCE,
 )
 EXIT_OK: Final[int] = STATUS.exit_code(STATUS.passed)
 EXIT_STOP: Final[int] = STATUS.exit_code(STATUS.blocked)
@@ -88,6 +94,13 @@ DESTINATION_PATH: Final[str] = "unit/mirror-destination"
 REPOSITORY_ID: Final[int] = 9001
 OTHER_REPOSITORY_ID: Final[int] = 9002
 CLONE_URL: Final[str] = "https://github.example.test/unit/mirror-destination.git"
+# Mirror URLs GitLab can report for a mirror created with CLONE_URL.
+MIRROR_URL_WITHOUT_SUFFIX: Final[str] = (
+    "https://github.example.test/unit/mirror-destination"
+)
+MIRROR_URL_WITH_SLASH: Final[str] = (
+    "https://github.example.test/unit/mirror-destination.git/"
+)
 MIRROR_ID: Final[int] = 15
 EXECUTION_HOST: Final[str] = "unit-host"
 SKILL_DIGEST: Final[str] = "unit-digest"
@@ -236,7 +249,8 @@ def fake_fields(monkeypatch: pytest.MonkeyPatch) -> object:
     """Bind keys from installed enumerations whose every value differs from the lib.
 
     :param monkeypatch: Serves the renamed ``Field``, ``EnvelopeField`` and
-        ``MirrorField``.
+        ``MirrorField``, and a provenance module with a renamed
+        ``DIGEST_VALUE_KEY``.
     :returns: Keys bound by ``installed_bindings``.
     """
     _serve(
@@ -250,6 +264,10 @@ def fake_fields(monkeypatch: pytest.MonkeyPatch) -> object:
             ),
             QUALIFY.MIRRORING_MODULE: _replaced(
                 MIRRORING, MirrorField=_renamed(MIRRORING.MirrorField)
+            ),
+            QUALIFY.PROVENANCE_MODULE: _replaced(
+                PROVENANCE,
+                DIGEST_VALUE_KEY=FAKE_KEY_PREFIX + PROVENANCE.DIGEST_VALUE_KEY,
             ),
         },
     )
@@ -515,7 +533,7 @@ def _results(
         fields.execution_host: EXECUTION_HOST,
         fields.tested_revision: CANDIDATE,
         fields.target_source: TARGET_SOURCE,
-        fields.skill: {QUALIFY.SKILL_DIGEST_KEY: SKILL_DIGEST},
+        fields.skill: {fields.digest: SKILL_DIGEST},
     }
     noop_record = _created({fields.action: tokens.no_op}, tokens, fields)
     results = {
@@ -695,10 +713,10 @@ def test_qualification_removes_only_created_objects_and_records_cleanup(
         f"mirror:{mirror_id}",
         f"destination:{destination[FIELDS.path]}:{destination[FIELDS.id]}",
     ]
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
-    assert ledger["candidate"] == CANDIDATE
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.LEDGER_CANDIDATE_FIELD] == CANDIDATE
     assert ledger[QUALIFY.TARGET_SOURCE_FIELD] == TARGET_SOURCE
-    assert ledger["seed_refs"] == SEED_REFS
+    assert ledger[QUALIFY.LEDGER_SEED_REFS_FIELD] == SEED_REFS
     cleanup = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert cleanup[QUALIFY.STATUS_FIELD] == STATUS.passed
     assert cleanup[QUALIFY.BEFORE_FIELD] == {
@@ -762,10 +780,10 @@ def test_plan_only_stops_after_the_rejection_and_writes_no_ledger(
     assert provider.labels == [QUALIFY.BASELINE_PLAN_STEP]
     assert provider.deletes == []
     assert not (inputs.work_dir / QUALIFY.ALLOCATION_FILE).exists()
-    assert summary["plan_digest"] == PLAN_DIGEST
-    assert summary["candidate"] == CANDIDATE
+    assert summary[QUALIFY.LEDGER_PLAN_DIGEST_FIELD] == PLAN_DIGEST
+    assert summary[QUALIFY.LEDGER_CANDIDATE_FIELD] == CANDIDATE
     assert summary[QUALIFY.TARGET_SOURCE_FIELD] == TARGET_SOURCE
-    assert summary["seed_refs"] == SEED_REFS
+    assert summary[QUALIFY.LEDGER_SEED_REFS_FIELD] == SEED_REFS
 
 
 @pytest.mark.parametrize(
@@ -938,8 +956,8 @@ def test_apply_outcome_is_recorded_before_the_run_stops(
         _qualification(inputs, ScriptedRunner(_results(overrides)), provider).run()
 
     ledger = _ledger(inputs)
-    assert ledger["cleanup"] == state
-    assert ledger["created"] == created
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == state
+    assert ledger[QUALIFY.LEDGER_CREATED_FIELD] == created
     assert provider.deletes == []
     assert provider.labels == [QUALIFY.BASELINE_PLAN_STEP]
 
@@ -1040,7 +1058,7 @@ def test_cleanup_stops_when_an_identity_or_deletion_is_unproven(
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
     assert provider.deletes == deletes
-    assert _ledger(inputs)["cleanup"] == state
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == state
     assert not (inputs.work_dir / QUALIFY.CLEANUP_RECORD).exists()
 
 
@@ -1092,7 +1110,7 @@ def test_absence_read_back_stops_on_a_present_object_or_moved_ref(
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
     assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
-    assert _ledger(inputs)["cleanup"] == QUALIFY.VERIFY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.VERIFY_PENDING
     assert not (inputs.work_dir / QUALIFY.CLEANUP_RECORD).exists()
     assert not (inputs.work_dir / QUALIFY.NOOP_WITH_CLEANUP).exists()
 
@@ -1163,8 +1181,8 @@ def test_ledger_write_failure_keeps_the_previous_ledger(
     ):
         _qualification(inputs, ScriptedRunner(_results()), provider).run()
 
-    assert _ledger(inputs)["cleanup"] == QUALIFY.APPLY_PENDING
-    assert _ledger(inputs)["created"] is None
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_CREATED_FIELD] is None
     assert not list(inputs.work_dir.glob(f"*{QUALIFY.STAGED_SUFFIX}"))
     assert provider.deletes == []
 
@@ -1196,8 +1214,8 @@ def test_interrupt_at_the_apply_records_the_ledger_and_deletes_nothing(
     assert runner.labels[-1] == QUALIFY.APPLIED_STEP
     assert provider.deletes == []
     ledger = _ledger(inputs)
-    assert ledger["cleanup"] == QUALIFY.APPLY_PENDING
-    assert ledger["created"] is None
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
+    assert ledger[QUALIFY.LEDGER_CREATED_FIELD] is None
     assert not list(inputs.work_dir.glob(f"*{QUALIFY.STAGED_SUFFIX}"))
     reconciler = FakeProvider()
 
@@ -1257,8 +1275,8 @@ def test_interrupt_at_the_mirror_delete_leaves_the_ledger_for_reconcile(
     assert str(raised.value) == _interrupted(QUALIFY.MIRROR_DELETE_PENDING)
     assert provider.deletes == run_deletes
     ledger = _ledger(inputs)
-    assert ledger["cleanup"] == QUALIFY.MIRROR_DELETE_PENDING
-    assert ledger["created"] == _owned(True, True)
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.MIRROR_DELETE_PENDING
+    assert ledger[QUALIFY.LEDGER_CREATED_FIELD] == _owned(True, True)
     assert not (inputs.work_dir / QUALIFY.CLEANUP_RECORD).exists()
     assert not (inputs.work_dir / QUALIFY.NOOP_WITH_CLEANUP).exists()
     fresh = reconciler()
@@ -1266,7 +1284,7 @@ def test_interrupt_at_the_mirror_delete_leaves_the_ledger_for_reconcile(
     reconciled = _qualification(inputs, ScriptedRunner(_results()), fresh).reconcile()
 
     assert fresh.deletes == reconcile_deletes
-    assert reconciled["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert reconciled[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
         QUALIFY.MIRROR_HTTP_STATUS_FIELD: mirror_status,
@@ -1349,7 +1367,7 @@ def test_bound_status_tokens_drive_every_comparison(
         inputs, ScriptedRunner(_results(tokens=tokens)), FakeProvider(), tokens
     ).run()
 
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.STATUS_FIELD] == FAKE_PASS
 
@@ -1583,8 +1601,8 @@ def test_reconcile_removes_the_recorded_ids_after_a_failed_cleanup(
     assert runner.calls == []
     assert provider.labels == [QUALIFY.RECONCILE_PLAN_STEP]
     assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
-    assert ledger["reconciled"] is True
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.RECONCILED_FIELD] is True
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.RECONCILED_FIELD] is True
     assert record[QUALIFY.TESTED_REVISION_FIELD] == CANDIDATE
@@ -1639,7 +1657,7 @@ def test_reconcile_does_not_delete_objects_already_absent(inputs: object) -> Non
     ledger = _qualification(inputs, ScriptedRunner(_results()), provider).reconcile()
 
     assert provider.deletes == []
-    assert ledger["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
     assert record[QUALIFY.DELETE_FIELD] == {
         QUALIFY.MIRROR_HTTP_STATUS_FIELD: 404,
@@ -1685,7 +1703,7 @@ def test_reconcile_without_recorded_ids_is_blocked(inputs: object) -> None:
     assert str(raised.value) == _manual_read_back()
     assert provider.labels == []
     assert provider.deletes == []
-    assert _ledger(inputs)["cleanup"] == QUALIFY.APPLY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
 
 
 def test_reconcile_record_is_written_only_to_the_cleanup_file(inputs: object) -> None:
@@ -1788,7 +1806,7 @@ def test_reconcile_stops_when_ownership_is_unproven(
         _qualification(selected, ScriptedRunner(_results()), provider).reconcile()
 
     assert provider.deletes == deletes
-    assert _ledger(inputs)["cleanup"] != QUALIFY.CLEANUP_PASS
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] != QUALIFY.CLEANUP_PASS
 
 
 def _completed(
@@ -1966,6 +1984,7 @@ class FakeApi:
         self.responses = responses or {}
         self.error = error
         self.calls: MutableSequence[tuple[str, str]] = []
+        self.on_delete: Optional[Callable[[], None]] = None
 
     def get_json(self, session: object, endpoint: str) -> object:
         """Record a GET and answer it.
@@ -1981,7 +2000,7 @@ class FakeApi:
         return self.responses[endpoint]
 
     def request_no_content(self, session: object, method: str, endpoint: str) -> None:
-        """Record a no-content request.
+        """Record a no-content request; a DELETE then runs ``on_delete``, if set.
 
         :param session: Provider session.
         :param method: HTTP method.
@@ -1991,6 +2010,8 @@ class FakeApi:
         self.calls.append((str(method), endpoint))
         if self.error is not None:
             raise self.error
+        if method == HTTPMethod.DELETE and self.on_delete is not None:
+            self.on_delete()
 
 
 class FakeGitHubSession:
@@ -2143,6 +2164,7 @@ def test_installed_bindings_read_the_installed_lib(bindings: object) -> None:
     assert bindings.repository_endpoint == REPOSITORY.REPOSITORY_ENDPOINT
     assert bindings.repository_not_found == REPOSITORY.NOT_FOUND
     assert bindings.path_separator == REPOSITORY.PATH_SEPARATOR
+    assert bindings.repository_url_key is REMOTE.repository_url_key
     assert bindings.status == STATUS
     assert bindings.fields == FIELDS
 
@@ -2186,6 +2208,40 @@ def test_installed_bindings_refuse_a_lib_without_a_bound_name(
         QUALIFY.installed_bindings(tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("module", "name"),
+    (
+        (QUALIFY.REMOTE_MODULE, REMOTE.repository_url_key.__name__),
+        (QUALIFY.PROVENANCE_MODULE, "DIGEST_VALUE_KEY"),
+    ),
+    ids=("remote-without-repository-url-key", "provenance-without-digest-key"),
+)
+def test_installed_bindings_refuse_an_older_lib_without_a_newer_name(
+    monkeypatch: pytest.MonkeyPatch, module: str, name: str
+) -> None:
+    """Stop with the missing name when the installed module predates that name.
+
+    :param monkeypatch: Serves the installed module without ``name``.
+    :param module: Dotted installed module name.
+    :param name: Name ``installed_bindings`` binds from ``module``.
+    :returns: None; assertions verify the reason.
+    """
+    installed = vars(import_script_module(module))
+    _serve(
+        monkeypatch,
+        {
+            module: SimpleNamespace(
+                **{key: value for key, value in installed.items() if key != name}
+            )
+        },
+    )
+
+    with pytest.raises(
+        QUALIFY.QualificationError, match=f"^installed_lib_incompatible:{name}$"
+    ):
+        QUALIFY.installed_bindings(SKILL_ROOT)
+
+
 def test_native_provider_reads_through_the_installed_routes(
     inputs: object, bindings: object
 ) -> None:
@@ -2198,7 +2254,7 @@ def test_native_provider_reads_through_the_installed_routes(
     ref_route = QUALIFY.REF_ENDPOINT.format(
         project=SOURCE_ID, kind=BRANCHES, name="release%2F1.0"
     )
-    api = FakeApi({ref_route: {"commit": {"id": SEED}}})
+    api = FakeApi({ref_route: {QUALIFY.REF_COMMIT_KEY: {QUALIFY.COMMIT_ID_KEY: SEED}}})
     session = FakeGitHubSession(FakeApi())
     provider = _native(
         inputs,
@@ -2228,6 +2284,180 @@ def test_native_provider_reads_through_the_installed_routes(
     assert absent.mirror_targets(MIRROR_ID, DESTINATION_PATH) is None
     assert absent.destination(DESTINATION_PATH) is None
     assert absent.destination_id_present(REPOSITORY_ID) is False
+
+
+@pytest.mark.parametrize(
+    "mirror_url",
+    (MIRROR_URL_WITHOUT_SUFFIX, MIRROR_URL_WITH_SLASH),
+    ids=("without-git-suffix", "trailing-slash"),
+)
+def test_native_provider_matches_the_mirror_url_by_the_installed_key(
+    inputs: object, bindings: object, mirror_url: str
+) -> None:
+    """Match a mirror URL that differs from the clone URL only in its URL key.
+
+    GitLab can report ``https://host/o/r`` or ``https://host/o/r.git/`` for a
+    mirror created with the clone URL ``https://host/o/r.git``. A replaced
+    ``repository_url_key`` that keeps the URL unchanged stops the match, so the
+    provider compares with the bound key and not with its own normalization.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :param mirror_url: URL GitLab reports for the mirror.
+    :returns: None; assertions verify the match with the installed key and the
+        mismatch with a key that keeps the URL unchanged.
+    """
+    source = FakeMirrorSource(FakeApi(), mirror_url=mirror_url)
+    matched = _native(inputs, bindings, source)
+    kept = _native(
+        inputs, dataclasses.replace(bindings, repository_url_key=str), source
+    )
+
+    assert matched.mirror_targets(MIRROR_ID, DESTINATION_PATH) is True
+    assert kept.mirror_targets(MIRROR_ID, DESTINATION_PATH) is False
+
+
+def _ref_responses() -> dict[str, object]:
+    """Build the GitLab ref responses of every seed ref.
+
+    :returns: ``REF_ENDPOINT`` response per seed ref, holding its input commit.
+    """
+    return {
+        QUALIFY.REF_ENDPOINT.format(
+            project=SOURCE_ID, kind=ref.kind, name=quote(ref.name, safe="")
+        ): {QUALIFY.REF_COMMIT_KEY: {QUALIFY.COMMIT_ID_KEY: ref.commit}}
+        for ref in (MAIN_REF, TAG_REF)
+    }
+
+
+class NativeServices:
+    """Hold fake installed services whose DELETE removes the deleted object.
+
+    Calling the instance is the provider factory: it records the label and returns
+    a ``NativeMirrorProvider`` over the same services.
+    """
+
+    def __init__(self, inputs: object, bindings: object, mirror_url: str) -> None:
+        """Start with the mirror and the destination present.
+
+        :param inputs: Synthetic fixture inputs.
+        :param bindings: Installed names; ``create_guard`` is replaced.
+        :param mirror_url: URL GitLab reports for the mirror.
+        """
+        self.inputs = inputs
+        self.bindings = dataclasses.replace(bindings, create_guard=FakeGuard())
+        self.gitlab = FakeApi(_ref_responses())
+        self.github = FakeApi()
+        self.source = FakeMirrorSource(self.gitlab, mirror_url=mirror_url)
+        self.session = FakeGitHubSession(self.github)
+        self.destination = FakeRepositoryService(self.session)
+        self.gitlab.on_delete = self._remove_mirror
+        self.github.on_delete = self._remove_destination
+        self.labels: MutableSequence[str] = []
+
+    def __call__(self, label: str) -> object:
+        """Record the factory label and build a provider over these services.
+
+        :param label: Output file stem of the provider's live plan.
+        :returns: Native provider.
+        """
+        self.labels.append(label)
+        return _native(self.inputs, self.bindings, self.source, self.destination)
+
+    def _remove_mirror(self) -> None:
+        """Make the next mirror read return provider not-found."""
+        self.source.mirror_url = None
+
+    def _remove_destination(self) -> None:
+        """Make the next path and ID reads find no repository."""
+        self.destination.repository_id = None
+        self.session.present = False
+
+    @property
+    def deletes(self) -> tuple[tuple[str, str], ...]:
+        """List the GitLab, then the GitHub, DELETE requests.
+
+        :returns: Method and route of every DELETE.
+        """
+        return tuple(
+            call
+            for call in (*self.gitlab.calls, *self.github.calls)
+            if call[0] == HTTPMethod.DELETE
+        )
+
+
+# The mirror delete by native ID, then the destination delete by path.
+NATIVE_DELETES: Final[tuple[tuple[str, str], ...]] = (
+    (
+        HTTPMethod.DELETE,
+        MIRROR_PROVIDER.MIRROR_ENDPOINT.format(project=SOURCE_ID, mirror=MIRROR_ID),
+    ),
+    (
+        HTTPMethod.DELETE,
+        REPOSITORY.REPOSITORY_ENDPOINT.format(reference=DESTINATION_PATH),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "mirror_url",
+    (MIRROR_URL_WITHOUT_SUFFIX, MIRROR_URL_WITH_SLASH),
+    ids=("without-git-suffix", "trailing-slash"),
+)
+def test_run_cleanup_completes_when_gitlab_reports_another_url_form(
+    inputs: object, bindings: object, mirror_url: str
+) -> None:
+    """Remove both objects when the mirror URL lacks ``.git`` or ends in ``/``.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :param mirror_url: URL GitLab reports for the run-created mirror.
+    :returns: None; assertions verify the ledger, both deletes and the record.
+    """
+    services = NativeServices(inputs, bindings, mirror_url)
+
+    ledger = _qualification(inputs, ScriptedRunner(_results()), services).run()
+
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert services.labels == [QUALIFY.BASELINE_PLAN_STEP, QUALIFY.CLEANUP_PLAN_STEP]
+    assert services.deletes == NATIVE_DELETES
+    record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
+    assert record[QUALIFY.DELETE_FIELD] == {
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+    }
+
+
+@pytest.mark.parametrize(
+    "mirror_url",
+    (MIRROR_URL_WITHOUT_SUFFIX, MIRROR_URL_WITH_SLASH),
+    ids=("without-git-suffix", "trailing-slash"),
+)
+def test_reconcile_completes_when_gitlab_reports_another_url_form(
+    inputs: object, bindings: object, mirror_url: str
+) -> None:
+    """Finish a pending cleanup when the mirror URL lacks ``.git`` or ends in ``/``.
+
+    :param inputs: Synthetic fixture inputs.
+    :param bindings: Installed names.
+    :param mirror_url: URL GitLab reports for the run-created mirror.
+    :returns: None; assertions verify the ledger, both deletes and the record.
+    """
+    _failed_run(inputs, lambda provider: setattr(provider, "keep_mirror", True))
+    services = NativeServices(inputs, bindings, mirror_url)
+
+    ledger = _qualification(inputs, ScriptedRunner(_results()), services).reconcile()
+
+    assert ledger[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
+    assert ledger[QUALIFY.RECONCILED_FIELD] is True
+    assert services.labels == [QUALIFY.RECONCILE_PLAN_STEP]
+    assert services.deletes == NATIVE_DELETES
+    record = json.loads((inputs.work_dir / QUALIFY.CLEANUP_RECORD).read_text())
+    assert record[QUALIFY.RECONCILED_FIELD] is True
+    assert record[QUALIFY.DELETE_FIELD] == {
+        QUALIFY.MIRROR_HTTP_STATUS_FIELD: 204,
+        QUALIFY.DESTINATION_HTTP_STATUS_FIELD: 204,
+    }
 
 
 def test_native_provider_deletes_the_mirror_inside_the_installed_guard(
@@ -2672,8 +2902,8 @@ def test_main_prints_the_ledger_and_exits_zero_after_pass(
 
     output = _output(capsys)
     assert code == EXIT_OK
-    assert output["status"] == STATUS.passed
-    assert output["ledger"]["cleanup"] == QUALIFY.CLEANUP_PASS
+    assert output[QUALIFY.STATUS_FIELD] == STATUS.passed
+    assert output[CLI.LEDGER_FIELD][QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.CLEANUP_PASS
     assert provider.deletes == [MIRROR_DELETED, DESTINATION_DELETED]
 
 
@@ -2709,8 +2939,8 @@ def test_main_dry_run_is_the_default_and_writes_no_ledger(
 
     output = _output(capsys)
     assert code == EXIT_OK
-    assert output["status"] == STATUS.planned
-    assert output["plan"]["plan_digest"] == PLAN_DIGEST
+    assert output[QUALIFY.STATUS_FIELD] == STATUS.planned
+    assert output[CLI.PLAN_FIELD][QUALIFY.LEDGER_PLAN_DIGEST_FIELD] == PLAN_DIGEST
     assert runner.labels == [QUALIFY.LIVE_PLAN_STEP, QUALIFY.REJECTION_STEP]
     assert provider.deletes == []
     assert not (inputs.work_dir / QUALIFY.ALLOCATION_FILE).exists()
@@ -2773,10 +3003,10 @@ def test_main_sigterm_during_apply_exits_two_and_names_reconcile(
 
     assert code == EXIT_STOP
     assert _output(capsys) == {
-        "status": STATUS.blocked,
-        "reason": _interrupted(QUALIFY.APPLY_PENDING),
+        QUALIFY.STATUS_FIELD: STATUS.blocked,
+        CLI.REASON_FIELD: _interrupted(QUALIFY.APPLY_PENDING),
     }
-    assert _ledger(inputs)["cleanup"] == QUALIFY.APPLY_PENDING
+    assert _ledger(inputs)[QUALIFY.LEDGER_STATE_FIELD] == QUALIFY.APPLY_PENDING
     assert provider.deletes == []
     assert signal.getsignal(signal.SIGTERM) == previous
 
@@ -2910,7 +3140,10 @@ def test_main_prints_the_reason_and_exits_two_when_blocked(
     code = CLI.main(_argv(inputs, CLI.APPLY_MODE_OPTION))
 
     assert code == EXIT_STOP
-    assert _output(capsys) == {"status": STATUS.blocked, "reason": reason}
+    assert _output(capsys) == {
+        QUALIFY.STATUS_FIELD: STATUS.blocked,
+        CLI.REASON_FIELD: reason,
+    }
     assert fake.deletes == []
 
 
@@ -2945,8 +3178,8 @@ def test_main_reconcile_without_a_ledger_exits_two(
 
     assert code == EXIT_STOP
     assert _output(capsys) == {
-        "status": STATUS.blocked,
-        "reason": QUALIFY.NOTHING_TO_RECONCILE,
+        QUALIFY.STATUS_FIELD: STATUS.blocked,
+        CLI.REASON_FIELD: QUALIFY.NOTHING_TO_RECONCILE,
     }
     assert not missing.exists()
 

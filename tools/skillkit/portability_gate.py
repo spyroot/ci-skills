@@ -463,7 +463,7 @@ def _field_selector(path: str) -> Optional[str]:
         return "project"
     if field == "context":
         return "cluster"
-    return "registry" if parts[0] == "harbor" else "host"
+    return "registry" if parts[0] == endpoints.HARBOR_AUTHORITY else "host"
 
 
 def _findings(

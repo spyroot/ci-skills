@@ -182,7 +182,7 @@ INVALID_NO_CONTENT_REASON: Final[str] = API.INVALID_NO_CONTENT_RESPONSE
 DESTINATION_CHANGED_REASON: Final[str] = FAILURE.DESTINATION_CHANGED
 UNCONFIRMED_REASON: Final[str] = FAILURE.UNCONFIRMED
 TRANSPORT_REASON: Final[str] = "transport"
-AUTHORIZATION_REASON: Final[str] = "authorization"
+AUTHORIZATION_REASON: Final[str] = API.AUTHORIZATION_FAILURE
 VERIFICATION_TIMEOUT_REASON: Final[str] = FAILURE.TIMEOUT
 ALTERNATE_DESTINATION_URL: Final[str] = (
     f"https://{DESTINATION_HOST}/unit/replaced-destination.git"
@@ -353,6 +353,10 @@ def _engine(
     """
     source = create_autospec(MIRRORING.PushMirrorSource, instance=True)
     destination = create_autospec(MIRRORING.MirrorDestination, instance=True)
+    # An autospec double answers a class attribute with a Mock; the real
+    # providers hold None until a create call returns an ID.
+    source.created_mirror_id = None
+    destination.created_repository_id = None
     source.repository.return_value = SOURCE_REPOSITORY
     source.refs.return_value = REFS.RefSnapshot.parse(REMOTE_OUTPUT)
     source.mirrors.return_value = () if mirror is None else (mirror,)

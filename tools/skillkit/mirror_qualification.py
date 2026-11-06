@@ -30,8 +30,10 @@ ledger already exists. ``reconcile()`` finishes the cleanup a failed or interrup
 run left pending, for the native IDs that ledger recorded only. Provider calls sit
 behind `MirrorProvider`; `NativeMirrorProvider` binds the installed skill's own
 GitLab and GitHub services. ``installed_bindings`` reads the status tokens, record
-actions and exit codes (`InstalledStatus`) and the result keys (`InstalledFields`)
-from the installed copy; this module defines only the keys it writes.
+actions and exit codes (`InstalledStatus`), the result keys and the skill digest
+key (`InstalledFields`), and the repository URL comparison key
+(``repository_url_key``) from the installed copy; this module defines only the
+keys it writes and the GitLab keys the installed lib has no constant for.
 
 ``run()`` writes the cleanup record to ``mirror-smoke-cleanup.json`` and as
 ``smoke_cleanup`` of ``mirror-noop-with-cleanup-receipt.json``; the ``*_FIELD``
@@ -97,8 +99,18 @@ RECEIPT_OPTION: Final = "--receipt-out"
 # Option of tools/qualify_mirror.py named as the next action after an interrupt.
 RECONCILE_OPTION: Final = "--reconcile"
 TARGET_SOURCE_FIELD: Final = "target_source"
-LEDGER_STATE_FIELD: Final = "cleanup"
 SEED_REF_KINDS: Final = ("branches", "tags")
+
+# Keys of the plan summary and the allocation ledger. ``plan()`` returns the
+# summary; ``_allocate`` writes it as the first ledger. The ledger also uses
+# TARGET_SOURCE_FIELD, SOURCE_FIELD, DESTINATION_FIELD and RECONCILED_FIELD.
+LEDGER_RUN_FIELD: Final = "run"
+LEDGER_CANDIDATE_FIELD: Final = "candidate"
+LEDGER_PLAN_DIGEST_FIELD: Final = "plan_digest"
+LEDGER_SEED_REFS_FIELD: Final = "seed_refs"
+LEDGER_MIRROR_FIELD: Final = "mirror"
+LEDGER_CREATED_FIELD: Final = "created"
+LEDGER_STATE_FIELD: Final = "cleanup"
 
 # Cleanup record fields; tools/check_live_acceptance.py imports them.
 SMOKE_CLEANUP_FIELD: Final = "smoke_cleanup"
@@ -174,12 +186,14 @@ DESTINATION_DELETE: Final = "destination_delete"
 PROVIDER_FAILURE: Final = "provider_error:{step}:{reason}"
 # Attribute of the installed APIError holding its classified reason.
 REASON_ATTRIBUTE: Final = "reason"
-# Key of the digest in the receipt's skill identity; core/provenance.py writes it
-# without a constant.
-SKILL_DIGEST_KEY: Final = "digest"
 # Neither route has a constant in the installed lib.
 REF_ENDPOINT: Final = "projects/{project}/repository/{kind}/{name}"
 REPOSITORY_ID_ENDPOINT: Final = "repositories/{repository_id}"
+# Keys of the GitLab REF_ENDPOINT response that ``ref_commit`` reads: the ref's
+# ``commit`` object and that commit's ``id``. The installed lib has no constant
+# for them.
+REF_COMMIT_KEY: Final = "commit"
+COMMIT_ID_KEY: Final = "id"
 
 CATALOG_MODULE: Final = "lib.python.core.catalog"
 CLI_API_MODULE: Final = "lib.python.core.cli_api"
@@ -188,6 +202,8 @@ MIRROR_CLI_MODULE: Final = "lib.python.core.gitlab.mirror.cli"
 MIRROR_CONSTANTS_MODULE: Final = "lib.python.core.gitlab.mirror.constants"
 MIRRORING_MODULE: Final = "lib.python.core.git.mirroring"
 MIRROR_PROVIDER_MODULE: Final = "lib.python.core.gitlab.mirror.provider"
+PROVENANCE_MODULE: Final = "lib.python.core.provenance"
+REMOTE_MODULE: Final = "lib.python.core.git.remote"
 REPOSITORY_MODULE: Final = "lib.python.core.github.repository"
 STATUS_MODULE: Final = "lib.python.sys.status"
 
@@ -474,6 +490,7 @@ class InstalledFields:
     :param id: ``MirrorField.ID`` from ``core/git/mirroring.py``.
     :param host: ``MirrorField.HOST`` from the same module.
     :param path: ``MirrorField.PATH`` from the same module.
+    :param digest: ``DIGEST_VALUE_KEY`` from ``core/provenance.py``.
 
     .. attribute :: status
         :type: str
@@ -570,6 +587,12 @@ class InstalledFields:
         :type: str
 
         Path in source and destination evidence.
+
+    .. attribute :: digest
+        :type: str
+
+        Key of the package digest in the receipt skill identity; ``_cleanup``
+        copies that value to ``skill_digest`` of the cleanup record.
     """
 
     status: str
@@ -591,14 +614,18 @@ class InstalledFields:
     id: str
     host: str
     path: str
+    digest: str
 
     @classmethod
-    def bind(cls, field: Any, envelope: Any, evidence: Any) -> InstalledFields:
-        """Read the keys from the installed mirror and evidence enumerations.
+    def bind(
+        cls, field: Any, envelope: Any, evidence: Any, provenance: Any
+    ) -> InstalledFields:
+        """Read the keys from the installed enumerations and provenance module.
 
         :param field: Installed ``Field`` of ``core/gitlab/mirror/constants.py``.
         :param envelope: Installed ``EnvelopeField`` of ``core/gitlab/mirror/cli.py``.
         :param evidence: Installed ``MirrorField`` of ``core/git/mirroring.py``.
+        :param provenance: Installed ``lib.python.core.provenance`` module.
         :returns: Bound keys.
         """
         return cls(
@@ -621,6 +648,7 @@ class InstalledFields:
             id=evidence.ID,
             host=evidence.HOST,
             path=evidence.PATH,
+            digest=provenance.DIGEST_VALUE_KEY,
         )
 
 
@@ -642,9 +670,10 @@ class InstalledBindings:
         ``core/github/repository.py``.
     :param repository_not_found: ``NOT_FOUND`` from the same module.
     :param path_separator: ``PATH_SEPARATOR`` from the same module.
+    :param repository_url_key: ``repository_url_key`` from ``core/git/remote.py``.
     :param status: Tokens from ``sys/status.py`` and mirror ``Outcome``.
     :param fields: Result and receipt keys from mirror ``Field``, ``EnvelopeField``
-        and ``MirrorField``.
+        and ``MirrorField``, and ``DIGEST_VALUE_KEY`` from ``core/provenance.py``.
 
     .. attribute :: gitlab_option
         :type: str
@@ -706,6 +735,12 @@ class InstalledBindings:
 
         ``PATH_SEPARATOR`` from ``core/github/repository.py``.
 
+    .. attribute :: repository_url_key
+        :type: Callable[[str], str]
+
+        ``repository_url_key`` from ``core/git/remote.py``; the installed mirror
+        provider compares a mirror URL with a clone URL by this key.
+
     .. attribute :: status
         :type: InstalledStatus
 
@@ -715,7 +750,7 @@ class InstalledBindings:
         :type: InstalledFields
 
         Result and receipt keys from mirror ``Field``, ``EnvelopeField`` and
-        ``MirrorField``.
+        ``MirrorField``, and ``DIGEST_VALUE_KEY`` from ``core/provenance.py``.
     """
 
     gitlab_option: str
@@ -730,6 +765,7 @@ class InstalledBindings:
     repository_endpoint: str
     repository_not_found: str
     path_separator: str
+    repository_url_key: Callable[[str], str]
     status: InstalledStatus
     fields: InstalledFields
 
@@ -756,6 +792,8 @@ def installed_bindings(skill: Path) -> InstalledBindings:
     mirror_constants = _installed_module(skill, MIRROR_CONSTANTS_MODULE)
     mirroring = _installed_module(skill, MIRRORING_MODULE)
     mirror_provider = _installed_module(skill, MIRROR_PROVIDER_MODULE)
+    provenance = _installed_module(skill, PROVENANCE_MODULE)
+    remote = _installed_module(skill, REMOTE_MODULE)
     repository = _installed_module(skill, REPOSITORY_MODULE)
     status = _installed_module(skill, STATUS_MODULE)
     try:
@@ -772,11 +810,13 @@ def installed_bindings(skill: Path) -> InstalledBindings:
             repository_endpoint=repository.REPOSITORY_ENDPOINT,
             repository_not_found=repository.NOT_FOUND,
             path_separator=repository.PATH_SEPARATOR,
+            repository_url_key=remote.repository_url_key,
             status=InstalledStatus.bind(status, mirror_constants.Outcome),
             fields=InstalledFields.bind(
                 mirror_constants.Field,
                 mirror_cli.EnvelopeField,
                 mirroring.MirrorField,
+                provenance,
             ),
         )
     except AttributeError as exc:
@@ -1069,7 +1109,14 @@ class MirrorQualification:
         status = self.status
         fields = self.fields
         plan, summary = self._preflight()
-        self._allocate(**summary, mirror=None, created=None, cleanup=APPLY_PENDING)
+        self._allocate(
+            {
+                **summary,
+                LEDGER_MIRROR_FIELD: None,
+                LEDGER_CREATED_FIELD: None,
+                LEDGER_STATE_FIELD: APPLY_PENDING,
+            }
+        )
         code, applied = self.runner.run(
             APPLIED_STEP, self._apply(plan, APPLIED_RECEIPT)
         )
@@ -1098,7 +1145,7 @@ class MirrorQualification:
         ):
             raise QualificationError("noop_result_unexpected")
         receipt = _read(inputs.work_dir / NOOP_RECEIPT)
-        if receipt.get(fields.tested_revision) != summary["candidate"]:
+        if receipt.get(fields.tested_revision) != summary[LEDGER_CANDIDATE_FIELD]:
             raise QualificationError("receipt_candidate_mismatch")
         source = _object(created.get(fields.source))
         destination = _object(created.get(fields.destination))
@@ -1119,7 +1166,7 @@ class MirrorQualification:
             inputs.work_dir / NOOP_WITH_CLEANUP,
             {**receipt, SMOKE_CLEANUP_FIELD: cleanup},
         )
-        self._save(cleanup=CLEANUP_PASS)
+        self._save({LEDGER_STATE_FIELD: CLEANUP_PASS})
         return dict(self.ledger)
 
     def _reconcile(self) -> JSONMap:
@@ -1153,9 +1200,13 @@ class MirrorQualification:
             destination=_location(destination, fields),
             source=_location(source, fields),
         )
-        created = _object(self.ledger.get("created"))
+        created = _object(self.ledger.get(LEDGER_CREATED_FIELD))
         mirror_id = _owned_id(
-            created, fields.mirror, self.ledger.get("mirror"), fields.id, missing
+            created,
+            fields.mirror,
+            self.ledger.get(LEDGER_MIRROR_FIELD),
+            fields.id,
+            missing,
         )
         repository_id = _owned_id(
             created, fields.repository, destination, fields.id, missing
@@ -1168,13 +1219,13 @@ class MirrorQualification:
         self._seed_refs(provider, SEED_REF_BASELINE_DIFFERS)
         receipt = {
             **self._existing_receipt(),
-            fields.tested_revision: self.ledger.get("candidate"),
+            fields.tested_revision: self.ledger.get(LEDGER_CANDIDATE_FIELD),
         }
         cleanup = self._cleanup(
             provider, source, destination, mirror_id, repository_id, receipt, True
         )
         _write(inputs.work_dir / CLEANUP_RECORD, {**cleanup, RECONCILED_FIELD: True})
-        self._save(cleanup=CLEANUP_PASS, reconciled=True)
+        self._save({LEDGER_STATE_FIELD: CLEANUP_PASS, RECONCILED_FIELD: True})
         return dict(self.ledger)
 
     def _preflight(self) -> tuple[JSONMap, dict[str, object]]:
@@ -1209,13 +1260,13 @@ class MirrorQualification:
         if rejection.get(fields.mutated) is not False:
             raise QualificationError("rejection_mutated")
         summary = {
-            "run": inputs.run_id,
-            "candidate": candidate,
+            LEDGER_RUN_FIELD: inputs.run_id,
+            LEDGER_CANDIDATE_FIELD: candidate,
             TARGET_SOURCE_FIELD: target_source,
             SOURCE_FIELD: source,
             DESTINATION_FIELD: record.get(fields.destination),
-            "plan_digest": plan.get(fields.plan_digest),
-            "seed_refs": seed_refs,
+            LEDGER_PLAN_DIGEST_FIELD: plan.get(fields.plan_digest),
+            LEDGER_SEED_REFS_FIELD: seed_refs,
         }
         return plan, summary
 
@@ -1316,10 +1367,12 @@ class MirrorQualification:
         record = _object(records[0])
         if isinstance(record.get(fields.created), dict):
             self._save(
-                destination=record.get(fields.destination),
-                mirror=record.get(fields.mirror),
-                created=record.get(fields.created),
-                cleanup=CLEANUP_PENDING,
+                {
+                    DESTINATION_FIELD: record.get(fields.destination),
+                    LEDGER_MIRROR_FIELD: record.get(fields.mirror),
+                    LEDGER_CREATED_FIELD: record.get(fields.created),
+                    LEDGER_STATE_FIELD: CLEANUP_PENDING,
+                }
             )
 
     def _existing_receipt(self) -> JSONMap:
@@ -1371,13 +1424,13 @@ class MirrorQualification:
             if targets is False or (targets is None and not allow_absent):
                 raise QualificationError(MIRROR_IDENTITY_CHANGED)
             if targets is True:
-                self._save(cleanup=MIRROR_DELETE_PENDING)
+                self._save({LEDGER_STATE_FIELD: MIRROR_DELETE_PENDING})
                 mirror_status = provider.delete_mirror(mirror_id, path)
                 if mirror_status != HTTPStatus.NO_CONTENT or (
                     provider.mirror_targets(mirror_id, path) is not None
                 ):
                     raise QualificationError("mirror_deletion_unverified")
-        self._save(cleanup=DESTINATION_DELETE_PENDING)
+        self._save({LEDGER_STATE_FIELD: DESTINATION_DELETE_PENDING})
         destination_status: Optional[int] = None
         if repository_id is not None:
             destination_status = HTTPStatus.NOT_FOUND
@@ -1391,7 +1444,7 @@ class MirrorQualification:
                 destination_status = provider.delete_destination(path, repository_id)
                 if destination_status != HTTPStatus.NO_CONTENT:
                     raise QualificationError("destination_deletion_unverified")
-        self._save(cleanup=VERIFY_PENDING)
+        self._save({LEDGER_STATE_FIELD: VERIFY_PENDING})
         after = self._observe(provider, source, mirror_id, repository_id)
         self.sleep(self.inputs.settle_seconds)
         repeat = {
@@ -1405,7 +1458,7 @@ class MirrorQualification:
             STATUS_FIELD: self.status.passed,
             CAPTURED_AT_FIELD: self.clock().isoformat(),
             EXECUTION_HOST_FIELD: receipt.get(fields.execution_host),
-            SKILL_DIGEST_FIELD: skill.get(SKILL_DIGEST_KEY),
+            SKILL_DIGEST_FIELD: skill.get(fields.digest),
             TESTED_REVISION_FIELD: receipt.get(fields.tested_revision),
             BEFORE_FIELD: {
                 SOURCE_FIELD: source,
@@ -1460,14 +1513,14 @@ class MirrorQualification:
             DESTINATION_ID_HTTP_STATUS_FIELD: absent,
         }
 
-    def _allocate(self, **fields: object) -> None:
+    def _allocate(self, fields: JSONMap) -> None:
         """Create the allocation ledger; it must not exist yet.
 
         ``_allocate`` stages the complete ledger in a temporary file and publishes
         it with ``os.link``, which fails when a ledger exists. ``_allocate`` holds
         the ledger only after the link succeeds.
 
-        :param **fields: Ledger fields to set.
+        :param fields: Ledger value per ``LEDGER_*_FIELD`` or other ledger key.
         :raises QualificationError: The ledger exists or cannot be written.
         """
         path = self.inputs.work_dir / ALLOCATION_FILE
@@ -1480,13 +1533,14 @@ class MirrorQualification:
             raise QualificationError(f"write_failed:{path.name}") from exc
         self.ledger.update(fields)
 
-    def _save(self, **fields: object) -> None:
+    def _save(self, fields: Optional[JSONMap] = None) -> None:
         """Update the allocation ledger and replace its file atomically.
 
-        :param **fields: Ledger fields to set. With no fields, ``_save`` rewrites
-            the current ledger unchanged.
+        :param fields: Ledger value per ``LEDGER_*_FIELD`` or other ledger key.
+            When the value is ``None``, ``_save`` rewrites the current ledger
+            unchanged.
         """
-        self.ledger.update(fields)
+        self.ledger.update(fields or {})
         _write(self.inputs.work_dir / ALLOCATION_FILE, self.ledger)
 
 
@@ -1588,7 +1642,7 @@ class NativeMirrorProvider(MirrorProvider):
         )
         with self._errors(REF_READ):
             data = service.api.get_json(service.session, endpoint)
-        commit = _object(_object(data).get("commit")).get("id")
+        commit = _object(_object(data).get(REF_COMMIT_KEY)).get(COMMIT_ID_KEY)
         if not isinstance(commit, str) or not commit:
             raise QualificationError(f"seed_ref_unreadable:{ref.key}")
         return commit
@@ -1596,8 +1650,12 @@ class NativeMirrorProvider(MirrorProvider):
     def mirror_targets(self, mirror_id: int, destination: str) -> Optional[bool]:
         """Read whether a mirror exists and pushes to the destination.
 
-        ``mirror_targets`` compares URLs with ``casefold()``, as the installed
-        provider does.
+        ``mirror_targets`` compares the mirror URL with the destination clone URL
+        by the installed ``repository_url_key``, as the installed mirror provider
+        does. That key is the case-folded URL; for an ``https`` URL it also drops
+        trailing ``/`` and one ``.git``. So ``https://github.com/o/r`` and
+        ``https://github.com/o/r.git/`` both match the clone URL
+        ``https://github.com/o/r.git``.
 
         :param mirror_id: Native mirror ID.
         :param destination: Destination repository path.
@@ -1614,10 +1672,8 @@ class NativeMirrorProvider(MirrorProvider):
             if mirror is None:
                 return None
             repository = self._destination.repository(destination)
-        return (
-            repository is not None
-            and mirror.url.casefold() == repository.clone_url.casefold()
-        )
+        key = self._bindings.repository_url_key
+        return repository is not None and key(mirror.url) == key(repository.clone_url)
 
     def delete_mirror(self, mirror_id: int, destination: str) -> int:
         """Delete one mirror by native ID under the installed pending-write guard.

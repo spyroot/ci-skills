@@ -106,7 +106,10 @@ GitLab together with Kubernetes or Harbor, such as `gitlab_runner_manager.py dep
 selected instance's `[gitlab_routing]` row names, for example
 `gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }`. When the row omits a table the command needs,
 or the target has no `[gitlab_routing]`, the command returns BLOCKED
-`target is missing required authority tables: <names>`. See
+`target is missing required authority tables: <names>`. The one exception is the legacy shape: when the command
+reads the legacy `[gitlab]` table or a `[gitlab.NAME]` profile other than `[gitlab.com]`, the target has no
+`[gitlab_routing]`, and the caller passes no `--gitlab`, the command reads `[kubernetes]` and `[harbor]` directly; see
+[Legacy shape, read for one release](ci-skills/references/access.md#legacy-shape-read-for-one-release). See
 [GitLab private and public targets](ci-skills/references/access.md#gitlab-private-and-public-targets).
 `access_check.py` checks configured providers; unrelated provider tables and tools are not required.
 `--publication` additionally requires GitHub configuration. Kubernetes commands need the selected context and exact

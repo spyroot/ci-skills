@@ -14,13 +14,12 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import urlsplit
 
+from lib.python.core.git.remote import GIT_EXECUTABLE, GIT_SUFFIX
 from lib.python.core.runtime import run_command
 from lib.python.sys.status import PASS
 
-GIT_COMMAND: Final = "git"
 GIT_REMOTE_ARGUMENTS: Final = ("config", "--get", "remote.origin.url")
 GIT_TIMEOUT_SECONDS: Final = 10
-GIT_SUFFIX: Final = ".git"
 MAX_REFERENCE_LENGTH: Final = 4096
 IDENTITY_REQUIRED: Final = "repository_identity_required: provide "
 INVALID_REFERENCE: Final = "repository_reference_invalid"
@@ -160,7 +159,7 @@ def resolve_repository(
             path, RepositorySource.PROVIDER if path else RepositorySource.UNKNOWN
         )
     result = run_command(
-        (GIT_COMMAND, "-C", str(directory or Path.cwd()), *GIT_REMOTE_ARGUMENTS),
+        (GIT_EXECUTABLE, "-C", str(directory or Path.cwd()), *GIT_REMOTE_ARGUMENTS),
         timeout=GIT_TIMEOUT_SECONDS,
     )
     if result.returncode:

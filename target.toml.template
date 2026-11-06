@@ -94,8 +94,9 @@ url = "https://gitlab.example.com"
 # ci-skills reads token_file; a relative path resolves beside this file.
 # Without token_file, ci-skills uses the first set of GITLAB_TOKEN,
 # GITLAB_ACCESS_TOKEN and OAUTH_TOKEN, then the glab credential store for
-# url's host. An environment token is not tied to a host, so each instance
-# declares its own token_file.
+# url's host. An environment token is not tied to a host: without token_file,
+# ci-skills sends it to whichever instance the command reads. We recommend a
+# token_file in each instance table for that reason.
 # The full diagnostics access check needs an instance administrator identity.
 # The GitLab-only check proves identity and target read access; an action's
 # apply and read-back establish whether that action is authorized.

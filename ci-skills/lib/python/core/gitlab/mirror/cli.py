@@ -580,19 +580,12 @@ class MirrorCommand:
             return
         record: dict[str, JSONValue] = dict(self.state.record)
         created_repository = engine.created_repository
-        created_mirror_id = (
-            engine.source.created_mirror_id
-            if isinstance(engine.source, GitLabPushMirrorService)
-            else None
-        )
+        created_mirror_id = engine.source.created_mirror_id
         if created_mirror_id is not None:
             record[Field.CREATED_MIRROR_ID] = created_mirror_id
         if engine.destination_repository is not None:
             record[Field.DESTINATION] = engine.destination_repository.evidence()
-        elif (
-            isinstance(engine.destination, GitHubRepositoryService)
-            and engine.destination.created_repository_id is not None
-        ):
+        elif engine.destination.created_repository_id is not None:
             record[Field.DESTINATION] = {
                 **json_object(record[Field.DESTINATION]),
                 Field.ID: engine.destination.created_repository_id,

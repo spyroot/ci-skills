@@ -1469,38 +1469,53 @@ def test_api_command_sends_the_selected_host_and_token(
     assert result.stderr.count(GITLAB_DEPRECATION_EVENT) == deprecations
 
 
-def test_api_command_on_the_template_reads_the_public_instance(
+@pytest.mark.parametrize(
+    ("selection", "table"),
+    (
+        (NO_SELECTION, TEMPLATE_DEFAULT),
+        (SELECT_PRIVATE, GITLAB_PRIVATE_TABLE),
+        (SELECT_PUBLIC, GITLAB_PUBLIC_TABLE),
+    ),
+    ids=("default", "private", "public"),
+)
+def test_api_command_on_the_template_reads_the_selected_instance(
     template_path: Path,
     providers: Mapping[str, str],
     fake_bin: Path,
     call_journal: Path,
+    selection: GitLabSelection,
+    table: str,
 ) -> None:
-    """Reach the shipped template's public URL with the token file it names.
+    """Reach the selected template instance's URL with the token file it names.
+
+    Without ``--gitlab``, the command reads the instance that the template's
+    ``[gitlab_routing].default`` names.
 
     :param template_path: Copy of the shipped template beside its files.
     :param providers: Child environment of the journaling fake providers.
     :param fake_bin: Directory holding the fake providers.
     :param call_journal: Journal of provider calls.
+    :param selection: Caller's instance choice, or none.
+    :param table: Template instance table the command must read.
     :returns: None; assertions compare the call with the template's own values.
     """
-    target = template_path
-    public = TEMPLATE[GITLAB_PUBLIC_TABLE]
-    token = (template_path.parent / public["token_file"]).read_text(encoding="utf-8")
+    instance = TEMPLATE[table]
+    token = (template_path.parent / instance["token_file"]).read_text(encoding="utf-8")
 
     result = run_script(
         "ci-api",
         "check",
         "--provider",
         GITLAB_AUTHORITY,
-        *_selection_argv(SELECT_PUBLIC),
+        *_selection_argv(selection),
         fake_bin=fake_bin,
-        env={**providers, TARGET_ENV: str(target)},
+        env={**providers, TARGET_ENV: str(template_path)},
     )
     calls = read_journal(call_journal)
 
     assert result.returncode == STATUS.exit_code(STATUS.PASS), result.stderr
     assert calls
-    assert _hostnames(calls) == [urlsplit(public["url"]).netloc] * len(calls)
+    assert _hostnames(calls) == [urlsplit(instance["url"]).netloc] * len(calls)
     assert {call["token"] for call in calls} == {token}
     assert GITLAB_DEPRECATION_EVENT not in result.stderr
 

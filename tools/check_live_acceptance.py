@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.catalog import SCHEMA_VERSION as RESULT_SCHEMA_VERSION
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.endpoints import GITLAB_AUTHORITY, KUBERNETES_AUTHORITY
 from lib.python.core.git.mirroring import MirrorField
 from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
 from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
@@ -75,7 +76,7 @@ from lib.python.core.kubernetes.podman_evidence import (
 )
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.schema import SpecificationError, validate_specification
-from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
+from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, exit_code
 from skillkit.mirror_qualification import (
     AFTER_FIELD,
     BEFORE_FIELD,
@@ -211,7 +212,7 @@ REQUIRED_LIVE_CHECKS: Final = (
     "gitlab_job",
 )
 SETUP_RECEIPT_KINDS: Final = frozenset({RECEIPT_KIND, "gitlab_access"})
-GATE_SURFACES: Final = ("gitlab", "kubernetes")
+GATE_SURFACES: Final = (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY)
 REPEATABLE_GITLAB_OPERATIONS: Final = (
     ("gitlab_milestone", "create"),
     ("gitlab_milestone", "update"),
@@ -610,7 +611,7 @@ def _check_common(
     problems: MutableSequence[str] = []
     if receipt.get("schema_version") not in RECEIPT_SCHEMA_VERSIONS:
         problems.append(f"{name}:schema_version_unexpected")
-    if receipt.get("status") != "PASS":
+    if receipt.get("status") != PASS:
         problems.append(f"{name}:status_not_pass")
     skill = _mapping(receipt.get("skill"))
     if not skill.get("digest"):
@@ -904,13 +905,13 @@ def _check_receipt(
         observed = _mapping(surfaces.get(surface))
         if not observed.get("identity"):
             problems.append(f"{name}:identity_missing:{surface}")
-        if observed.get("status") != "PASS":
+        if observed.get("status") != PASS:
             problems.append(f"{name}:surface_not_pass:{surface}")
         source = sources.get(surface)
         if not source or observed.get("credential_source") != source:
             problems.append(f"{name}:credential_source_mismatch:{surface}")
         target = targets.get(surface)
-        if surface == "kubernetes":
+        if surface == KUBERNETES_AUTHORITY:
             cluster = _mapping(target)
             if not cluster.get("context") or not cluster.get("server"):
                 problems.append(f"{name}:surface_target_missing:{surface}")
@@ -928,7 +929,7 @@ def _check_receipt(
         elif check.get("access_proven") is not True:
             problems.append(f"{name}:live_check_unproven:{required}")
         if isinstance(check, dict) and (
-            check.get("status") not in {"PASS", "PARTIAL"}
+            check.get("status") not in {PASS, PARTIAL}
             or not isinstance(check.get("readback_sha256"), str)
             or re.fullmatch(r"[0-9a-f]{64}", check["readback_sha256"]) is None
         ):
@@ -1098,7 +1099,7 @@ def _check_gitlab_read_receipt(
     records = receipt.get("records")
     readback = receipt.get("readback")
     if (
-        receipt.get("status") != "PASS"
+        receipt.get("status") != PASS
         or receipt.get("phase") != "READ"
         or receipt.get("mutated") is not False
         or receipt.get("operation") != required.get("operation")

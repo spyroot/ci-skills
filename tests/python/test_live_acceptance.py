@@ -830,11 +830,11 @@ def test_operation_target_cannot_switch_away_from_initial_synthetic_setup() -> N
             lambda setup: setup["access.json"]["surfaces"][KUBERNETES_AUTHORITY].update(
                 status=STATUS.BLOCKED
             ),
-            "surface_not_pass:kubernetes",
+            f"surface_not_pass:{KUBERNETES_AUTHORITY}",
         ),
         (
             lambda setup: setup["access.json"]["surfaces"].pop(GITLAB_AUTHORITY),
-            "identity_missing:gitlab",
+            f"identity_missing:{GITLAB_AUTHORITY}",
         ),
         (
             lambda setup: setup["gitlab-access.json"].update(credential_digest=""),
@@ -1325,7 +1325,6 @@ def test_gate_never_reads_repository_merge_policy_from_the_skill_target() -> Non
     assert with_publication_fields["status"] == STATUS.PASS, with_publication_fields[
         "problems"
     ]
-    assert ACCEPTANCE.GATE_SURFACES == (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY)
 
 
 def test_cli_blocks_without_the_tracked_policy_file(

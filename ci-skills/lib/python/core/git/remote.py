@@ -14,10 +14,11 @@ from urllib.parse import urlsplit, urlunsplit
 
 from lib.python.core.cli_api import APIError, CommandRunner, RequestDeadline
 from lib.python.core.git.refs import RefSnapshot
-from lib.python.core.runner_identity import GIT_SUFFIX
 from lib.python.core.runtime import error_class, run_command_bounded
 
 GIT_EXECUTABLE: Final = "git"
+# Repository path suffix that URL and remote-reference normalization strips.
+GIT_SUFFIX: Final = ".git"
 LS_REMOTE_ARGUMENTS: Final = ("ls-remote", "--refs", "--heads", "--tags")
 HTTPS_SCHEME: Final = "https"
 AUTHORIZATION_PREFIX: Final = "Authorization: Basic "

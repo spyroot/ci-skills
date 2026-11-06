@@ -88,8 +88,8 @@ token_file = "gitlab-private.token"
 url = "https://gitlab.second.example.test"
 # ci-skills reads token_file only for --gitlab public; a relative path resolves beside target.toml. Without
 # token_file, ci-skills uses the first set of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN, then the glab
-# credential store for url's host. An environment token is not tied to a host, so each instance declares its
-# own token_file.
+# credential store for url's host. An environment token is not tied to a host: without token_file, ci-skills
+# sends it to whichever instance the command reads. We recommend a token_file in each instance table.
 token_file = "gitlab-public.token"
 
 [kubernetes]
@@ -198,7 +198,8 @@ row those commands block. Replace `--gitlab-profile com` with `--gitlab public`.
   `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable. Otherwise, the command uses the `glab` credential
   store of the selected host. When the selected table has no `token_file`, the command sends the first set variable
   to the instance it reads, whether `--gitlab`, `[gitlab_routing].default` or the `gitlab_private` fallback selected
-  that instance. Declare a `token_file` in each instance table when both instances are used.
+  that instance. We recommend a `token_file` in each instance table when both instances are used, because an
+  environment token is not tied to a host.
 - Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
   combined path, its `kubernetes.kubeconfig` single file, or the kubeconfig
   selected by an explicit project binding. If none is declared, it uses
