@@ -1,16 +1,16 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-11-06T06:12:02.177109+00:00",
+  "captured_at": "2026-11-11T07:44:33.523779+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
   },
   "credential_sources": {
-    "github": "gh-credential-store:github.com",
-    "gitlab": "file:path:29f247d18d3c",
+    "github": "env:GH_TOKEN",
+    "gitlab": "file:path:22167718ff58",
     "kubernetes": "target:kubernetes.kubeconfigs"
   },
-  "execution_host": "mac.lan",
+  "execution_host": "receipt-proof-j855j",
   "kind": "access_check",
   "live_checks": {
     "ceph_cluster": {
@@ -22,7 +22,7 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "475fdc87414f19f1f44f0b4a84f9de9eb271f188ea0afd669db40acfa87d87b0",
+      "readback_sha256": "8bb4457fa741c529d95abadf409c1c2dd8332a2c6b597226dcfaee0e174d1fe8",
       "record_count": 15,
       "status": "PASS"
     },
@@ -35,7 +35,7 @@
       "ciliumnode_count": 10,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "aea305261eedac2e403b01c0817b7fd05e4d12d79f07a472999620715a0881dc",
+      "readback_sha256": "33e72a0fbc4293eee5a102e1539877d84bb2eb75247de87226bb9af543a54391",
       "record_count": 10,
       "status": "PASS"
     },
@@ -43,8 +43,8 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "f870ecd2d232d6872080fcaa0bc45ba962aa4336fa1f10f425a673f0269ba00f",
-      "record_count": 5583,
+      "readback_sha256": "4c6cb54c34e37617a255bbbfaf6dfd80aa887b9613d8452434c36bc4ced8597f",
+      "record_count": 9100,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -58,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "48d30b0c290492bfdef9c2d0174107cc8f6ac69f1167112b6a3e9340789342bd",
+      "readback_sha256": "69e9c9536e4f13dd7b44bc9ed945cb53c19c73623cf533c7fe3c7ec61c98b1aa",
       "record_count": 1,
       "status": "PASS"
     },
@@ -66,19 +66,19 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "fab3765ad350309446d0b77836dfe3316b39b4276434f19243dc8ba3cf81980b",
-      "record_count": 75,
+      "readback_sha256": "b730c4723bbd6605cbe7701f3a619e1fc32223d01a850bfd0297fa7a37a20309",
+      "record_count": 80,
       "resource_counts": {
-        "attachments": 37,
+        "attachments": 43,
         "csidrivers": 5,
         "csinodes": 10,
         "daemonsets": 44,
-        "deployments": 215,
+        "deployments": 225,
         "nodes": 10,
-        "pods": 763,
-        "pvcs": 70,
-        "pvs": 75,
-        "replicasets": 488,
+        "pods": 796,
+        "pvcs": 74,
+        "pvs": 80,
+        "replicasets": 511,
         "statefulsets": 15,
         "storageclasses": 9
       },
@@ -100,19 +100,19 @@
       "commit": null,
       "source": null
     },
-    "digest": "63bdb745176bdf3d27ba1d0a5be9765b2f21fbed2b5aa781e742930957434664",
+    "digest": "360aa6b004e43ad69a177fc191e83829f19068608b8d830a7119517533d1c38e",
     "file_count": 276,
-    "functional_digest": "5e988fb7fa7c79553667eb2b9dfba548ae7f14c58c19f3774cf09e58aab734e3",
+    "functional_digest": "f7b62b5b6760b94c6b2d8995233c294cccc79328aab733c9156581ebf681eea5",
     "revision": {
       "source": "installer_record",
-      "value": "fa7063c8185766a9d3de6f3d12b351738c22c9b9",
+      "value": "ce382b671da33287d7ddeb6f7b8c7b49ec0f02ce",
       "verified": true
     }
   },
   "status": "PASS",
   "surfaces": {
     "github": {
-      "credential_source": "gh-credential-store:github.com",
+      "credential_source": "env:GH_TOKEN",
       "details": null,
       "identity": "spyroot",
       "name": "github",
@@ -124,10 +124,10 @@
       ],
       "reason": null,
       "status": "PASS",
-      "target": "github.com/spyroot/test-mirror-push"
+      "target": "github.com/spyroot/test_project_creation_linux"
     },
     "gitlab": {
-      "credential_source": "file:path:29f247d18d3c",
+      "credential_source": "file:path:22167718ff58",
       "details": null,
       "identity": "spyroot",
       "name": "gitlab",
@@ -153,7 +153,7 @@
         "cilium_health_pod": "cilium-7lrww",
         "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
         "kubeconfig_files": [
-          "path:200724a2de76"
+          "path:bc41cdc6ff97"
         ],
         "user_entry": "kube:admin/api-ww-cai-cisco-live-dcloud-local:6443"
       },
@@ -178,16 +178,16 @@
       "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin -> https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "target_file": "path:5e5380df1eda",
-  "target_selection": "env:CI_SKILLS_TARGET -> file:path:5e5380df1eda",
+  "target_file": "path:511693c10ade",
+  "target_selection": "env:CI_SKILLS_TARGET -> file:path:0942e22a419e",
   "target_source": "env:CI_SKILLS_TARGET",
   "targets": {
-    "github": "github.com/spyroot/test-mirror-push",
+    "github": "github.com/spyroot/test_project_creation_linux",
     "gitlab": "https://gitlab.dcloud.run",
     "kubernetes": {
       "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "fa7063c8185766a9d3de6f3d12b351738c22c9b9"
+  "tested_revision": "ce382b671da33287d7ddeb6f7b8c7b49ec0f02ce"
 }
