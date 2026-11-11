@@ -7,7 +7,15 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
+import re
+from collections.abc import (
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from typing import Final, Optional
 
@@ -33,6 +41,7 @@ PROVIDER_ANNOTATIONS: Final = frozenset(
 RESTORABLE_METADATA: Final = frozenset(
     {"annotations", "finalizers", "labels", "name", "namespace", "ownerReferences"}
 )
+IMMUTABLE_IMAGE: Final = re.compile(r"^\S+@sha256:[0-9a-f]{64}$")
 
 
 POD_OMITTED_FALSE_PATHS: Final = frozenset(
@@ -172,6 +181,148 @@ def restorable(document: JSONObject) -> MutableMapping[str, JSONValue]:
         for key in PROVIDER_ANNOTATIONS:
             annotations.pop(key, None)
     return desired
+
+
+def adopt_deployment_container_image(
+    read: Callable[[str, str], Optional[JSONObject]],
+    patch: Callable[[str, str, Sequence[JSONObject]], None],
+    wait_rollout: Callable[[str, str], None],
+    namespace: str,
+    name: str,
+    expected_uid: str,
+    container_name: str,
+    image: str,
+) -> JSONObject:
+    """Change only one existing Deployment container image with CAS read-back.
+
+    The caller owns provider-specific admission guards, such as pausing GitLab
+    runners and proving that no jobs are assigned. This atom re-reads the exact
+    Deployment identity, uses native JSON Patch tests for the old image, waits for
+    rollout, and rejects every unrelated desired-state change. It never selects the
+    observed prior image as a fallback; a caller may submit a separately qualified
+    image through a later invocation of this same guarded operation.
+
+    :param read: Bound exact-Deployment read callback accepting namespace and name.
+    :param patch: Bound JSON Patch callback accepting namespace, name, and operations.
+    :param wait_rollout: Bound rollout/readiness callback accepting namespace and name.
+    :param namespace: Exact namespace of the existing Deployment.
+    :param name: Exact existing Deployment name.
+    :param expected_uid: Immutable Deployment UID from the confirmed plan.
+    :param container_name: Unique container whose image may change.
+    :param image: Desired immutable image reference including a sha256 digest.
+    :returns: Sanitized UID, container, previous/desired image, and action evidence.
+    :raises KubernetesError: Identity, image, structure, patch, rollout, or
+        read-back differs from the confirmed operation.
+    """
+    if not namespace or not name or not expected_uid or not container_name:
+        raise KubernetesError("deployment_image_target_incomplete")
+    if IMMUTABLE_IMAGE.fullmatch(image) is None:
+        raise KubernetesError("deployment_image_not_immutable")
+
+    def selected(document: JSONObject) -> tuple[int, str]:
+        metadata = document.get("metadata")
+        spec = document.get("spec")
+        if not isinstance(metadata, Mapping) or metadata.get("uid") != expected_uid:
+            raise KubernetesError("deployment_image_identity_mismatch")
+        template = spec.get("template") if isinstance(spec, Mapping) else None
+        pod_spec = template.get("spec") if isinstance(template, Mapping) else None
+        containers = (
+            pod_spec.get("containers") if isinstance(pod_spec, Mapping) else None
+        )
+        if not isinstance(containers, Sequence) or isinstance(containers, str):
+            raise KubernetesError("deployment_image_containers_invalid")
+        matches = [
+            (index, value.get("image"))
+            for index, value in enumerate(containers)
+            if isinstance(value, Mapping) and value.get("name") == container_name
+        ]
+        if (
+            len(matches) != 1
+            or not isinstance(matches[0][1], str)
+            or matches[0][1] == ""
+        ):
+            raise KubernetesError("deployment_image_container_not_unique_or_missing")
+        return matches[0][0], matches[0][1]
+
+    def changed_snapshot(document: JSONObject, index: int, value: str) -> JSONObject:
+        snapshot = restorable(document)
+        try:
+            container = (
+                KubernetesObject(snapshot)
+                .object("spec")
+                .object("template")
+                .object("spec")
+                .objects("containers")[index]
+                .document
+            )
+        except (IndexError, TypeError) as exc:
+            raise KubernetesError("deployment_image_snapshot_invalid") from exc
+        if not isinstance(container, MutableMapping):
+            raise KubernetesError("deployment_image_snapshot_invalid")
+        container["image"] = value
+        return dict(snapshot)
+
+    def replace(index: int, old: str, new: str) -> None:
+        operations = [
+            {"op": "test", "path": "/metadata/uid", "value": expected_uid},
+            {
+                "op": "test",
+                "path": f"/spec/template/spec/containers/{index}/name",
+                "value": container_name,
+            },
+            {
+                "op": "test",
+                "path": f"/spec/template/spec/containers/{index}/image",
+                "value": old,
+            },
+            {
+                "op": "replace",
+                "path": f"/spec/template/spec/containers/{index}/image",
+                "value": new,
+            },
+        ]
+        patch(namespace, name, operations)
+
+    before = read(namespace, name)
+    if before is None:
+        raise KubernetesError("deployment_image_target_missing")
+    index, previous = selected(before)
+    if previous == image:
+        return {
+            "kind": "Deployment",
+            "namespace": namespace,
+            "name": name,
+            "uid": expected_uid,
+            "container": container_name,
+            "previous_image": previous,
+            "image": image,
+            "action": NO_OP,
+        }
+
+    expected = changed_snapshot(before, index, image)
+    replace(index, previous, image)
+    wait_rollout(namespace, name)
+    observed = read(namespace, name)
+    if observed is None:
+        raise KubernetesError("deployment_image_readback_missing")
+    observed_index, observed_image = selected(observed)
+    if (
+        observed_index != index
+        or observed_image != image
+        or restorable(observed) != expected
+    ):
+        raise KubernetesError("deployment_image_readback_mismatch")
+
+    return {
+        "kind": "Deployment",
+        "namespace": namespace,
+        "name": name,
+        "uid": expected_uid,
+        "container": container_name,
+        "previous_image": previous,
+        "image": image,
+        "action": APPLIED,
+    }
 
 
 @dataclass

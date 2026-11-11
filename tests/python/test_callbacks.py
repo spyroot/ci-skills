@@ -2178,3 +2178,218 @@ def test_read_runner_uses_the_real_composed_callback_operation() -> None:
     assert [record["id"] for record in result["records"]] == [23]
     assert [record["id"] for record in callback.state.runner_read.records] == [23]
     assert api.calls == ["projects/42/runners?per_page=100&page=1", "runners/23"]
+
+
+def _existing_runner_deployment(
+    image: str = "registry.example/runner@sha256:" + "1" * 64,
+):
+    """Return one immutable baseline for existing-runner image adoption tests."""
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "runner", "namespace": "ci", "uid": "deployment-uid"},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": {"app": "runner"}},
+            "template": {
+                "metadata": {"labels": {"app": "runner"}},
+                "spec": {
+                    "serviceAccountName": "runner",
+                    "containers": [
+                        {"name": "manager", "image": image, "args": ["run"]},
+                    ],
+                },
+            },
+        },
+    }
+
+
+def test_adopt_deployment_container_image_changes_only_the_selected_image() -> None:
+    """The shared atom uses tested JSON Patch and exact desired-state read-back."""
+    state = {"deployment": _existing_runner_deployment()}
+    calls = []
+    desired = "registry.example/runner@sha256:" + "2" * 64
+
+    def read(namespace: str, name: str):
+        assert (namespace, name) == ("ci", "runner")
+        return deepcopy(state["deployment"])
+
+    def patch(namespace: str, name: str, operations) -> None:
+        assert (namespace, name) == ("ci", "runner")
+        calls.append(deepcopy(operations))
+        container = state["deployment"]["spec"]["template"]["spec"]["containers"][0]
+        assert operations[:3] == [
+            {"op": "test", "path": "/metadata/uid", "value": "deployment-uid"},
+            {
+                "op": "test",
+                "path": "/spec/template/spec/containers/0/name",
+                "value": "manager",
+            },
+            {
+                "op": "test",
+                "path": "/spec/template/spec/containers/0/image",
+                "value": container["image"],
+            },
+        ]
+        container["image"] = operations[3]["value"]
+
+    result = RESOURCES.adopt_deployment_container_image(
+        read,
+        patch,
+        lambda namespace, name: calls.append((namespace, name)),
+        "ci",
+        "runner",
+        "deployment-uid",
+        "manager",
+        desired,
+    )
+
+    assert result["action"] == STATUS.APPLIED
+    assert state["deployment"]["spec"]["replicas"] == 1
+    assert state["deployment"]["spec"]["template"]["spec"]["containers"][0] == {
+        "name": "manager",
+        "image": desired,
+        "args": ["run"],
+    }
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("mutation", "desired", "error"),
+    (
+        (
+            lambda deployment: deployment["metadata"].update(uid="other"),
+            "registry.example/runner@sha256:" + "2" * 64,
+            "identity_mismatch",
+        ),
+        (
+            lambda deployment: deployment["spec"]["template"]["spec"][
+                "containers"
+            ].append(deepcopy(deployment["spec"]["template"]["spec"]["containers"][0])),
+            "registry.example/runner@sha256:" + "2" * 64,
+            "container_not_unique_or_missing",
+        ),
+        (
+            lambda _deployment: None,
+            "registry.example/runner:latest",
+            "image_not_immutable",
+        ),
+    ),
+)
+def test_adopt_deployment_container_image_rejects_one_changed_invariant(
+    mutation, desired: str, error: str
+) -> None:
+    """Every rejection mutates only one copy of the shared immutable baseline."""
+    deployment = _existing_runner_deployment()
+    mutation(deployment)
+
+    with pytest.raises(KUBERNETES.KubernetesError, match=error):
+        RESOURCES.adopt_deployment_container_image(
+            lambda _namespace, _name: deepcopy(deployment),
+            lambda *_args: pytest.fail("rejected input must not patch"),
+            lambda *_args: pytest.fail("rejected input must not wait"),
+            "ci",
+            "runner",
+            "deployment-uid",
+            "manager",
+            desired,
+        )
+
+
+@pytest.mark.parametrize(
+    "stale",
+    (
+        (
+            "image-registry.openshift-image-registry.svc:5000/ci/runner@sha256:"
+            "337a2e893d663fd1e00054c6df3bdaf180b1d0ef488338305457f00e4c7422c1"
+        ),
+        "image-registry.openshift-image-registry.svc:5000/ci/runner:latest",
+    ),
+)
+def test_adopt_deployment_container_image_repairs_unqualified_observed_regression(
+    stale: str,
+) -> None:
+    """Observed stale or mutable current image CASes to qualified a599."""
+    qualified = (
+        "image-registry.openshift-image-registry.svc:5000/ci/runner@sha256:"
+        "a59998e82e6319d928a92e1f4dba26a48cbd9ca15bd0aafaa9920a9b84a171c8"
+    )
+    state = {"deployment": _existing_runner_deployment(stale)}
+    patches = []
+
+    def patch(_namespace: str, _name: str, operations) -> None:
+        patches.append(deepcopy(operations))
+        state["deployment"]["spec"]["template"]["spec"]["containers"][0]["image"] = (
+            operations[3]["value"]
+        )
+
+    result = RESOURCES.adopt_deployment_container_image(
+        lambda _namespace, _name: deepcopy(state["deployment"]),
+        patch,
+        lambda _namespace, _name: None,
+        "ci",
+        "runner",
+        "deployment-uid",
+        "manager",
+        qualified,
+    )
+
+    assert result["action"] == STATUS.APPLIED
+    assert patches[0][2]["value"] == stale
+    assert patches[0][3]["value"] == qualified
+    assert (
+        state["deployment"]["spec"]["template"]["spec"]["containers"][0]["image"]
+        == qualified
+    )
+
+
+def test_adopt_deployment_container_image_noop_skips_patch_and_rollout() -> None:
+    """An already-selected independently qualified image is a verified NO_OP."""
+    qualified = "registry.example/runner@sha256:" + "2" * 64
+    deployment = _existing_runner_deployment(qualified)
+    result = RESOURCES.adopt_deployment_container_image(
+        lambda _namespace, _name: deepcopy(deployment),
+        lambda *_args: pytest.fail("NO_OP must not patch"),
+        lambda *_args: pytest.fail("NO_OP must not roll out"),
+        "ci",
+        "runner",
+        "deployment-uid",
+        "manager",
+        qualified,
+    )
+
+    assert result["action"] == STATUS.NO_OP
+
+
+def test_adopt_deployment_container_image_rejects_unrelated_postwrite_change() -> None:
+    """Read-back rejects unrelated desired-state drift without unsafe fallback."""
+    state = {"deployment": _existing_runner_deployment()}
+    desired = "registry.example/runner@sha256:" + "2" * 64
+    patches = 0
+
+    def patch(_namespace: str, _name: str, operations) -> None:
+        nonlocal patches
+        patches += 1
+        state["deployment"]["spec"]["template"]["spec"]["containers"][0]["image"] = (
+            operations[3]["value"]
+        )
+        state["deployment"]["spec"]["replicas"] = 2
+
+    with pytest.raises(KUBERNETES.KubernetesError, match="readback_mismatch"):
+        RESOURCES.adopt_deployment_container_image(
+            lambda _namespace, _name: deepcopy(state["deployment"]),
+            patch,
+            lambda _namespace, _name: None,
+            "ci",
+            "runner",
+            "deployment-uid",
+            "manager",
+            desired,
+        )
+
+    assert patches == 1
+    assert (
+        state["deployment"]["spec"]["template"]["spec"]["containers"][0]["image"]
+        == desired
+    )
+    assert state["deployment"]["spec"]["replicas"] == 2
