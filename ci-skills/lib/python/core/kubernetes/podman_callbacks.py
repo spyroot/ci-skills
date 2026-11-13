@@ -32,6 +32,7 @@ from lib.python.core.kubernetes.podman_evidence import (
 from lib.python.core.kubernetes.podman_probe import (
     DEFAULT_SERVICE_ACCOUNT,
     NESTED_RUNTIME_CLAIM,
+    PROBE_JOB_ROLE,
     PROBE_POLL_SECONDS,
     PodmanProbeAction,
     ProbeMode,
@@ -200,9 +201,7 @@ class OpenProbeNamespace(PodmanK8SCallback[PodmanProbeAction]):
             re-resolved or a selected namespace is absent.
         :raises TypeError: If the shared state cannot retain run-scope evidence.
         """  # noqa: DOC502 - The shared callback propagates declared failures.
-        callback = OpenRunScope(
-            RunScopeAction(scope=RunScope.new(namespace=self.action.namespace))
-        )
+        callback = OpenRunScope(RunScopeAction(scope=self.action.new_scope()))
         callback.bind(self.probe_state)
         self.scope_callback = callback
         return callback.run()
@@ -241,7 +240,7 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
         state, scope = self.probe_state, self.probe_state.run_scope
         resources = scope.resources(self.kubernetes)
         self.resources = resources
-        resources.apply(probe_configmap(scope))
+        resources.apply(probe_configmap(self.action, scope))
         job_evidence = resources.apply(
             probe_job(self.action, scope, state.selected_node)
         )
@@ -263,7 +262,10 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
                     scope.namespace, self.action.service_account
                 ),
                 "owns_namespace": scope.owns_namespace,
-                "job": {"name": scope.name("podman-probe"), "uid": uid},
+                "job": {
+                    "name": self.action.resource_name(scope, PROBE_JOB_ROLE),
+                    "uid": uid,
+                },
                 "rows": [],
             }
             if observed == "scc_required":
@@ -289,7 +291,10 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
                 scope.namespace, self.action.service_account
             ),
             "owns_namespace": scope.owns_namespace,
-            "job": {"name": scope.name("podman-probe"), "uid": uid},
+            "job": {
+                "name": self.action.resource_name(scope, PROBE_JOB_ROLE),
+                "uid": uid,
+            },
             "pod": {
                 "name": observed.pod_name,
                 "uid": observed.pod_uid,
@@ -342,7 +347,7 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
         :raises KubernetesError: If provider response shapes are malformed.
         """
         deadline = time.monotonic() + self.action.timeout
-        name = scope.name("podman-probe")
+        name = self.action.resource_name(scope, PROBE_JOB_ROLE)
         service = self.kubernetes
         original_timeout = service.timeout
         job_failed = False

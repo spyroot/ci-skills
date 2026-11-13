@@ -21,7 +21,6 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesError,
     KubernetesService,
 )
-from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.kubernetes.resources import (
     MANAGER_LABEL,
     MANAGER_VALUE,
@@ -40,7 +39,7 @@ from lib.python.core.kubernetes.runner import (
     PullImage,
 )
 from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
-from lib.python.core.kubernetes.scc_access import role_binding_document
+from lib.python.core.kubernetes.scc_access import role_binding_names
 from lib.python.core.runner import RunnerAction, runner_runtime_identities
 from lib.python.core.runner_identity import NameSource, ResolvedName
 from lib.python.core.runner_scope import (
@@ -119,8 +118,10 @@ def _require_manager_resources_absent(
     resources = {
         identity for name in names for identity in runner_runtime_identities(name)
     }
-    binding = KubernetesObject(role_binding_document(workflow.scc_access(), scope))
-    resources.add(("RoleBinding", binding.name))
+    resources.update(
+        ("RoleBinding", name)
+        for name in role_binding_names(workflow.scc_access(), scope)
+    )
     for kind, name in sorted(resources):
         if service.read(kind, name, scope.namespace) is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
@@ -165,20 +166,11 @@ def resolve_manager_name(
     :returns: Unique existing identity, otherwise the uncreated planned name.
     :raises KubernetesError: Both legacy and preferred names identify owned workloads.
     """
-    candidates = {scope.name(MANAGER_ROLE), preferred.value}
-    observed_names = [
-        name
-        for name in sorted(candidates)
-        if (document := service.read("Deployment", name, scope.namespace)) is not None
-        and scope.resources(service).owns(document)
-    ]
-    if len(observed_names) > 1:
-        raise KubernetesError("runner_manager_workload_ambiguous")
-    return (
-        ResolvedName(observed_names[0], NameSource.PROVIDER)
-        if observed_names
-        else preferred
+    candidates = (scope.name(MANAGER_ROLE), preferred.value)
+    observed = scope.resources(service).resolve_owned_name(
+        "Deployment", candidates, ambiguous_reason="runner_manager_workload_ambiguous"
     )
+    return ResolvedName(observed, NameSource.PROVIDER) if observed else preferred
 
 
 def preserve_manager_name(
@@ -337,7 +329,7 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
         scope = RunScope.new(
             namespace=getattr(workflow.args, "namespace", None),
             run_id=workflow.scope_id,
-            namespace_prefix=workflow.repository_identity.name,
+            namespace_prefix=workflow.consumer_name.value or None,
         )
         namespace = self.kubernetes.read("Namespace", scope.namespace, "")
         if scope.owns_namespace and namespace is not None:

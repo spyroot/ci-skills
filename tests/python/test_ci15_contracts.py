@@ -11,7 +11,7 @@ import subprocess
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Final
 from unittest.mock import Mock
 from uuid import uuid4
@@ -80,9 +80,15 @@ NORMALIZE_UPPERCASE: Final = "uppercase"
 NORMALIZE_PUNCTUATION: Final = "punctuation"
 NORMALIZE_LENGTH: Final = "length"
 INVALID_NAME_EMPTY: Final = "empty"
+INVALID_PROJECT_NAME_EMPTY: Final = "empty-project-name"
 INVALID_NAME_EXPLICIT: Final = "explicit"
 NAME_ARGUMENT: Final = "--name"
 DESCRIPTION_ARGUMENT: Final = "--description"
+PROJECT_NAME_ARGUMENT: Final = "--project-name"
+PROJECT_NAME_CONSUMERS: Final = (
+    ("finance/payments-service", "customer-payments"),
+    ("research/telemetry-hub", "edge-observability"),
+)
 TAG_ARGUMENT: Final = "--tag"
 TRANSPORT_NATIVE: Final = "native"
 TRANSPORT_HTTPS: Final = "https"
@@ -644,13 +650,17 @@ def test_github_workload_uses_selected_consumer_defaults_and_preserves_overrides
 @pytest.mark.parametrize(
     "normalization", (NORMALIZE_UPPERCASE, NORMALIZE_PUNCTUATION, NORMALIZE_LENGTH)
 )
+@pytest.mark.parametrize(
+    "source", (IDENTITY.NameSource.REPOSITORY, IDENTITY.NameSource.PROJECT_NAME)
+)
 def test_repository_workload_names_are_normalized_with_suffix_capacity(
-    repository_inputs: Namespace, normalization: str
+    repository_inputs: Namespace, normalization: str, source: IDENTITY.NameSource
 ) -> None:
     """Fit native names, ownership labels and registration Secrets before planning.
 
     :param repository_inputs: Generated repository leaf used by each normalization case.
     :param normalization: Uppercase/underscore, punctuation, or resource length boundary.
+    :param source: Consumer repository or optional project-name naming provenance.
     """
     name = repository_inputs.name
     cases = {
@@ -670,10 +680,10 @@ def test_repository_workload_names_are_normalized_with_suffix_capacity(
     repository_name, expected = cases[normalization]
     expected = expected[: OPTIONS.RUNNER_NAME_LIMIT]
     resolved = OPTIONS.kubernetes_runner_name(
-        IDENTITY.ResolvedName(repository_name, IDENTITY.NameSource.REPOSITORY)
+        IDENTITY.ResolvedName(repository_name, source)
     )
     assert resolved.value == expected
-    assert resolved.source == IDENTITY.NameSource.REPOSITORY
+    assert resolved.source == source
     assert RUN_SCOPE.validate_namespace(resolved.value) == expected
     assert (
         len(resolved.value + RUNNER.REGISTRATION_SECRET_SUFFIX)
@@ -780,7 +790,9 @@ def test_long_repository_runner_keeps_bounded_names_and_scope_identity_through_c
     assert manager.workload().runner(scope).name == planned_name
 
 
-@pytest.mark.parametrize("case", (INVALID_NAME_EMPTY, INVALID_NAME_EXPLICIT))
+@pytest.mark.parametrize(
+    "case", (INVALID_NAME_EMPTY, INVALID_PROJECT_NAME_EMPTY, INVALID_NAME_EXPLICIT)
+)
 def test_kubernetes_name_rejects_empty_normalization_and_invalid_explicit_override(
     repository_inputs: Namespace, case: str
 ) -> None:
@@ -791,6 +803,7 @@ def test_kubernetes_name_rejects_empty_normalization_and_invalid_explicit_overri
     """
     invalid = {
         INVALID_NAME_EMPTY: (NAME_UNDERSCORE, IDENTITY.NameSource.REPOSITORY),
+        INVALID_PROJECT_NAME_EMPTY: (NAME_UNDERSCORE, IDENTITY.NameSource.PROJECT_NAME),
         INVALID_NAME_EXPLICIT: (
             NAME_UNDERSCORE.join((repository_inputs.name, repository_inputs.name)),
             IDENTITY.NameSource.EXPLICIT,
@@ -841,6 +854,128 @@ def test_repository_default_and_explicit_override_have_distinct_sources(
     assert explicit == IDENTITY.ResolvedName(
         selected.override, IDENTITY.NameSource.EXPLICIT
     )
+
+
+@pytest.mark.parametrize(("reference", "project_name"), PROJECT_NAME_CONSUMERS)
+@pytest.mark.parametrize("explicit", (False, True), ids=("project-base", "exact-name"))
+def test_project_name_resolves_between_explicit_name_and_real_repository(
+    repository_inputs: Namespace,
+    reference: str,
+    project_name: str,
+    explicit: bool,
+) -> None:
+    """Resolve consumer names without replacing the actual provider identity.
+
+    :param repository_inputs: Existing isolated explicit-name and tag fixture.
+    :param reference: Actual repository selected for provider operations.
+    :param project_name: Independent consumer naming base supplied by the caller.
+    :param explicit: Whether the exact object-name override must take precedence.
+    """
+    repository = IDENTITY.resolve_repository(reference)
+    original = repository
+    resolved = IDENTITY.resolve_name(
+        repository_inputs.override if explicit else None,
+        repository,
+        argument=NAME_ARGUMENT,
+        project_name=project_name,
+    )
+
+    assert resolved == IDENTITY.ResolvedName(
+        repository_inputs.override if explicit else project_name,
+        IDENTITY.NameSource.EXPLICIT if explicit else IDENTITY.NameSource.PROJECT_NAME,
+    )
+    assert repository == original
+    assert repository.reference == reference
+    assert OPTIONS.runner_tags((), repository, project_name=project_name) == (
+        project_name,
+    )
+    assert (
+        OPTIONS.runner_tags(
+            repository_inputs.labels, repository, project_name=project_name
+        )
+        == repository_inputs.labels
+    )
+    assert IDENTITY.resolve_name(None, repository, argument=NAME_ARGUMENT).value == (
+        repository.name
+    )
+
+
+@pytest.mark.parametrize("invalid", (EMPTY_TEXT, TAG_BLANK, "\n"))
+def test_project_name_rejects_blank_override_even_with_explicit_name_and_tags(
+    repository_inputs: Namespace, invalid: str
+) -> None:
+    """Invalid consumer input cannot hide behind exact names or selected tags.
+
+    :param repository_inputs: Existing valid explicit name and repository fixture.
+    :param invalid: Sole invariant changed from the immutable valid naming baseline.
+    """
+    selected = repository_inputs
+    repository = IDENTITY.resolve_repository(selected.repository)
+    baseline = MappingProxyType({"project_name": selected.override})
+    changed = dict(baseline)
+    changed["project_name"] = invalid
+
+    with pytest.raises(ValueError, match=PROJECT_NAME_ARGUMENT):
+        IDENTITY.resolve_name(
+            selected.override, repository, argument=NAME_ARGUMENT, **changed
+        )
+    with pytest.raises(ValueError, match=PROJECT_NAME_ARGUMENT):
+        OPTIONS.runner_tags(selected.labels, repository, **changed)
+    assert baseline["project_name"] == selected.override
+
+
+@pytest.mark.parametrize(("reference", "project_name"), PROJECT_NAME_CONSUMERS)
+@pytest.mark.parametrize(
+    "explicit", (False, True), ids=("project-base", "exact-fields")
+)
+def test_project_name_github_workload_uses_consumer_base_and_preserves_spec(
+    repository_inputs: Namespace,
+    reference: str,
+    project_name: str,
+    explicit: bool,
+) -> None:
+    """Propagate the naming base while preserving exact object and ToolboxSpec inputs.
+
+    :param repository_inputs: Existing isolated name, namespace and runtime fixture.
+    :param reference: Actual GitHub repository retained for registration and ownership.
+    :param project_name: Consumer naming base independent of the selected repository.
+    :param explicit: Whether exact object fields suppress their generated defaults.
+    """
+    selected = repository_inputs
+    specification = SimpleNamespace(
+        app=INSTALLATION_NAME, namespace=selected.build_namespace
+    )
+    original_specification = vars(specification).copy()
+    action = WORKFLOWS.WorkflowAction(
+        Namespace(
+            action=CREATE_ACTION,
+            kind=GITHUB_KIND,
+            name=selected.override if explicit else None,
+            namespace=selected.namespace if explicit else None,
+            project_name=project_name,
+            label=list(selected.labels) if explicit else [],
+            runner_root=selected.runner_root,
+            timeout=COMMAND_TIMEOUT,
+        ),
+        spec=specification,
+    )
+    action.target = SimpleNamespace(
+        github=TARGET.GitHubTarget(selected.host, reference)
+    )
+
+    action._workload()
+
+    assert action.repository_identity.reference == reference
+    assert action.runner.name == (selected.override if explicit else project_name)
+    assert action.runner.labels == (selected.labels if explicit else (project_name,))
+    assert action.resolved_runner_name.source == (
+        IDENTITY.NameSource.EXPLICIT if explicit else IDENTITY.NameSource.PROJECT_NAME
+    )
+    if explicit:
+        assert action.runner.namespace == selected.namespace
+    else:
+        assert action.runner.namespace.startswith(project_name + NAME_SEPARATOR)
+    assert vars(specification) == original_specification
 
 
 @pytest.mark.parametrize(

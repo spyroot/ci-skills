@@ -41,6 +41,7 @@ from lib.python.core.runner_identity import (
     ResolvedName,
     resolve_name,
     resolve_repository,
+    validate_project_name,
 )
 from lib.python.core.runner_options import (
     RUNNER_NAME_LIMIT,
@@ -257,6 +258,16 @@ class ImageBuildChainAction(SkillAction):
 
         Exact selected runner description and provenance.
 
+    .. attribute :: explicit_description
+        :type: str | None
+
+        Original caller description before consumer defaults.
+
+    .. attribute :: explicit_tags
+        :type: tuple[str, ...]
+
+        Original caller labels before consumer defaults.
+
     .. attribute :: manager_scope
         :type: RunScope | None
 
@@ -278,8 +289,34 @@ class ImageBuildChainAction(SkillAction):
     gitlab_selection: tuple[str, str] = field(init=False)
     repository_identity: RepositoryIdentity = field(init=False)
     resolved_description: ResolvedName = field(init=False)
+    explicit_description: str | None = field(init=False, default=None)
+    explicit_tags: tuple[str, ...] = field(init=False, default=())
     manager_scope: RunScope | None = field(init=False)
     resolved_runner_name: ResolvedName | None = field(init=False, default=None)
+
+    @property
+    def project_name(self) -> str | None:
+        """Read the validated consumer override independently of provider identity.
+
+        :returns: Trimmed optional consumer naming input.
+        :raises ValueError: A present override is invalid.
+        """  # noqa: DOC502 - Shared input validation propagates ValueError.
+        return validate_project_name(getattr(self.args, "project_name", None))
+
+    @property
+    def naming_base(self) -> ResolvedName:
+        """Select the shared consumer base without changing the GitLab selector.
+
+        :returns: Known consumer name, or unresolved offline intent.
+        :raises ValueError: A supplied consumer override is invalid.
+        """  # noqa: DOC502 - Shared resolution propagates validation failures.
+        return resolve_name(
+            None,
+            self.repository_identity,
+            argument="--project-name",
+            project_name=self.project_name,
+            pending=True,
+        )
 
     @property
     def runner_kind(self) -> str:
@@ -345,6 +382,9 @@ class ImageBuildChainAction(SkillAction):
         """  # noqa: DOC503 - existing component preparation propagates errors.
         self.mode = mode
         self._validate_chain_inputs()
+        validate_project_name(getattr(self.args, "project_name", None))
+        self.explicit_description = self.args.runner_description
+        self.explicit_tags = tuple(self.args.runner_label)
         target = resolve_target(
             self.args.target,
             self.args.binding,
@@ -374,23 +414,32 @@ class ImageBuildChainAction(SkillAction):
             else RepositoryIdentity(None, RepositorySource.UNKNOWN)
         )
         self.resolved_description = resolve_name(
-            self.args.runner_description,
+            self.explicit_description,
             self.repository_identity,
             argument="--description",
+            project_name=self.project_name,
             pending=self.runner_kind == "project",
         )
         self.args.runner_description = self.resolved_description.value or None
         self.args.runner_label = list(
-            runner_tags(self.args.runner_label, self.repository_identity)
+            runner_tags(
+                self.explicit_tags,
+                self.repository_identity,
+                project_name=self.project_name,
+            )
         )
         if self.runner_kind == "group" and (
-            not self.args.namespace or not self.args.runner_label
+            (not self.args.namespace and not self.naming_base.value)
+            or not self.args.runner_label
         ):
             raise ValueError(
                 "repository_identity_required: provide --namespace and --tag"
             )
-        self.toolbox = WorkflowAction(self._toolbox_args(), context=self.state)
+        self.toolbox = WorkflowAction(
+            self._toolbox_args(), context=self.state, naming_base=self.naming_base
+        )
         self.toolbox.prepare()
+        self.toolbox.repository_identity = self.repository_identity
         self._prepare_scope()
         if self.toolbox.spec is not None:
             build = ScopeObservation(
@@ -422,9 +471,9 @@ class ImageBuildChainAction(SkillAction):
             RunScope.new(
                 namespace=self.args.namespace,
                 run_id=scope_id,
-                namespace_prefix=self.repository_identity.name,
+                namespace_prefix=self.naming_base.value or None,
             )
-            if self.repository_identity.name or self.args.namespace
+            if self.naming_base.value or self.args.namespace
             else None
         )
         self.resolved_runner_name = (
@@ -432,11 +481,9 @@ class ImageBuildChainAction(SkillAction):
                 self.manager_scope.bounded_name(
                     MANAGER_ROLE,
                     limit=RUNNER_NAME_LIMIT,
-                    prefix=self.repository_identity.name,
+                    prefix=self.naming_base.value or None,
                 ),
-                NameSource.REPOSITORY
-                if self.repository_identity.name
-                else NameSource.UNKNOWN,
+                self.naming_base.source,
             )
             if self.manager_scope is not None
             else None
@@ -463,14 +510,21 @@ class ImageBuildChainAction(SkillAction):
                 access, self.runner_reference
             )
             self.resolved_description = resolve_name(
-                self.args.runner_description,
+                self.explicit_description,
                 self.repository_identity,
                 argument="--description",
+                project_name=self.project_name,
             )
             self.args.runner_description = self.resolved_description.value
             self.args.runner_label = list(
-                runner_tags(self.args.runner_label, self.repository_identity)
+                runner_tags(
+                    self.explicit_tags,
+                    self.repository_identity,
+                    project_name=self.project_name,
+                )
             )
+            self.toolbox.repository_identity = self.repository_identity
+            self.toolbox.naming_base = self.naming_base
             self._prepare_scope()
 
     def _runner_auth_plan(self) -> ActionPlan:
@@ -506,6 +560,7 @@ class ImageBuildChainAction(SkillAction):
                 "tag_list": ",".join(self.args.runner_label),
             },
             revision=self.args.revision,
+            project_name=self.project_name,
         )
 
     def plan(self, selected_node: str) -> JSONObject:
@@ -578,4 +633,15 @@ class ImageBuildChainAction(SkillAction):
         :param selected_node: Exact worker selected for the runner workload.
         :returns: SHA-256 plan fingerprint.
         """
-        return plan_digest(self.plan(selected_node))
+        return plan_digest(
+            {
+                **self.plan(selected_node),
+                "project_name": self.project_name,
+                "consumer_name": self.naming_base.value or None,
+                "build_candidate": (
+                    self.toolbox.build_candidate.image
+                    if self.toolbox.build_candidate is not None
+                    else None
+                ),
+            }
+        )

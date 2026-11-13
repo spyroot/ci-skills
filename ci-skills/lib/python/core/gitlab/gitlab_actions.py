@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
+from lib.python.core.catalog import PROJECT_NAMING_OPTIONS, ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.cli import output_mode, parser
 from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
@@ -28,6 +28,7 @@ from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json
 from lib.python.core.logging import log_event
 from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit, plan_digest
+from lib.python.core.runner_identity import validate_project_name
 from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import GitLabOperationTarget, GitLabRoute
@@ -85,6 +86,7 @@ class ActionPlan(SkillAction):
     :param revision: Optional exact source revision bound to the action.
     :param project_ids: Optional project IDs selected for runner assignment.
     :param runner_snapshot: Optional before-state bound to runner deletion.
+    :param project_name: Optional consumer naming input bound privately into confirmation.
     :param routing: Route of the GitLab table the target read. ``ActionPlan`` binds it into
         ``plan_digest``, and ``_result`` copies it into ``routing``. The value is
         ``None`` only when code built the target without a route; the plan and
@@ -162,6 +164,11 @@ class ActionPlan(SkillAction):
         ``plan_digest``, and ``_result`` copies it into ``routing``. The value is
         ``None`` only when code built the target without a route; the plan and
         the result then carry no ``routing``.
+
+    .. attribute :: project_name
+        :type: str | None
+
+        Optional consumer naming input retained privately for confirmation.
     """
 
     kind: str
@@ -178,6 +185,7 @@ class ActionPlan(SkillAction):
     project_ids: Optional[tuple[int, ...]] = None
     runner_snapshot: Optional[JSONObject] = None
     routing: Optional[GitLabRoute] = None
+    project_name: str | None = None
 
     @property
     def digest(self) -> str:
@@ -203,6 +211,8 @@ class ActionPlan(SkillAction):
             "revision": self.revision,
             "project_ids": self.project_ids,
         }
+        if self.project_name is not None:
+            data["project_name"] = validate_project_name(self.project_name)
         if self.kind == "gitlab_runner" and self.operation == "delete":
             data["runner_snapshot"] = self.runner_snapshot
         if self.routing is not None:
@@ -476,6 +486,11 @@ def make_plan(
         token_out=prepared.token_out,
         revision=args.revision,
         routing=target.routing,
+        project_name=(
+            validate_project_name(getattr(args, "project_name", None))
+            if kind == "gitlab_runner"
+            else None
+        ),
     )
 
 
@@ -755,6 +770,11 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
 
     :param result: Caller-owned runner parser to extend with its field options.
     """
+    result.add_argument(
+        "--project-name",
+        action=SingleValue,
+        help=PROJECT_NAMING_OPTIONS["--project-name"],
+    )
     result.add_argument(
         "--live-plan",
         action="store_true",

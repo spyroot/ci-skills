@@ -47,6 +47,7 @@ from lib.python.core.runner_identity import (
     RepositorySource,
     resolve_name,
     resolve_repository,
+    validate_project_name,
 )
 from lib.python.core.runner_options import (
     PROTECTION_READBACK_MISMATCH,
@@ -248,6 +249,7 @@ def prepare(
     :returns: Named request fields, optional runner ID, and optional one-time token sink.
     :raises ActionError: If the action or its arguments are invalid.
     """  # noqa: DOC502 - input errors propagate from the selected preparation helper
+    validate_project_name(getattr(args, "project_name", None))
     if args.action != "create" and getattr(args, "protected", None) is not None:
         raise ActionError("protected_only_valid_for_runner_create")
     if args.action in {"get", "list", "delete"}:
@@ -356,22 +358,21 @@ def _prepare_runner_mutation(
     )
     body: MutableMapping[str, JSONValue] = {
         "runner_type": f"{target_kind}_type",
-        "description": (
-            _required_text(args.description, "description")
-            if args.description is not None
-            else resolve_name(
-                None,
-                repository,
-                argument="--description",
-                pending=target_kind == "project",
-            ).value
-            or None
-        ),
+        "description": resolve_name(
+            args.description,
+            repository,
+            argument="--description",
+            project_name=getattr(args, "project_name", None),
+            pending=target_kind == "project",
+        ).value
+        or None,
     }
     protection = parse_protected(getattr(args, "protected", None))
     if protection is not None:
         body["access_level"] = protection
-    tags = runner_tags(args.tag, repository)
+    tags = runner_tags(
+        args.tag, repository, project_name=getattr(args, "project_name", None)
+    )
     if tags:
         body["tag_list"] = ",".join(tags)
     if args.runner_id is not None:
@@ -415,17 +416,28 @@ def resolve_runner_identity(plan: ActionPlan, access: JSONObject) -> ActionPlan:
     :returns: Plan with only omitted repository defaults resolved.
     :raises ActionError: Verified native identity or derived inputs are inconsistent.
     """
-    if not pending_runner_identity(plan):
+    numeric_create = (
+        plan.kind == RUNNER_KIND
+        and plan.operation == RUNNER_CREATE
+        and plan.target_kind == PROJECT_KIND
+        and plan.target_reference.isdecimal()
+    )
+    if not pending_runner_identity(plan) and not numeric_create:
         return plan
     try:
         repository = RepositoryIdentity.from_access(access, plan.target_reference)
         body = dict(plan.body)
         if body.get(RUNNER_DESCRIPTION_FIELD) is None:
             body[RUNNER_DESCRIPTION_FIELD] = resolve_name(
-                None, repository, argument="--description"
+                None,
+                repository,
+                argument="--description",
+                project_name=plan.project_name,
             ).value
         if RUNNER_TAGS_FIELD not in body:
-            body[RUNNER_TAGS_FIELD] = ",".join(runner_tags((), repository))
+            body[RUNNER_TAGS_FIELD] = ",".join(
+                runner_tags((), repository, project_name=plan.project_name)
+            )
         return replace(plan, body=body)
     except ValueError as exc:
         raise ActionError(str(exc)) from exc
