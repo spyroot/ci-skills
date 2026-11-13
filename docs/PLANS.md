@@ -63,7 +63,7 @@ newlines after every heading, use # and ## and so on, and correct syntax for ord
 When writing an ExecPlan to a Markdown (.md) file where the content of the file _is only_ the single ExecPlan, you
 should omit the triple backticks.
 
-Write in plain prose. Prefer sentences over lists. Avoid checklists, tables, and long enumerations unless brevity would
+Write in plain prose. Prefer sentences to lists. Avoid checklists, tables, and long enumerations unless brevity would
 obscure meaning. Checklists are permitted only in the `Progress` section, where they are mandatory. Narrative sections
 must remain prose-first.
 
@@ -145,18 +145,6 @@ during a large migration. Describe how to validate both paths and how to retire 
 multiple new libraries or feature areas, consider creating spikes that evaluate the feasibility of these features
 _independently_ of one another, proving that the external library performs as expected and implements the features we
 need in isolation.
-
-## Documentation Contract
-
-- **Human-Facing Voice Only:** Never use internal agent orchestration terms
-- (`operator`, `coordinator`, `worker`, `in chat`, `inspected revision`, `this document does not authorize`) or local
-  laptop paths (`~/dev/...`) in repository documentation or ExecPlans. Use domain roles (`administrators`,
-  `maintainers`, `callers`, or the team name).
-- **Track by Artifact ID, Not Dates:** Do not stamp `Progress` checklists, `Decision Log` entries, or bottom-of-file
-  `Revision notes` with calendar dates (`YYYY-MM-DD`). Track progress and decisions using immutable Decision IDs
-  (`DEC-01`), Gate IDs (`G-17`), Milestone IDs (`CI-E2E-01`), MR numbers (`!32`), or PR commit SHAs.
-- Stamp allowed in file name, example .coordination/ read system-architecture contract, backup, logs, original
-  contracts.
 
 ## Documentation Contract
 
