@@ -15,8 +15,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
+from enum import StrEnum
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Final, Optional
 from unittest.mock import Mock
 from uuid import uuid4
@@ -68,6 +69,31 @@ RUNNER_ID = 73
 RUNNER_DESCRIPTION = "unit-manager-runner"
 RUNNER_LABELS = ("ci13", "unit")
 IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
+DELETE_ACTION: Final = "delete"
+BORROWED_NAMESPACE_UID: Final = "caller-namespace-uid"
+NAMESPACE_KEY: Final = ("namespace", "", NAMESPACE)
+ABSENCE_READ_FAILURE: Final = "unit_absence_read_failed"
+BORROWED_NAMESPACE_SNAPSHOT: Final = json.dumps(
+    {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {"name": NAMESPACE, "uid": BORROWED_NAMESPACE_UID},
+    },
+    sort_keys=True,
+)
+
+
+class DeleteRepeatConflict(StrEnum):
+    """Single changed invariants invalidating an absent-manager confirmation."""
+
+    SCOPE_APPEARED = "scope-appeared"
+    SCOPE_AMBIGUOUS = "scope-ambiguous"
+    NAMESPACE_REPLACED = "namespace-replaced"
+    NAMESPACE_UNLABELED = "namespace-unlabeled"
+    REGISTRATION_SECRET = "registration-secret"
+    REGISTRY_SECRET = "registry-secret"
+    MALFORMED_READ = "malformed-read"
+    FAILED_READ = "failed-read"
 
 
 def _args(
@@ -1075,16 +1101,30 @@ class ManagerCluster(MemoryCluster):
                 "configmaps": "configmap",
                 "deployments": "deployment",
                 "rolebindings": "rolebinding",
+                "secrets": "secret",
             }[args[1]]
             selector = dict(
                 item.split("=", 1) for item in args[args.index("-l") + 1].split(",")
             )
             self.events.append("lookup:" + kind)
+            namespace = next(
+                (
+                    args[args.index(option) + 1]
+                    for option in ("--namespace", "-n")
+                    if option in args
+                ),
+                None,
+            )
             return {
                 "items": [
                     deepcopy(document)
-                    for (resource_kind, _, _), document in self.objects.items()
+                    for (
+                        resource_kind,
+                        resource_namespace,
+                        _,
+                    ), document in self.objects.items()
                     if resource_kind == kind
+                    and (namespace is None or resource_namespace == namespace)
                     and all(
                         document["metadata"].get("labels", {}).get(key) == value
                         for key, value in selector.items()
@@ -1635,3 +1675,152 @@ def test_manager_main_delete_preserves_runner_caller_namespace_and_unowned_objec
     assert cluster.runner_reads >= 4
     assert removed["cleanup"] == {"status": STATUS.PASS, "failures": []}
     assert deployed["plan_digest"] != removed["plan_digest"]
+
+
+@pytest.mark.parametrize("borrowed_namespace", (False, True), ids=("owned", "borrowed"))
+def test_manager_main_delete_repeat_proves_no_op_without_mutating_survivors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    borrowed_namespace: bool,
+) -> None:
+    """A fresh confirmed delete of an absent manager preserves its exact survivors.
+
+    :param monkeypatch: Bind the existing isolated provider lifecycle harness.
+    :param tmp_path: Test-owned token and lock directory.
+    :param capsys: Capture the actual command's schema-validated reports.
+    :param borrowed_namespace: Whether a pre-existing namespace must survive both deletes.
+    """
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    if borrowed_namespace:
+        cluster.caller_namespace = NAMESPACE
+        cluster.objects[NAMESPACE_KEY] = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+    protected = deepcopy(cluster.objects)
+    code, _ = _confirmed_manager(cluster, capsys, run_id=RUN_ID)
+    assert code == STATUS.exit_code(STATUS.PASS)
+    code, first = _confirmed_manager(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, first[FIELD_STATUS]) == (STATUS.exit_code(STATUS.PASS), STATUS.PASS)
+    assert cluster.objects == protected
+    cluster.applied.clear()
+    cluster.deleted.clear()
+
+    code, repeated = _confirmed_manager(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+
+    assert (code, repeated[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.PASS),
+        STATUS.PASS,
+    )
+    assert any(
+        record.get("action") == STATUS.NO_OP for record in repeated[FIELD_RECORDS]
+    )
+    assert cluster.objects == protected
+    assert cluster.applied == cluster.deleted == []
+    assert not cluster.guard_held
+
+
+@pytest.mark.parametrize("conflict", tuple(DeleteRepeatConflict), ids=str)
+def test_manager_main_absent_delete_confirmation_rejects_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    conflict: DeleteRepeatConflict,
+) -> None:
+    """An absent-manager plan rejects changed identities and unproven native absence.
+
+    :param monkeypatch: Bind the existing isolated provider lifecycle harness.
+    :param tmp_path: Test-owned token and lock directory.
+    :param capsys: Capture the actual command's schema-validated reports.
+    :param conflict: Sole presence, identity, or native-read invariant changed per case.
+    """
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    if conflict in {
+        DeleteRepeatConflict.REGISTRATION_SECRET,
+        DeleteRepeatConflict.REGISTRY_SECRET,
+    }:
+        cluster.caller_namespace = NAMESPACE
+        cluster.objects[NAMESPACE_KEY] = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+    protected = deepcopy(cluster.objects)
+    code, _ = _confirmed_manager(cluster, capsys, run_id=RUN_ID)
+    assert code == STATUS.exit_code(STATUS.PASS)
+    native_baseline = MappingProxyType(
+        {
+            identity: json.dumps(document, sort_keys=True)
+            for identity, document in cluster.objects.items()
+        }
+    )
+    code, _ = _confirmed_manager(cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID)
+    assert code == STATUS.exit_code(STATUS.PASS)
+    baseline = MappingProxyType(deepcopy(cluster.objects))
+    assert baseline == protected
+    code, absent_plan = _manager_cli_report(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, absent_plan[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
+    if conflict in {
+        DeleteRepeatConflict.SCOPE_APPEARED,
+        DeleteRepeatConflict.SCOPE_AMBIGUOUS,
+    }:
+        appeared_scopes = 1 if conflict == DeleteRepeatConflict.SCOPE_APPEARED else 2
+        for index in range(appeared_scopes):
+            scope = RUN_SCOPE.RunScope(RUN_ID, f"{NAMESPACE}-{index}", True)
+            scope.cluster_resources(cluster).apply(RUN_SCOPE.namespace_document(scope))
+    elif conflict in {
+        DeleteRepeatConflict.NAMESPACE_REPLACED,
+        DeleteRepeatConflict.NAMESPACE_UNLABELED,
+    }:
+        identity = next(key for key in native_baseline if key[0] == "namespace")
+        namespace = json.loads(native_baseline[identity])
+        if conflict == DeleteRepeatConflict.NAMESPACE_REPLACED:
+            namespace["metadata"]["uid"] = BORROWED_NAMESPACE_UID
+        else:
+            namespace["metadata"]["labels"] = {}
+        cluster.objects[identity] = namespace
+    elif conflict in {
+        DeleteRepeatConflict.REGISTRATION_SECRET,
+        DeleteRepeatConflict.REGISTRY_SECRET,
+    }:
+        suffix = (
+            K8S_RUNNER.REGISTRATION_SECRET_SUFFIX
+            if conflict == DeleteRepeatConflict.REGISTRATION_SECRET
+            else K8S_RUNNER.REGISTRY_SECRET_SUFFIX
+        )
+        identity = next(
+            key
+            for key in native_baseline
+            if key[0] == "secret" and key[2].endswith(suffix)
+        )
+        cluster.objects[identity] = json.loads(native_baseline[identity])
+    else:
+        read = (
+            Mock(return_value={})
+            if conflict == DeleteRepeatConflict.MALFORMED_READ
+            else Mock(side_effect=KUBERNETES.KubernetesError(ABSENCE_READ_FAILURE))
+        )
+        monkeypatch.setattr(cluster, MemoryCluster.read.__name__, read)
+    observed = deepcopy(cluster.objects)
+    cluster.applied.clear()
+    cluster.deleted.clear()
+
+    code, rejected = _manager_cli_report(
+        cluster,
+        capsys,
+        action=DELETE_ACTION,
+        run_id=RUN_ID,
+        flags=(APPLY_ARGUMENT, CONFIRM_ARGUMENT, absent_plan[FIELD_PLAN_DIGEST]),
+    )
+
+    assert (code, rejected[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    )
+    assert cluster.objects == observed
+    assert cluster.applied == cluster.deleted == []
+    assert baseline == protected
+    assert not cluster.guard_held

@@ -67,6 +67,10 @@ CONFIG_MAP_KIND: Final = "ConfigMap"
 FIELD_DATA: Final = "data"
 FIELD_APP: Final = "app"
 FIELD_ACTION: Final = "action"
+CURRENT_PROJECT_NAME: Final = "current-consumer-project"
+PRIOR_PROJECT_NAME: Final = "prior-consumer-project"
+LEGACY_NAME_PREFIX: Final = "ci-skills-prior-runner-"
+NATIVE_NAME_SOURCES: Final = ("repository", "legacy", "project-name")
 
 
 @pytest.fixture
@@ -581,21 +585,34 @@ def test_successful_build_namespace_cleanup_preserves_interleaved_consumer(
     (None, "repository", "host", "ownership"),
     ids=("matching-legacy", "foreign-repository", "foreign-host", "unowned-workload"),
 )
+@pytest.mark.parametrize("name_source", NATIVE_NAME_SOURCES)
 def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_identity(
-    selected_scope: Namespace, changed: str | None
+    selected_scope: Namespace, changed: str | None, name_source: str
 ) -> None:
     """Recover an owned legacy workload without taking ownership of its namespace.
 
     :param selected_scope: One generated repository, native namespace and workload identity.
     :param changed: One independently changed native identity invariant, if selected.
+    :param name_source: Previous repository, skill-era, or project-override naming scheme.
     :returns: None after validating native selection and zero namespace mutations.
     """
-    selected = selected_scope
+    native_names = {
+        "repository": selected_scope.repository_name,
+        "legacy": LEGACY_NAME_PREFIX + selected_scope.operation,
+        "project-name": PRIOR_PROJECT_NAME + "-" + selected_scope.operation,
+    }
+    selected = Namespace(
+        **{
+            **vars(selected_scope),
+            "legacy_name": native_names[name_source][: OPTIONS.RUNNER_NAME_LIMIT],
+        }
+    )
     cluster = MemoryCluster()
     action = _action(cluster, selected)
     action.args.kind = GITHUB_KIND
     action.args.action = UPDATE_OPERATION
     action.args.name = None
+    action.args.project_name = CURRENT_PROJECT_NAME
     action.args.label = [selected.tag]
     action.args.runner_root = RUNNER.RUNTIME_ROOT
     action._workload()
@@ -604,7 +621,10 @@ def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_id
     cluster.objects[selected.namespace_key] = namespace
     deployment: JSONObject = {
         FIELD_KIND: NAMESPACES.DEPLOYMENT_KIND,
-        FIELD_METADATA: {FIELD_NAME: selected.legacy_name},
+        FIELD_METADATA: {
+            FIELD_NAME: selected.legacy_name,
+            FIELD_UID: selected.replacement_uid,
+        },
         NAMESPACES.SPEC_FIELD: {
             NAMESPACES.TEMPLATE_FIELD: {
                 NAMESPACES.SPEC_FIELD: {
@@ -669,4 +689,14 @@ def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_id
             callback.run()
         assert action.runner.name == planned_name
     assert cluster.objects[selected.namespace_key] == namespace
+    assert (
+        cluster.objects[
+            (
+                NAMESPACES.DEPLOYMENT_KIND.casefold(),
+                selected.namespace,
+                selected.legacy_name,
+            )
+        ]
+        == observed
+    )
     assert cluster.applied == cluster.deleted == []

@@ -19,7 +19,7 @@ from collections.abc import (
     MutableMapping,
     MutableSequence,
 )
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Optional, TypeGuard
 
@@ -40,6 +40,7 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesService,
 )
 from lib.python.core.kubernetes.resources import ResourceSet
+from lib.python.core.kubernetes.run_scope import dns_token
 from lib.python.core.runtime import error_class
 from lib.python.core.schema import (
     TOOLBOX_SCHEMA,
@@ -71,6 +72,8 @@ CONDA_PATH: Final = "/opt/ci-skills/conda-environment.yml"
 NONROOT_UID: Final = 1001
 BUILD_HISTORY_LIMIT: Final = 2
 HASH_SEPARATOR: Final = b"\0"
+BUILD_TAG_PREFIX: Final = "ci-skills-build-"
+FINGERPRINT_TAG_LENGTH: Final = 24
 
 DigestLookup = Callable[[str], Optional[str]]
 
@@ -557,6 +560,81 @@ class BuildAction(SkillAction):
         ).hexdigest()
 
 
+def build_candidate_reference(
+    fingerprint: str, *, name_prefix: str | None = None
+) -> str:
+    """Name a new build candidate from the consumer base and declared content.
+
+    :param fingerprint: Existing specification fingerprint identifying build inputs.
+    :param name_prefix: Optional consumer base; omission preserves legacy naming.
+    :returns: Bounded registry tag without changing explicit published image fields.
+    :raises ValueError: A present prefix has no valid DNS token.
+    """  # noqa: DOC502 - Shared DNS normalization validates the consumer base.
+    prefix = (
+        f"{dns_token(name_prefix)}-build-"
+        if name_prefix is not None
+        else BUILD_TAG_PREFIX
+    )
+    return prefix + fingerprint[:FINGERPRINT_TAG_LENGTH]
+
+
+def build_annotations(document: JSONObject) -> Mapping[str, str]:
+    """Read text build annotations through the existing tolerant boundary.
+
+    :param document: Independently observed native resource.
+    :returns: Text annotation mapping, or empty mapping for malformed metadata.
+    """
+    metadata = document.get("metadata")
+    annotations = metadata.get("annotations") if isinstance(metadata, Mapping) else None
+    if not isinstance(annotations, Mapping):
+        return {}
+    return {
+        key: value
+        for key, value in annotations.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+
+def resolve_build_candidate(
+    action: BuildAction,
+    service: KubernetesService,
+    *,
+    preserve_existing: bool,
+) -> tuple[BuildAction, str | None]:
+    """Verify exact content before retaining a prior native candidate identity.
+
+    :param action: Declared content, immutable base and preferred candidate image.
+    :param service: Verified same-target Kubernetes observation service.
+    :param preserve_existing: Permit selection of the existing compatible candidate.
+    :returns: Selected action and verified digest, or preferred action with no reuse.
+    :raises KubernetesError: Native read-back or shared ownership validation fails.
+    :raises ToolboxError: The exact selected BuildConfig has another owner.
+    :raises APIError: Registry digest read-back fails.
+    """  # noqa: DOC503 - Native ownership and registry readers propagate failures.
+    existing = service.read("buildconfig", action.spec.app, action.spec.namespace)
+    if existing is None:
+        return action, None
+    if not ResourceSet(service, action.spec.namespace, MANAGED_VALUE).owns(existing):
+        raise ToolboxError("buildconfig_ownership_conflict")
+    annotations = build_annotations(existing)
+    selected = action
+    image = annotations.get(IMAGE_ANNOTATION)
+    prefix = action.candidate_repository + ":"
+    if preserve_existing and image is not None and image.startswith(prefix):
+        reference = image[len(prefix) :]
+        if reference and not any(character.isspace() for character in reference):
+            selected = replace(action, candidate_reference=reference)
+    digest = annotations.get(DIGEST_ANNOTATION)
+    if (
+        annotations.get(FINGERPRINT_ANNOTATION) == selected.fingerprint
+        and image == selected.image
+        and _valid_digest(digest)
+        and selected.digest_lookup(selected.candidate_reference) == digest
+    ):
+        return selected, digest
+    return action, None
+
+
 @dataclass(frozen=True)
 class ToolboxBuildResult:
     """Verified toolbox image identity from a new or reused OpenShift build.
@@ -713,24 +791,10 @@ class BuildToolbox(K8SCallback[BuildAction]):
         :raises ToolboxError: If the selected existing BuildConfig has another owner.
         :raises APIError: If independent registry digest read-back fails.
         """  # noqa: DOC503 - provider and registry readers propagate failures
-        action = self.action
-        existing = self.kubernetes.read(
-            "buildconfig", action.spec.app, action.spec.namespace
+        _, digest = resolve_build_candidate(
+            self.action, self.kubernetes, preserve_existing=False
         )
-        if existing is None:
-            return {}
-        if not self._resources().owns(existing):
-            raise ToolboxError("buildconfig_ownership_conflict")
-        annotations = self._annotations(existing)
-        digest = annotations.get(DIGEST_ANNOTATION)
-        if (
-            annotations.get(FINGERPRINT_ANNOTATION) == action.fingerprint
-            and annotations.get(IMAGE_ANNOTATION) == action.image
-            and _valid_digest(digest)
-            and action.digest_lookup(action.candidate_reference) == digest
-        ):
-            return self._verified_result(digest, None, reused=True)
-        return {}
+        return self._verified_result(digest, None, reused=True) if digest else {}
 
     def _start_build(self) -> str:
         """Submit the rendered source and read the exact created Build identity.
@@ -830,17 +894,7 @@ class BuildToolbox(K8SCallback[BuildAction]):
         :param document: Kubernetes object containing optional metadata annotations.
         :returns: String annotation mapping, or an empty mapping when malformed.
         """
-        metadata = document.get("metadata")
-        annotations = (
-            metadata.get("annotations") if isinstance(metadata, Mapping) else None
-        )
-        if not isinstance(annotations, Mapping):
-            return {}
-        return {
-            key: value
-            for key, value in annotations.items()
-            if isinstance(key, str) and isinstance(value, str)
-        }
+        return build_annotations(document)
 
     def _managed_annotations(self, digest: Optional[str] = None) -> Mapping[str, str]:
         """Build ownership and candidate identity annotations.

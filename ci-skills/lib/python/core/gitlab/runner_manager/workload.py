@@ -7,7 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from typing import ClassVar, Optional
+from typing import ClassVar, Final, Optional
 
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.kubernetes import (
@@ -20,11 +20,23 @@ from lib.python.core.kubernetes.run_scope import (
     RunScope,
     RunScopeAction,
 )
-from lib.python.core.kubernetes.runner import DeleteRunner, DeployRunner, PullImage
+from lib.python.core.kubernetes.runner import (
+    REGISTRY_SECRET_SUFFIX,
+    DeleteRunner,
+    DeployRunner,
+    PullImage,
+)
 from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
-from lib.python.core.runner import RunnerAction
+from lib.python.core.kubernetes.scc_access import role_binding_names
+from lib.python.core.runner import REGISTRATION_SECRET_SUFFIX, RunnerAction
 from lib.python.core.runner_identity import NameSource, ResolvedName
-from lib.python.core.runner_scope import ScopePurpose, ScopeSource, ScopeState
+from lib.python.core.runner_scope import (
+    ScopeObservation,
+    ScopePurpose,
+    ScopeSource,
+    ScopeState,
+)
+from lib.python.sys.status import PASS
 
 from .action import (
     MANAGER_ROLE,
@@ -32,6 +44,8 @@ from .action import (
     GitLabRunnerManagerState,
     ManagerWorkloadAction,
 )
+
+MANAGER_SCOPE_NOT_UNIQUE: Final = "runner_manager_scope_not_unique"
 
 
 def resolve_manager_name(
@@ -47,20 +61,11 @@ def resolve_manager_name(
     :returns: Unique existing identity, otherwise the uncreated planned name.
     :raises KubernetesError: Both legacy and preferred names identify owned workloads.
     """
-    candidates = {scope.name(MANAGER_ROLE), preferred.value}
-    observed_names = [
-        name
-        for name in sorted(candidates)
-        if (document := service.read("Deployment", name, scope.namespace)) is not None
-        and scope.resources(service).owns(document)
-    ]
-    if len(observed_names) > 1:
-        raise KubernetesError("runner_manager_workload_ambiguous")
-    return (
-        ResolvedName(observed_names[0], NameSource.PROVIDER)
-        if observed_names
-        else preferred
+    candidates = (scope.name(MANAGER_ROLE), preferred.value)
+    observed = scope.resources(service).resolve_owned_name(
+        "Deployment", candidates, ambiguous_reason="runner_manager_workload_ambiguous"
     )
+    return ResolvedName(observed, NameSource.PROVIDER) if observed else preferred
 
 
 def preserve_manager_name(
@@ -98,7 +103,7 @@ class SelectManagerPlanScope(K8SCallback[ManagerWorkloadAction]):
             raise TypeError("gitlab_runner_manager_state_required")
         scopes = tuple(state.found_scopes)
         if len(scopes) > 1:
-            raise KubernetesError("runner_manager_scope_not_unique")
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
         candidate = self.action.workflow.candidate_scope
         if candidate is None:
             raise KubernetesError("runner_manager_scope_not_prepared")
@@ -205,23 +210,77 @@ class OpenManagerRunScope(K8SCallback[ManagerWorkloadAction]):
 
 
 class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
-    """Select one unique live scope before deleting its manager resources."""
+    """Select one live manager scope or independently verify its absence."""
+
+    def _absent_scope(self, state: GitLabRunnerManagerState) -> RunScope:
+        """Verify selected namespace and both supported workload identities are absent.
+
+        :param state: Shared state receiving actual namespace absence evidence.
+        :returns: Input-derived candidate after independent native absence reads.
+        :raises KubernetesError: The generated namespace or any manager resource exists.
+        :raises ValueError: The selected namespace or operation identity is invalid.
+        """  # noqa: DOC502 - Shared native readers propagate access failures.
+        workflow = self.action.workflow
+        scope = RunScope.new(
+            namespace=getattr(workflow.args, "namespace", None),
+            run_id=workflow.scope_id,
+            namespace_prefix=workflow.consumer_name.value or None,
+        )
+        namespace = self.kubernetes.read("Namespace", scope.namespace, "")
+        if scope.owns_namespace and namespace is not None:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        names = {scope.name(MANAGER_ROLE), self.action.runner(scope).name}
+        resources = {
+            (kind, name + suffix)
+            for name in names
+            for kind, suffix in (
+                ("Deployment", ""),
+                ("Secret", REGISTRATION_SECRET_SUFFIX),
+                ("Secret", REGISTRY_SECRET_SUFFIX),
+            )
+        }
+        resources.update(
+            ("RoleBinding", name)
+            for name in role_binding_names(workflow.scc_access(), scope)
+        )
+        if namespace is not None:
+            owned = scope.resources(self.kubernetes)
+            if any(
+                owned.owned_objects(kind)
+                for kind in ("Deployment", "Secret", "RoleBinding")
+            ):
+                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        for kind, name in sorted(resources):
+            if self.kubernetes.read(kind, name, scope.namespace) is not None:
+                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        if namespace is None and scope.owns_namespace:
+            state.runner_scopes[scope_key(ScopePurpose.MANAGER, scope.namespace)] = (
+                ScopeObservation(
+                    ScopePurpose.MANAGER,
+                    scope.namespace,
+                    ScopeSource.EXISTING_RUN_SCOPE,
+                    state=ScopeState.ABSENT,
+                    cleanup_status=PASS,
+                )
+            )
+        return scope
 
     def run(self) -> JSONObject:
-        """Retain the one exact scope found by the preceding shared lookup.
+        """Bind one observed scope or the independently verified absent identity.
 
         :returns: Verified concrete scope identity.
         :raises TypeError: Workflow state does not retain run scopes.
-        :raises KubernetesError: Scope lookup is absent, ambiguous, or conflicts
-            with an optional caller-selected namespace.
-        """
+        :raises KubernetesError: Scope lookup is ambiguous, absence is unproven,
+            or the scope conflicts with a caller-selected namespace.
+        :raises ValueError: The selected namespace or operation identity is invalid.
+        """  # noqa: DOC502,DOC503 - Shared scope and absence readers propagate errors.
         state = self.state
         if not isinstance(state, GitLabRunnerManagerState):
             raise TypeError("gitlab_runner_manager_state_required")
         scopes = tuple(state.found_scopes)
-        if len(scopes) != 1:
-            raise KubernetesError("runner_manager_scope_not_unique")
-        scope = scopes[0]
+        if len(scopes) > 1:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        scope = scopes[0] if scopes else self._absent_scope(state)
         requested = getattr(self.action.workflow.args, "namespace", "")
         if requested and requested != scope.namespace:
             raise KubernetesError("runner_manager_namespace_mismatch")
@@ -234,7 +293,7 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
             purpose=ScopePurpose.MANAGER,
             source=ScopeSource.EXISTING_RUN_SCOPE,
             operation=scope.run_id,
-            required=True,
+            required=bool(scopes) or not scope.owns_namespace,
         )
         return {"verified": True, **scope.as_dict()}
 

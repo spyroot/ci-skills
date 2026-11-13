@@ -737,12 +737,19 @@ class FakeKubernetes:
             "configmaps": "configmap",
             "deployments": "deployment",
             "rolebindings": "rolebinding",
+            "secrets": "secret",
         }
         if (
             len(args) >= 2
             and args[0] == "get"
             and args[1] in scope_resources
-            and "--all-namespaces" in args
+            and (
+                "--all-namespaces" in args
+                or (
+                    args[1] != "pods"
+                    and any(option in args for option in ("--namespace", "-n"))
+                )
+            )
         ):
             return {"items": self._labeled(scope_resources[args[1]], args)}
         if "pods" in args:
@@ -773,9 +780,19 @@ class FakeKubernetes:
         """
         selector = args[args.index("-l") + 1]
         expected = dict(item.split("=", 1) for item in selector.split(","))
+        namespace = next(
+            (
+                args[args.index(option) + 1]
+                for option in ("--namespace", "-n")
+                if option in args
+            ),
+            None,
+        )
         result = []
         for (resource_kind, _name, _namespace), document in self.resources.items():
-            if resource_kind != kind:
+            if resource_kind != kind or (
+                namespace is not None and _namespace != namespace
+            ):
                 continue
             metadata = document.get("metadata")
             labels = metadata.get("labels", {}) if isinstance(metadata, dict) else {}

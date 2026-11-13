@@ -33,7 +33,7 @@ from lib.python.core.json_types import (
 from lib.python.core.kubernetes.resources import ResourceSet
 from lib.python.core.kubernetes.run_scope import resource_identity
 from lib.python.core.kubernetes.runner import REGISTRY_SECRET_SUFFIX
-from lib.python.core.kubernetes.scc_access import role_binding_document
+from lib.python.core.kubernetes.scc_access import resolve_role_binding_name
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.runner import (
     REGISTRATION_SECRET_SUFFIX,
@@ -464,13 +464,10 @@ def retain_manager_resources(
             ),
         }
     )
-    binding = role_binding_document(workflow.scc_access(), scope)
-    metadata = json_object(binding["metadata"])
-    name = metadata.get("name")
-    if isinstance(name, str):
-        observed = state.kubernetes.read("RoleBinding", name, scope.namespace)
-        if observed is not None and scope.resources(state.kubernetes).owns(observed):
-            retained.add(resource_identity("RoleBinding", name, scope.namespace))
+    name = resolve_role_binding_name(workflow.scc_access(), scope, state.kubernetes)
+    observed = state.kubernetes.read("RoleBinding", name, scope.namespace)
+    if observed is not None and scope.resources(state.kubernetes).owns(observed):
+        retained.add(resource_identity("RoleBinding", name, scope.namespace))
 
 
 class VerifyGitLabRunnerOnline(GitLabManagerComponent):
