@@ -155,6 +155,18 @@ need in isolation.
 - **Track by Artifact ID, Not Dates:** Do not stamp `Progress` checklists, `Decision Log` entries, or bottom-of-file
   `Revision notes` with calendar dates (`YYYY-MM-DD`). Track progress and decisions using immutable Decision IDs
   (`DEC-01`), Gate IDs (`G-17`), Milestone IDs (`CI-E2E-01`), MR numbers (`!32`), or PR commit SHAs.
+- Stamp allowed in file name, example .coordination/ read system-architecture contract, backup, logs, original
+  contracts.
+
+## Documentation Contract
+
+- **Human-Facing Voice Only:** Never use internal agent orchestration terms
+- (`operator`, `coordinator`, `worker`, `in chat`, `inspected revision`, `this document does not authorize`) or local
+  laptop paths (`~/dev/...`) in repository documentation or ExecPlans. Use domain roles (`administrators`,
+  `maintainers`, `callers`, or the team name).
+- **Track by Artifact ID, Not Dates:** Do not stamp `Progress` checklists, `Decision Log` entries, or bottom-of-file
+  `Revision notes` with calendar dates (`YYYY-MM-DD`). Track progress and decisions using immutable Decision IDs
+  (`DEC-01`), Gate IDs (`G-17`), Milestone IDs (`CI-E2E-01`), MR numbers (`!32`), or PR commit SHAs.
 - Stamp allowed in file name, example .coordination/ read system-arhitecture contract, backup, logs, original contracts.
 
 ## Skeleton of a Good ExecPlan
