@@ -149,7 +149,7 @@ class ManagerWorkloadAction(SkillAction):
                 else scope.bounded_name(
                     MANAGER_ROLE,
                     limit=RUNNER_NAME_LIMIT,
-                    prefix=self.workflow.repository_identity.name,
+                    prefix=self.workflow.consumer_name.value or None,
                 )
             ),
             source_root="",
@@ -199,7 +199,7 @@ class ManagerWorkloadAction(SkillAction):
                 "name": candidate.bounded_name(
                     MANAGER_ROLE,
                     limit=RUNNER_NAME_LIMIT,
-                    prefix=workflow.repository_identity.name,
+                    prefix=workflow.consumer_name.value or None,
                 )
                 if candidate
                 else None,
@@ -244,6 +244,11 @@ class GitLabRunnerManagerAction(WorkflowAction):
 
         Caller-supplied tags before repository defaults or provider discovery.
 
+    .. attribute :: explicit_description
+        :type: str | None
+
+        Original caller description retained before resolving defaults.
+
     .. attribute :: observed_tags
         :type: tuple[str, ...] | None
 
@@ -264,6 +269,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
     runner_token: RunnerTokenSelection = field(init=False, repr=False)
     candidate_scope: Optional[RunScope] = field(init=False, default=None)
     explicit_tags: tuple[str, ...] = field(init=False, default=())
+    explicit_description: str | None = field(init=False, default=None)
     observed_tags: tuple[str, ...] | None = field(init=False, default=None)
     gitlab_selection: tuple[str, str] = field(init=False)
     podman_runtime: Optional[PodmanRuntimeSettings] = field(
@@ -314,7 +320,9 @@ class GitLabRunnerManagerAction(WorkflowAction):
         if self.observed_tags is not None:
             return self.observed_tags
         labels = runner_tags(
-            tuple(getattr(self.args, "tag", ())), self.repository_identity
+            tuple(getattr(self.args, "tag", ())),
+            self.repository_identity,
+            project_name=self.project_name,
         )
         return labels
 
@@ -389,7 +397,11 @@ class GitLabRunnerManagerAction(WorkflowAction):
 
         :returns: Existing privileged SCC and run-scoped default ServiceAccount.
         """
-        return SCCAccessAction(PRIVILEGED_CONSTRAINT, DEFAULT_SERVICE_ACCOUNT)
+        return SCCAccessAction(
+            PRIVILEGED_CONSTRAINT,
+            DEFAULT_SERVICE_ACCOUNT,
+            name_prefix=self.consumer_name.value or None,
+        )
 
     def _prepare_scope(self) -> None:
         """Prepare a deploy candidate or validate delete lookup identity.
@@ -398,23 +410,23 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :raises ValueError: Namespace or run identifier syntax is invalid.
         """
         namespace = getattr(self.args, "namespace", "") or None
-        if not self.repository_identity.name and not namespace:
+        if not self.consumer_name.value and not namespace:
             raise ValueError("repository_identity_required: provide --namespace")
         selected_run_id = self.scope_id
         if self.args.action == "deploy":
             self.candidate_scope = RunScope.new(
                 namespace=namespace,
                 run_id=selected_run_id,
-                namespace_prefix=self.repository_identity.name,
+                namespace_prefix=self.consumer_name.value or None,
             )
-            if self.repository_identity.name:
+            if self.consumer_name.value:
                 self.resolved_runner_name = ResolvedName(
                     self.candidate_scope.bounded_name(
                         MANAGER_ROLE,
                         limit=RUNNER_NAME_LIMIT,
-                        prefix=self.repository_identity.name,
+                        prefix=self.consumer_name.value or None,
                     ),
-                    NameSource.REPOSITORY,
+                    self.consumer_name.source,
                 )
 
     def prepare(self) -> None:
@@ -434,6 +446,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
             raise ValueError(PROTECTION_DEPLOY_ONLY)
         self.context.args = self.args
         self.explicit_tags = tuple(getattr(self.args, "tag", ()))
+        self.explicit_description = getattr(self.args, "description", None)
         surfaces = (
             (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY, HARBOR_AUTHORITY)
             if self.args.action == "deploy"
@@ -462,9 +475,10 @@ class GitLabRunnerManagerAction(WorkflowAction):
             else RepositoryIdentity(None, RepositorySource.UNKNOWN)
         )
         self.resolved_description = resolve_name(
-            getattr(self.args, "description", None),
+            self.explicit_description,
             self.repository_identity,
             argument="--description",
+            project_name=self.project_name,
             pending=target_kind == "project",
         )
         self.args.runner_id = self.runner_id
@@ -477,7 +491,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
             and not self.args.tag
         ):
             raise ValueError("repository_identity_required: provide --tag")
-        if self.repository_identity.name or getattr(self.args, "namespace", None):
+        if self.consumer_name.value or getattr(self.args, "namespace", None):
             self._prepare_scope()
         if self.candidate_scope is not None:
             candidate = self.candidate_scope
@@ -528,9 +542,10 @@ class GitLabRunnerManagerAction(WorkflowAction):
         if not self.repository_identity.name and target_kind == "project":
             self.repository_identity = RepositoryIdentity.from_access(access, reference)
             self.resolved_description = resolve_name(
-                self.args.description,
+                self.explicit_description,
                 self.repository_identity,
                 argument="--description",
+                project_name=self.project_name,
             )
             self.args.description = self.resolved_description.value
             self.args.tag = list(self.labels)
@@ -610,6 +625,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
         return plan_digest(
             {
                 "repository": self.repository_identity.reference,
+                "project_name": self.project_name,
                 "protected": parse_protected(getattr(self.args, "protected", None)),
                 "kind": self.args.kind,
                 "operation": self.args.action,

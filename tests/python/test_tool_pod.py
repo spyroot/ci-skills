@@ -127,14 +127,28 @@ class MemoryCluster:
             "configmaps": "configmap",
             "deployments": "deployment",
             "rolebindings": "rolebinding",
+            "secrets": "secret",
         }[args[1]]
         selector = args[args.index("-l") + 1]
         selected = dict(item.split("=", 1) for item in selector.split(","))
+        namespace = next(
+            (
+                args[args.index(option) + 1]
+                for option in ("--namespace", "-n")
+                if option in args
+            ),
+            None,
+        )
         return {
             "items": [
                 deepcopy(document)
-                for (resource_kind, _, _), document in self.objects.items()
+                for (
+                    resource_kind,
+                    resource_namespace,
+                    _,
+                ), document in self.objects.items()
                 if resource_kind == kind
+                and (namespace is None or resource_namespace == namespace)
                 and all(
                     document["metadata"].get("labels", {}).get(key) == value
                     for key, value in selected.items()

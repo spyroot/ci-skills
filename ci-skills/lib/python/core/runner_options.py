@@ -19,7 +19,12 @@ from lib.python.core.kubernetes.run_scope import (
     validate_namespace,
 )
 from lib.python.core.runner import REGISTRATION_SECRET_SUFFIX
-from lib.python.core.runner_identity import NameSource, RepositoryIdentity, ResolvedName
+from lib.python.core.runner_identity import (
+    NameSource,
+    RepositoryIdentity,
+    ResolvedName,
+    resolve_name,
+)
 
 RUNNER_NAME_LIMIT: Final = DNS_LABEL_LIMIT - len(REGISTRATION_SECRET_SUFFIX)
 RUNNER_NAME_INVALID: Final = "runner_name_invalid"
@@ -106,18 +111,27 @@ class SingleValue(argparse.Action):
 
 
 def runner_tags(
-    values: Sequence[str], repository: RepositoryIdentity
+    values: Sequence[str],
+    repository: RepositoryIdentity,
+    *,
+    project_name: str | None = None,
 ) -> tuple[str, ...]:
     """Apply repository tags only when the caller omitted every explicit tag.
 
     :param values: Ordered explicit tags or labels.
     :param repository: Selected consumer repository, possibly pending authentication.
+    :param project_name: Optional consumer naming base used only for omitted tags.
     :returns: Validated explicit values, the repository leaf, or pending empty intent.
     :raises ValueError: Supplied tag values are malformed.
     """
-    return validate_runner_tags(
-        values or ((repository.name,) if repository.name else ())
+    selected = resolve_name(
+        None,
+        repository,
+        argument="--tag",
+        project_name=project_name,
+        pending=True,
     )
+    return validate_runner_tags(values or ((selected.value,) if selected.value else ()))
 
 
 def kubernetes_runner_name(name: ResolvedName) -> ResolvedName:

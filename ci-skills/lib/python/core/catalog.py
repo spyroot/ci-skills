@@ -79,6 +79,16 @@ GITLAB_PROFILE_HELP: Final = (
     f"use {GITLAB_TARGET_OPTION} instead"
 )
 
+PROJECT_NAMING_OPTIONS: Final = MappingProxyType(
+    {
+        "--project-name": (
+            "optional consumer naming base; explicit object names take precedence; "
+            "omission uses the selected consumer repository; provider identity is unchanged"
+        ),
+    }
+)
+
+
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
     "--binding": "project-declared target and ordered kubeconfig source resolver",
@@ -371,11 +381,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "capabilities": ("namespaced",),
         "mutates": True,
         "options": {
+            **PROJECT_NAMING_OPTIONS,
             "--spec": "toolbox JSON following schemas/toolbox.schema.json",
-            "--name": "exact runner name; omission uses the known consumer repository, otherwise --name is required",
+            "--name": "exact runner name; omission uses --project-name, then the known consumer repository; otherwise --name is required",
             "--runner-root": "runner runtime directory inside the toolbox image",
-            "--label": "GitHub custom runner label; repeatable; omission uses the selected consumer repository; provider system labels are unchanged",
-            "--namespace": "exact existing caller namespace; omission reuses its unique owned namespace or plans a namespace from the selected consumer repository and an opaque hash",
+            "--label": "GitHub custom runner label; repeatable; omission uses --project-name, then the selected consumer repository; provider system labels are unchanged",
+            "--namespace": "exact existing caller namespace; omission reuses its unique owned namespace or plans a namespace from --project-name or the selected consumer repository and an opaque hash",
             "--apply": "perform the confirmed operation",
             "--confirm-plan": "exact fingerprint from the preceding plan",
             "--timeout": "operation timeout in seconds",
@@ -697,7 +708,8 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "capabilities": ("node_scoped", "namespaced"),
         "mutates": True,
         "options": {
-            "--namespace": "existing caller namespace; chain omission reuses its live scope or plans a repository-based owned namespace",
+            **PROJECT_NAMING_OPTIONS,
+            "--namespace": "existing caller namespace; chain omission reuses its live scope or plans an owned namespace from --project-name or the selected consumer repository",
             "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
             "--inner-image": "digest-pinned inner test image; default is Linux amd64",
             "--timeout": "maximum probe duration in seconds",
@@ -713,8 +725,8 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--toolbox-spec": "chain: existing toolbox specification with gitlab-runner, git and podman",
             "--project": "chain: GitLab project for a project runner",
             "--group": "chain: GitLab group for a group runner",
-            "--description": "chain: runner description; omission uses the known consumer repository, otherwise required",
-            "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label; omission uses the selected consumer repository",
+            "--description": "chain: runner description; omission uses --project-name, then the known consumer repository; otherwise required",
+            "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label; omission uses --project-name, then the selected consumer repository",
             "--protected": "chain: true for ref_protected, false for not_protected; omission preserves provider default",
         },
         "repeatable_options": ("--tag",),
@@ -1182,16 +1194,17 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "mutates": True,
         "side_effects": "Apply may create, assign, tag, or delete a runner record.",
         "options": {
+            **PROJECT_NAMING_OPTIONS,
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
             "--runner-id": "numeric runner ID, required for assign, tag, and delete",
             "--job-id": "project job ID whose related runner get should inspect",
             "--runner-type": "project or group scope for creation",
-            "--description": "runner description and recovery key; create omission uses the known repository, otherwise required",
+            "--description": "runner description and recovery key; create omission uses --project-name, then the known consumer repository; otherwise required",
             "--protected": "create: true for ref_protected, false for not_protected; omission preserves provider default",
             "--limit": "maximum returned runner records for list (1-100, default 10)",
             "--filter": "repeatable runner state filter: protected, unprotected, online, offline, shared, dedicated, paused, active",
-            "--tag": "runner tag for create or tag; repeat for multiple tags; create omission uses the selected consumer repository",
+            "--tag": "runner tag for create or tag; repeat for multiple tags; create omission uses --project-name, then the selected consumer repository",
             "--token-out": "caller-selected 0600 file for the one-time runner token",
             "--live-plan": "read pending repository defaults for project runner creation, group assignment or runner deletion identity and print an apply-ready plan without writes",
             "--apply": "perform the validated change",
@@ -1263,18 +1276,19 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "capabilities": ("namespaced", "node_scoped"),
         "mutates": True,
         "options": {
+            **PROJECT_NAMING_OPTIONS,
             "--project": "exact project path or numeric ID; otherwise use "
             "gitlab.project",
             "--group": "exact group path or numeric ID; otherwise use gitlab.group",
             "--runner-id": "positive ID returned by gitlab_runner.py create",
-            "--description": "exact runner description; deploy omission uses the known consumer repository, otherwise required",
+            "--description": "exact runner description; deploy omission uses --project-name, then the known consumer repository; otherwise required",
             "--protected": "deploy: verify true as ref_protected or false as not_protected; omission preserves the existing value",
             "--tag": "GitLab runner tag given to gitlab_runner.py create --tag; "
-            "repeat for multiple tags; --label is accepted as an alias; omission uses the selected consumer repository",
+            "repeat for multiple tags; --label is accepted as an alias; omission uses --project-name, then the selected consumer repository",
             "--image": "digest-pinned toolbox image containing gitlab-runner and "
             "podman",
             "--token-file": "one-time token file written by gitlab_runner.py create",
-            "--namespace": "existing caller namespace to preserve; omission reuses its live scope or plans a repository-based owned namespace",
+            "--namespace": "existing caller namespace to preserve; omission reuses its live scope or plans an owned namespace from --project-name or the selected consumer repository",
             "--node": "exact worker already verified by image_build_readiness.py",
             "--cpu-request": "runner CPU request; repeat the proven probe value",
             "--cpu-limit": "runner CPU limit; repeat the proven probe value",

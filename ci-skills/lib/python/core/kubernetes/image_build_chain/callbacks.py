@@ -36,8 +36,7 @@ from lib.python.core.kubernetes.kubernetes import DEFAULT_COMMAND_TIMEOUT
 from lib.python.core.kubernetes.podman_probe import ProbeMode, select_ready_worker
 from lib.python.core.kubernetes.run_scope import RunScope
 from lib.python.core.kubernetes.runner_scope import observe_namespace
-from lib.python.core.report import plan_digest
-from lib.python.core.runner_identity import NameSource, ResolvedName
+from lib.python.core.runner_identity import ResolvedName
 from lib.python.core.runner_options import RUNNER_NAME_LIMIT
 from lib.python.core.runner_scope import ScopePurpose, ScopeSource
 
@@ -166,6 +165,7 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
             action.bind_repository(state.gitlab.access)
         if action.manager_scope is None:
             raise ValueError("repository_identity_required: provide --namespace")
+        action.toolbox.prepare_build_candidate(state)
         nodes = state.kubernetes.json("get", "nodes", "-o", "json")
         selected = select_ready_worker(nodes, action.args.node)
         state.selected_node = selected.name
@@ -181,11 +181,9 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
             action.manager_scope.bounded_name(
                 MANAGER_ROLE,
                 limit=RUNNER_NAME_LIMIT,
-                prefix=action.repository_identity.name,
+                prefix=action.naming_base.value or None,
             ),
-            NameSource.REPOSITORY
-            if action.repository_identity.name
-            else NameSource.UNKNOWN,
+            action.naming_base.source,
         )
         action.resolved_runner_name = resolve_manager_name(
             state.kubernetes, action.manager_scope, preferred
@@ -214,7 +212,7 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
                 operation=action.toolbox.runner.operation,
             )
         document = action.plan(state.selected_node)
-        digest = plan_digest(document)
+        digest = action.fingerprint(state.selected_node)
         state.chain_plan = document
         state.chain_plan_digest = digest
         if action.mode == ProbeMode.APPLY and action.args.confirm_plan != digest:
@@ -353,6 +351,7 @@ def _runner_args(action: ImageBuildChainAction, token_path: Path) -> argparse.Na
         project=action.runner_reference if action.runner_kind == "project" else None,
         group=action.runner_reference if action.runner_kind == "group" else None,
         description=args.runner_description,
+        project_name=action.project_name,
         protected=getattr(args, "protected", None),
         tag=list(args.runner_label),
         runner_id=None,

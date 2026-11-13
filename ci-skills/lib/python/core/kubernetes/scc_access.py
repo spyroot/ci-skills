@@ -14,12 +14,13 @@ from typing import Final, Optional
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.cli_api import response_decoder
-from lib.python.core.json_types import JSONObject, json_object
+from lib.python.core.json_types import JSONObject, json_object, json_objects
 from lib.python.core.kubernetes.kubernetes import (
     K8SCallback,
     KubernetesError,
     KubernetesService,
 )
+from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.kubernetes.resources import ResourceSet
 from lib.python.core.kubernetes.run_scope import (
     RunScope,
@@ -62,6 +63,7 @@ class SCCAccessAction(SkillAction):
 
     :param constraint: OpenShift SecurityContextConstraint name.
     :param service_account: ServiceAccount name inside the resolved run namespace.
+    :param name_prefix: Optional consumer naming base for newly created bindings.
     :raises ValueError: If either name is empty or not DNS-subdomain-safe.
 
     .. attribute :: constraint
@@ -73,10 +75,16 @@ class SCCAccessAction(SkillAction):
         :type: str
 
         ServiceAccount name within the resolved run namespace.
+
+    .. attribute :: name_prefix
+        :type: str | None
+
+        Optional consumer base used only when creating a new binding identity.
     """
 
     constraint: str
     service_account: str
+    name_prefix: str | None = None
 
     def __post_init__(self) -> None:
         """Validate provider names before any Kubernetes access.
@@ -129,18 +137,92 @@ def _binding_role(action: SCCAccessAction) -> str:
     return f"{SCC_BINDING_ROLE}-{suffix}"
 
 
-def role_binding_document(action: SCCAccessAction, scope: RunScope) -> JSONObject:
+def role_binding_names(action: SCCAccessAction, scope: RunScope) -> tuple[str, ...]:
+    """Name the preferred binding and the original compatibility candidate.
+
+    :param action: Exact SCC, account, and optional consumer naming base.
+    :param scope: Concrete namespace and unchanged operation ownership.
+    :returns: Deduplicated preferred and legacy names in preference order.
+    :raises ValueError: A selected prefix cannot produce a DNS-safe name.
+    """  # noqa: DOC502 - Shared scope naming validates the derived name.
+    role = _binding_role(action)
+    return tuple(
+        dict.fromkeys((scope.name(role, prefix=action.name_prefix), scope.name(role)))
+    )
+
+
+def _owned_binding_names(
+    action: SCCAccessAction, scope: RunScope, service: KubernetesService
+) -> tuple[str, ...]:
+    """Read prior-prefix bindings with the exact native permission identity.
+
+    :param action: Exact permission selected by the consumer.
+    :param scope: Concrete namespace and operation ownership.
+    :param service: Verified Kubernetes reader.
+    :returns: Owned matching names, independently of their historical prefix.
+    :raises KubernetesError: Native reads or a selected binding are malformed.
+    """  # noqa: DOC502 - Shared discovery validates ownership and reads.
+    names = set()
+    resources = scope.resources(service)
+    documents = list(resources.owned_objects("RoleBinding"))
+    for name in role_binding_names(action, scope):
+        current = service.read("RoleBinding", name, scope.namespace)
+        if current is not None and resources.owns(current):
+            documents.append(current)
+    try:
+        for document in documents:
+            binding = KubernetesObject(document)
+            role = binding.object("roleRef").document
+            subjects = json_objects(document.get("subjects", []))
+            if (
+                role.get("apiGroup") == "rbac.authorization.k8s.io"
+                and role.get("kind") == "ClusterRole"
+                and role.get("name") == action.cluster_role
+                and len(subjects) == 1
+                and subjects[0].get("kind") == "ServiceAccount"
+                and subjects[0].get("name") == action.service_account
+                and subjects[0].get("namespace") == scope.namespace
+                and subjects[0].get("apiGroup", "") == ""
+            ):
+                names.add(binding.name)
+    except TypeError as exc:
+        raise KubernetesError("scc_role_binding_identity_invalid") from exc
+    return tuple(sorted(names))
+
+
+def resolve_role_binding_name(
+    action: SCCAccessAction, scope: RunScope, service: KubernetesService
+) -> str:
+    """Retain a unique verified native binding before selecting a new name.
+
+    :param action: Exact permission and preferred consumer naming base.
+    :param scope: Namespace and unchanged operation ownership.
+    :param service: Verified native observation service.
+    :returns: Existing owned name, or the preferred name when none exists.
+    :raises KubernetesError: Native reads fail or several owned identities match.
+    :raises ValueError: The preferred naming base cannot produce a valid name.
+    """  # noqa: DOC502 - Shared discovery and naming propagate failures.
+    observed = _owned_binding_names(action, scope, service)
+    if len(observed) > 1:
+        raise KubernetesError("scc_role_binding_ambiguous")
+    return observed[0] if observed else role_binding_names(action, scope)[0]
+
+
+def role_binding_document(
+    action: SCCAccessAction, scope: RunScope, *, name: str | None = None
+) -> JSONObject:
     """Render one run-owned namespaced SCC RoleBinding.
 
     :param action: Selected SCC and ServiceAccount names.
     :param scope: Concrete namespace and ownership labels for this run.
+    :param name: Exact verified existing name, or absence for the preferred default.
     :returns: Native RoleBinding referencing the OpenShift SCC ClusterRole.
     """
     return {
         "apiVersion": "rbac.authorization.k8s.io/v1",
         "kind": "RoleBinding",
         "metadata": {
-            "name": scope.name(_binding_role(action)),
+            "name": name or role_binding_names(action, scope)[0],
             "namespace": scope.namespace,
             "labels": dict(scope.labels),
         },
@@ -324,6 +406,7 @@ class EnsureSCCAccess(K8SCallback[SCCAccessAction]):
             raise KubernetesError("scc_not_found")
         if self.kubernetes.read("ClusterRole", self.action.cluster_role, "") is None:
             raise KubernetesError("scc_cluster_role_missing")
+        selected_name = resolve_role_binding_name(self.action, scope, self.kubernetes)
         if self._permission(scope):
             return {
                 **base,
@@ -334,7 +417,9 @@ class EnsureSCCAccess(K8SCallback[SCCAccessAction]):
         self._require_mutation_permissions(scope)
         resources = scope.resources(self.kubernetes)
         self.resources = resources
-        binding = resources.apply(role_binding_document(self.action, scope))
+        binding = resources.apply(
+            role_binding_document(self.action, scope, name=selected_name)
+        )
         if not self._permission(scope):
             raise KubernetesError("scc_access_readback_denied")
         return {
@@ -407,7 +492,8 @@ class RemoveSCCAccess(K8SCallback[SCCAccessAction]):
         if not isinstance(state, RunScopeState):
             raise TypeError("run_scope_state_required")
         scope = state.run_scope
-        binding = role_binding_document(self.action, scope)
+        selected_name = resolve_role_binding_name(self.action, scope, self.kubernetes)
+        binding = role_binding_document(self.action, scope, name=selected_name)
         metadata = json_object(binding["metadata"])
         name = metadata.get("name")
         if not isinstance(name, str):
@@ -427,6 +513,8 @@ class RemoveSCCAccess(K8SCallback[SCCAccessAction]):
                 },
             }
         changed = resources.delete("RoleBinding", name)
+        if _owned_binding_names(self.action, scope, self.kubernetes):
+            raise KubernetesError("scc_role_binding_cleanup_incomplete")
         identity = resource_identity("RoleBinding", name, scope.namespace)
         state.retained_resources.discard(identity)
         evidence = {

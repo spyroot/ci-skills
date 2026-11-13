@@ -16,7 +16,7 @@ from typing import Optional
 from lib.python.access.credentials import bind_sources
 from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.catalog import describe
+from lib.python.core.catalog import PROJECT_NAMING_OPTIONS, describe
 from lib.python.core.cli import _failure, parser
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.endpoints import KUBERNETES_AUTHORITY
@@ -52,6 +52,7 @@ from lib.python.core.kubernetes.podman_probe import (
 from lib.python.core.kubernetes.scc_access import EnsureSCCAccess
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit_result, report
+from lib.python.core.runner_identity import resolve_repository, validate_project_name
 from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
 from lib.python.core.runtime import TRACE_TEXT_LIMIT, redact_tree, sanitize
 from lib.python.core.target import GitLabSelection, Target, TargetError
@@ -117,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
     result.set_defaults(kind=PROBE_KIND)
     result.add_argument(
         "action", nargs="?", choices=("probe", "chain"), default="probe"
+    )
+    result.add_argument(
+        "--project-name",
+        action=SingleValue,
+        help=PROJECT_NAMING_OPTIONS["--project-name"],
     )
     result.add_argument("--node", metavar="NAME", help="Ready worker; default discover")
     result.add_argument(
@@ -229,6 +235,7 @@ class ImageBuildReadiness:
         :raises ValueError: If modes, images, resource quantities, or timeout are invalid.
         :raises OSError: If configured target or credential files cannot be read.
         """
+        validate_project_name(getattr(self.args, "project_name", None))
         target = resolve_target(
             self.args.target,
             self.args.binding,
@@ -249,6 +256,8 @@ class ImageBuildReadiness:
             mode=mode,
             confirm_plan=self.args.confirm_plan,
             namespace=self.args.namespace,
+            project_name=getattr(self.args, "project_name", None),
+            repository_identity=resolve_repository(None),
         )
         return mode
 
