@@ -1,20 +1,20 @@
 # Codex Execution Plans (ExecPlans)
 
-This document describes the requirements for an execution plan ("ExecPlan"), a design document that a coding agent can
-follow to deliver a working feature or system change. Treat the reader as a complete beginner to this repository: they
-have only the current working tree and the single ExecPlan file you provide. There is no memory of prior plans and no
-external context.
+This document describes the requirements for an execution plan ("ExecPlan"). Treat the reader as a complete beginner to
+this repository: they have only the current working tree and the single ExecPlan file you provide. There is no memory of
+prior plans and no external context.
 
 ## How to use ExecPlans and PLANS.md
 
 When authoring an executable specification (ExecPlan), follow PLANS.md _to the letter_. If it is not in your context,
-refresh your memory by reading the entire PLANS.md file. Be thorough in reading (and re-reading) source material to
-produce an accurate specification. When creating a spec, start from the skeleton and flesh it out as you do your
-research.
+refresh your memory by reading the entire PLANS.md file, read current `docs/exec-plans`. Be thorough in reading (and
+re-reading) source material to produce an accurate specification. When creating a spec, start from the skeleton and
+flesh it out as you do your research. ExecPlan to `docs/architecture`.
 
 When implementing an executable specification (ExecPlan), do not prompt the user for "next steps"; simply proceed to the
 next milestone. Keep all sections up to date, add or split entries in the list at every stopping point to affirmatively
-state the progress made and next steps. Resolve ambiguities autonomously, and commit frequently.
+state the progress made and next steps. Resolve ambiguities autonomously, and commit frequently. For decision first read
+pinned manifest, it might include direction and decision already indirectly indicate as high level.
 
 When discussing an executable specification (ExecPlan), record decisions in a log in the spec for posterity; it should
 be unambiguously clear why any change to the specification was made. ExecPlans are living documents, and it should
@@ -29,18 +29,29 @@ implementation.
 
 NON-NEGOTIABLE REQUIREMENTS:
 
-- Every ExecPlan must be fully self-contained. Self-contained means that in its current form it contains all knowledge
-  and instructions needed for a novice to succeed.
-- Every ExecPlan is a living document. Contributors are required to revise it as progress is made, as discoveries occur,
-  and as design decisions are finalized. Each revision must remain fully self-contained.
-- Every ExecPlan must enable a complete novice to implement the feature end-to-end without prior knowledge of this repo.
-- Every ExecPlan must produce a demonstrably working behavior, not merely code changes to "meet a definition".
-- Every ExecPlan must define every term of art in plain language or do not use it.
-- Every ExecPlan that defines, modifies, or references runtime/CI variables, CI pipelines/jobs, or verification gates
-  MUST present them in `Concrete Steps` using structured Markdown tables specifying: (1) Variable name, type,
-  default/required status, and source; (2) Pipeline/job name, trigger type, stage/order, and file path; and (3) Gate ID,
-  type/class, pass condition, fail-closed condition, and owning module. Describing variables, pipelines, or gates solely
-  in prose is forbidden.
+Every ExecPlan MUST:
+
+1. Fully self-contained. Self-contained means that in its current form it contains all knowledge and instructions needed
+   for a novice to succeed;
+2. is a living document. Contributors are required to revise it as progress is made, as discoveries occur, and as design
+   decisions are finalized. Each revision must remain fully self-contained;
+3. must enable a complete novice to implement the feature end-to-end without prior knowledge of this repo.
+4. must produce a demonstrably working behavior, not merely code changes to "meet a definition";
+5. must define every term of art in plain language or do not use i;
+6. that defines, modifies, or references runtime/CI variables, CI pipelines/jobs, or verification gates MUST present
+   them in `Concrete Steps` using structured Markdown tables specifying: (1) Variable name, type, default/required
+   status, and source; (2) Pipeline/job name, trigger type, stage/order, and file path; and (3) Gate ID, type/class,
+   pass condition, fail-closed condition, and owning module. Describing variables, pipelines, or gates solely in prose
+   is forbidden;
+7. must use a consistent, unambiguous, and observable acceptance criteria - live smoke, e2e or contract; 9 must link
+   `docs/gates.md' which high level table of gates;
+8. Every ExecPlan include make reasonable assumption about budget, resource and compute and if possible indicate
+   acceptable upper bounds on compute, storage, runtime;
+9. Every ExecPlan must clearly communicate `Out Of Scope` for a given phase;
+10. Every must define config, storage of config where config define schema, CI variable, spec or any other form that
+    must define early stage. If same state require initial bootstrap validation;
+11. Define as first phase initial lock require for `10.` - validation, bootstrap, or creation such object, entity or CI
+    variable.
 
 Purpose and intent come first. Begin by explaining, in a few sentences, why the work matters from a user's perspective:
 what someone can do after this change that they could not do before, and how to see it working. Then guide the reader
