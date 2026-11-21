@@ -17,6 +17,9 @@ dependencies:
       - installer
       - tomli-w
       - websocket-client
+      # Same pins as the validate `mutation` job.
+      - mutmut==2.5.1
+      - coverage==7.10.7
   - kubernetes
   - python-kubernetes
   - pyyaml
