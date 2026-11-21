@@ -10,7 +10,8 @@ from types import MappingProxyType
 from typing import Final
 
 import pytest
-from conftest import import_script_module
+from conftest import REPO_ROOT, import_script_module, parse_json_output, run_script
+from jsonschema import Draft202012Validator
 
 CLI = import_script_module("lib.python.core.gitlab.cluster_agent.cli")
 CATALOG = import_script_module("lib.python.core.catalog")
@@ -51,6 +52,14 @@ CONFIRMATION: Final = "a" * 64
 RECEIPT: Final = "agent-receipt.json"
 MODE_REJECTION: Final = "agent_verify_requires_read_only_mode"
 CONFIRMATION_REQUIRED: Final = "agent_apply_requires_plan_digest_and_run_id"
+HELP_ARG: Final = "--help"
+DESCRIBE_ARG: Final = "--describe"
+MIRROR_COMMAND: Final = "gitlab_mirror.py"
+CREDENTIALS_FIELD: Final = "credentials"
+CREDENTIALS_HEADING: Final = "Credentials:"
+DESCRIPTION_HEADING: Final = "Description:"
+EXAMPLES_HEADING: Final = "Examples:"
+COMMAND_CONTRACT_SCHEMA: Final = REPO_ROOT / "schemas" / "command-contract.schema.json"
 
 # Each valid invocation is immutable. Mutation cases change exactly one flag
 # on their own copy, with the same selected provider project in all cases.
@@ -317,3 +326,52 @@ def test_agent_entrypoint_emits_schema_valid_offline_json(
     assert result["records"] == result["errors"] == result["cleanup"]["failures"] == []
     assert result["filters"]["project"] == PROJECT
     assert result["filters"]["project_name"] == PROJECT_NAME
+
+
+def _help_and_contract(command: str) -> tuple[str, Mapping[str, object]]:
+    """Run one installed command's ``--help`` and ``--describe``.
+
+    :param command: Script name under the skill's ``bin`` directory.
+    :returns: Help text with whitespace collapsed, and the decoded command contract.
+    """
+    rendered = run_script(command, HELP_ARG)
+    described = run_script(command, DESCRIBE_ARG)
+    assert rendered.returncode == described.returncode == 0
+    contract = parse_json_output(described)
+    assert isinstance(contract, Mapping)
+    return " ".join(rendered.stdout.split()), contract
+
+
+def test_agent_help_and_describe_carry_the_catalog_credential_lines() -> None:
+    """Show each catalog credential line in ``--describe`` and under one help heading.
+
+    :returns: None; assertions compare help and contract with the catalog entry.
+    """
+    declared = list(CATALOG.COMMANDS[CLI.COMMAND][CREDENTIALS_FIELD])
+
+    help_text, contract = _help_and_contract(CLI.COMMAND)
+
+    schema = json.loads(COMMAND_CONTRACT_SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(contract)
+    assert contract[CREDENTIALS_FIELD] == declared
+    assert help_text.count(CREDENTIALS_HEADING) == 1
+    positions = [
+        help_text.index(" ".join(text.split()))
+        for text in (DESCRIPTION_HEADING, CREDENTIALS_HEADING, *declared)
+    ]
+    positions.append(help_text.index(EXAMPLES_HEADING))
+    assert positions == sorted(positions)
+
+
+def test_command_without_catalog_credentials_has_no_credentials_block() -> None:
+    """Omit the ``credentials`` key and the help heading when the catalog has none.
+
+    :returns: None; assertions inspect the mirror command's help and contract.
+    """
+    assert CREDENTIALS_FIELD not in CATALOG.COMMANDS[MIRROR_COMMAND]
+
+    help_text, contract = _help_and_contract(MIRROR_COMMAND)
+
+    assert DESCRIPTION_HEADING in help_text
+    assert CREDENTIALS_HEADING not in help_text
+    assert CREDENTIALS_FIELD not in contract
