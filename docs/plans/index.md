@@ -27,6 +27,7 @@ The [CI11-TOOLS plan](../phases/CI11-TOOLS.md) distinguishes installed commands 
 | [CI13][ci13] | [Active][exec-ci13] | Probe/historical chain proof → interruption/current-chain job | [Readiness][ci13-gates] |
 | [CI14][ci14] | [Active][exec-ci14] | Qualified mirror → approved Helm Agent delivery | [Connections][ci14-gates] |
 | [CI15][ci15] | [Active][exec-ci15] | Qualified baseline → remaining naming/Conda/ARC/executors | [Runners][ci15-gates] |
+| [CI16][ci16] | [Active][exec-ci16] | No OLM code → enable operator, apply shipped resources | [Operator][ci16-gates] |
 
 The ExecPlans retain each phase's existing decisions and requirement boundaries. Source-phase status prose is
 reconciled without changing normative requirements.
@@ -87,6 +88,7 @@ The [portability gate][portability] and [endpoint gate][endpoints] retain their 
 [exec-ci11]: ../exec-plans/active/ci11-tool-delivery.md
 [exec-ci14]: ../exec-plans/active/ci14-gitlab-connections.md
 [exec-ci15]: ../exec-plans/active/ci15-runner-workflows.md
+[exec-ci16]: ../exec-plans/active/ci16-olm-operator.md
 [exec-ci12]: ../exec-plans/completed/ci12-node-onboarding.md
 [exec-ci13]: ../exec-plans/active/ci13-image-build-readiness.md
 [exec-toolbelt]: ../exec-plans/active/gitlab-toolbelt-plan.md
@@ -114,6 +116,8 @@ The [portability gate][portability] and [endpoint gate][endpoints] retain their 
 [ci14-gates]: ../phases/CI14-GITLAB-CONNECTIONS.md#gates
 [ci15]: ../phases/CI15-RUNNER-WORKFLOWS.md
 [ci15-gates]: ../phases/CI15-RUNNER-WORKFLOWS.md#gates
+[ci16]: ../phases/CI16-OLM-OPERATOR.md
+[ci16-gates]: ../phases/CI16-OLM-OPERATOR.md#gates
 [toolbelt-gates]: ../exec-plans/active/gitlab-toolbelt-plan.md#gates-and-proof-per-block
 [hooks-gates]: ../exec-plans/active/skill-session-hook.md#gates
 [gitlab-targets-gates]: ../exec-plans/active/gitlab-private-public-targets.md#concrete-steps

@@ -1,21 +1,21 @@
 {
-  "captured_at": "2026-11-11T07:49:20.928679+00:00",
+  "captured_at": "2026-11-21T08:26:40.699903+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
   },
   "errors": [],
-  "execution_host": "receipt-proof-j855j",
+  "execution_host": "ci15-guard-live-3882722",
   "filters": {
     "create_if_absent": true,
-    "destination": "spyroot/ci-skills-image-adoption-mirror-proof",
+    "destination": "spyroot/test-mirror-push",
     "operation": "sync",
     "project": "hott/test-mirror-push"
   },
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "2a9f4be0e68ce78900cb064b89d77883ff835cd3e6517900745e2cf40af0d2f3",
+  "plan_digest": "2a1f2fea4b7101c658fc202e3a18b9f33a34c36e08963242ae6a80e11b8b34f4",
   "records": [
     {
       "action": "APPLIED",
@@ -23,7 +23,7 @@
         "destination": {
           "host": "github.com",
           "id": null,
-          "path": "spyroot/ci-skills-image-adoption-mirror-proof"
+          "path": "spyroot/test-mirror-push"
         },
         "destination_refs": {
           "count": 0,
@@ -36,8 +36,8 @@
           "path": "hott/test-mirror-push"
         },
         "source_refs": {
-          "count": 2,
-          "sha256": "e2cd0151069390ba6094373f0cd8bc262b9c7b3f09bf0481e39dd580aa48b63b"
+          "count": 5,
+          "sha256": "b1e38c7321f2a2317c5d3724af65997a6437099c8c87acd794cbba59fda5bfd9"
         }
       },
       "callback": "gitlab_mirror",
@@ -47,20 +47,20 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1453678538,
-        "path": "spyroot/ci-skills-image-adoption-mirror-proof"
+        "id": 1466337674,
+        "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
-        "count": 2,
-        "sha256": "e2cd0151069390ba6094373f0cd8bc262b9c7b3f09bf0481e39dd580aa48b63b"
+        "count": 5,
+        "sha256": "b1e38c7321f2a2317c5d3724af65997a6437099c8c87acd794cbba59fda5bfd9"
       },
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 21,
+        "id": 23,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-11T07:48:50.983Z",
+        "last_successful_update_at": "2026-11-21T08:26:10.461Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -72,11 +72,11 @@
         "path": "hott/test-mirror-push"
       },
       "source_refs": {
-        "count": 2,
-        "sha256": "e2cd0151069390ba6094373f0cd8bc262b9c7b3f09bf0481e39dd580aa48b63b"
+        "count": 5,
+        "sha256": "b1e38c7321f2a2317c5d3724af65997a6437099c8c87acd794cbba59fda5bfd9"
       },
       "verified": true,
-      "verified_source_ref_count": 2
+      "verified_source_ref_count": 5
     }
   ],
   "routing": {
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "360aa6b004e43ad69a177fc191e83829f19068608b8d830a7119517533d1c38e",
+    "digest": "3b3a45e144e27d90119faab14a507d65b74ab5a783f6c0730c926235cb55b24d",
     "file_count": 276,
-    "functional_digest": "f7b62b5b6760b94c6b2d8995233c294cccc79328aab733c9156581ebf681eea5",
+    "functional_digest": "856b17d44475818b042ac7016ba92744bb50b2807c099a12f30a84db2422ccea",
     "revision": {
       "source": "installer_record",
-      "value": "ce382b671da33287d7ddeb6f7b8c7b49ec0f02ce",
+      "value": "388272292655fff293b6a5f727058ee161253054",
       "verified": true
     }
   },
@@ -108,5 +108,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "env:CI_SKILLS_TARGET;argv:--gitlab=private",
-  "tested_revision": "ce382b671da33287d7ddeb6f7b8c7b49ec0f02ce"
+  "tested_revision": "388272292655fff293b6a5f727058ee161253054"
 }
