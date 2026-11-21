@@ -131,6 +131,11 @@ def _require_manager_resources_absent(
         raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
 
 
+def _confirmed_absent_manager_delete(state: GitLabRunnerManagerState) -> bool:
+    args = getattr(state, "args", None)
+    return getattr(args, "action", None) == "delete" and not state.found_scopes
+
+
 def present_manager_cleanup(
     callback: AbstractCallback[GitLabRunnerManagerState, SkillAction],
 ) -> DeferredCallback[GitLabRunnerManagerState, SkillAction]:
@@ -472,11 +477,13 @@ class DeleteManagerRunner(ScopedRunnerCallback):
     child_type = DeleteRunner
 
     def run(self) -> JSONObject:
-        """Run shared deletion only for a scope that was present at confirmation.
+        """Skip deletion for a confirmed absent standalone delete scope.
 
         :returns: Native deletion evidence, or empty evidence before absent recheck.
         """
-        return super().run() if self.manager_state.found_scopes else {}
+        if _confirmed_absent_manager_delete(self.manager_state):
+            return {}
+        return super().run()
 
 
 def workload_action(workflow: GitLabRunnerManagerAction) -> ManagerWorkloadAction:
@@ -504,7 +511,7 @@ class ObserveManagerNamespace(K8SCallback[ManagerWorkloadAction]):
         previous = self.state.runner_scopes[
             scope_key(ScopePurpose.MANAGER, scope.namespace)
         ]
-        absent = not self.state.found_scopes
+        absent = _confirmed_absent_manager_delete(self.state)
         if absent:
             if self.state.resolved_run_id != scope.run_id or RunScope.find_all(
                 self.kubernetes, scope.run_id
