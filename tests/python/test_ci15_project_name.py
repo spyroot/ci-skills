@@ -209,15 +209,31 @@ def test_project_name_github_confirmation_binds_override_behind_exact_fields(
     assert action.repository_identity.reference == selected.repository
 
 
+@pytest.fixture
+def legacy_toolbox_spec(tmp_path: Path) -> callback_tests.TOOLBOX.ToolboxSpec:
+    """Load the immutable legacy toolbox example through its installed schema.
+
+    :param tmp_path: Test-owned directory for the serialized fixture.
+    :returns: Explicit toolbox fields consumed by the chain and BuildConfig tests.
+    """
+    source = tmp_path / "toolbox.json"
+    source.write_text(chain_tests.LEGACY_SPEC_BASELINE, encoding="utf-8")
+    return callback_tests.TOOLBOX.ToolboxSpec.from_path(source)
+
+
 @pytest.mark.parametrize(("reference", "project_name"), CONSUMERS)
 def test_project_name_chain_forwards_naming_to_existing_runner_and_manager_adapters(
-    tmp_path: Path, reference: str, project_name: str
+    tmp_path: Path,
+    reference: str,
+    project_name: str,
+    legacy_toolbox_spec: callback_tests.TOOLBOX.ToolboxSpec,
 ) -> None:
     """One outer naming choice reaches both producers while explicit toolbox fields survive.
 
     :param tmp_path: Unused test-owned path for the runner token adapter.
     :param reference: Actual provider project retained through both adapters.
     :param project_name: Outer consumer naming base.
+    :param legacy_toolbox_spec: Explicit fields shared with build-reuse coverage.
     """
     action = chain_tests._prepared_action()
     action.gitlab_selection = (contract_tests.PROJECT_KIND, reference)
@@ -225,7 +241,9 @@ def test_project_name_chain_forwards_naming_to_existing_runner_and_manager_adapt
     action.args.project = reference
     action.args.project_name = project_name
     action.args.namespace = None
-    specification = vars(action.toolbox.spec).copy()
+    action.toolbox_spec = legacy_toolbox_spec
+    specification = vars(legacy_toolbox_spec).copy()
+    action._select_names()
     action._prepare_scope()
     state = action.state
     state.created_runner_id = manager_tests.RUNNER_ID
@@ -240,9 +258,9 @@ def test_project_name_chain_forwards_naming_to_existing_runner_and_manager_adapt
     assert runner.project == manager.project == reference
     assert action.manager_scope.namespace.startswith(project_name + "-")
     assert action.resolved_runner_name.value.startswith(project_name + "-")
-    assert vars(action.toolbox.spec) == specification
+    assert vars(action.toolbox_spec) == specification
     assert action.repository_identity.reference == reference
-    assert list(tmp_path.iterdir()) == []
+    assert list(tmp_path.iterdir()) == [legacy_toolbox_spec.source_path]
 
 
 @pytest.mark.parametrize(
@@ -407,13 +425,15 @@ def test_project_name_probe_rejects_blank_even_with_explicit_namespace(
 )
 def test_project_name_build_reuse_keeps_every_original_proof_requirement(
     changed: str | None,
+    legacy_toolbox_spec: callback_tests.TOOLBOX.ToolboxSpec,
 ) -> None:
     """Renaming support must not turn a partially verified BuildConfig into image reuse.
 
     :param changed: Sole invariant mutated from the immutable valid native build baseline.
+    :param legacy_toolbox_spec: Explicit inputs to the standalone build workflow.
     """
     toolbox = callback_tests.TOOLBOX
-    spec = chain_tests._prepared_action().toolbox.spec
+    spec = legacy_toolbox_spec
     digest = "sha256:" + "a" * 64
     lookup = Mock(return_value=digest)
     action = toolbox.BuildAction(

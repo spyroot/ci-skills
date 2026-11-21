@@ -161,6 +161,8 @@ server = "https://api.cluster.example.com:6443"
 url = "https://harbor.example.test"
 project = "example"
 credential_file = "harbor.credentials"
+# The chain copies this existing artifact within the selected Harbor project.
+# reference_toolbox = "ci-skills-toolbox:stable"
 # Or replace credential_file with both existing file references:
 # username_file = "harbor.identity"
 # password_file = "harbor.secret"

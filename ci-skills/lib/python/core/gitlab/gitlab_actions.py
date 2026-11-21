@@ -16,7 +16,8 @@ from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Optional, Union
+from types import MappingProxyType
+from typing import Final, Optional, Union
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.catalog import PROJECT_NAMING_OPTIONS, ROUTED_RESULT_SCHEMA_VERSION
@@ -24,15 +25,69 @@ from lib.python.core.cli import output_mode, parser
 from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
-from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    copy_json,
+    is_json_value,
+    json_object,
+)
 from lib.python.core.logging import log_event
-from lib.python.core.portable import write_portable_receipt
+from lib.python.core.portable import portable, write_portable_receipt
 from lib.python.core.report import emit, plan_digest
 from lib.python.core.runner_identity import validate_project_name
 from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import GitLabOperationTarget, GitLabRoute
 from lib.python.sys.status import BLOCKED, PASS, exit_code
+
+RUNNER_CONTROLS: Final = MappingProxyType(
+    {
+        "rename-tag": "tag_list",
+        "bind-project": "locked",
+        "set-protected": "access_level",
+        "set-name": "description",
+    }
+)
+
+
+def runner_control_plan_digest(target: JSONObject, intent: JSONObject) -> str:
+    """Fingerprint canonical runner control inputs that receipts can reproduce.
+
+    :param target: Resolved authority metadata or a receipt containing it.
+    :param intent: Runner control inputs or a public plan containing them.
+    :returns: SHA-256 digest of the same inputs in native and portable receipts.
+    """
+    fields: JSONObject = {
+        key: target.get(key)
+        for key in (
+            "origin",
+            "target_file",
+            "target_source",
+            "tested_revision",
+            ROUTING_RESULT_KEY,
+        )
+    }
+    return plan_digest(
+        json_object(
+            portable(
+                {
+                    **fields,
+                    **{
+                        key: intent.get(key)
+                        for key in (
+                            "operation",
+                            "target_kind",
+                            "target_reference",
+                            "resource_id",
+                            "body_sha256",
+                            "runner_control",
+                        )
+                    },
+                }
+            )
+        )
+    )
 
 
 class ActionError(ValueError):
@@ -85,7 +140,7 @@ class ActionPlan(SkillAction):
     :param token_out: Optional one-time sink for a created runner token.
     :param revision: Optional exact source revision bound to the action.
     :param project_ids: Optional project IDs selected for runner assignment.
-    :param runner_snapshot: Optional before-state bound to runner deletion.
+    :param runner_snapshot: Optional before-state bound to runner deletion or an exact runner update.
     :param project_name: Optional consumer naming input bound privately into confirmation.
     :param routing: Route of the GitLab table the target read. ``ActionPlan`` binds it into
         ``plan_digest``, and ``_result`` copies it into ``routing``. The value is
@@ -155,7 +210,7 @@ class ActionPlan(SkillAction):
     .. attribute :: runner_snapshot
         :type: Optional[JSONObject]
 
-        Optional before-state bound to runner deletion.
+        Optional before-state bound to runner deletion or an exact runner update.
 
     .. attribute :: routing
         :type: Optional[GitLabRoute]
@@ -196,6 +251,26 @@ class ActionPlan(SkillAction):
         :raises ValueError: If canonical JSON encoding rejects the plan's structure.
         :raises RecursionError: If supplied containers are cyclic or excessively nested.
         """  # noqa: DOC502 - Shared canonical plan serialization propagates failures.
+        if self.kind == "gitlab_runner" and self.operation in RUNNER_CONTROLS:
+            return runner_control_plan_digest(
+                {
+                    "origin": self.origin,
+                    "target_file": self.target_file,
+                    "target_source": self.target_source,
+                    "tested_revision": self.revision,
+                    ROUTING_RESULT_KEY: self.routing.as_dict()
+                    if self.routing
+                    else None,
+                },
+                {
+                    "operation": self.operation,
+                    "target_kind": self.target_kind,
+                    "target_reference": self.target_reference,
+                    "resource_id": self.resource_id,
+                    "body_sha256": self.request_digest,
+                    "runner_control": self.runner_snapshot,
+                },
+            )
         data = {
             "schema_version": "1.0",
             "kind": self.kind,
@@ -218,6 +293,16 @@ class ActionPlan(SkillAction):
         if self.routing is not None:
             data[ROUTING_RESULT_KEY] = self.routing.as_dict()
         return plan_digest(data)
+
+    @property
+    def request_digest(self) -> str:
+        """Fingerprint intent without exposing the underlying request body.
+
+        :returns: SHA-256 digest of the body and any runner control name override.
+        """
+        if self.operation in RUNNER_CONTROLS and self.project_name is not None:
+            return plan_digest({"body": self.body, "project_name": self.project_name})
+        return plan_digest(self.body)
 
     def verified_target_id(
         self, session: BoundGitLabSession, access: JSONObject
@@ -269,12 +354,18 @@ class ActionPlan(SkillAction):
                         and self.target_kind == "group"
                         and self.project_ids is None
                     )
-                    or (self.operation == "delete" and self.runner_snapshot is None)
+                    or (
+                        (
+                            self.operation == "delete"
+                            or self.operation in RUNNER_CONTROLS
+                        )
+                        and self.runner_snapshot is None
+                    )
                     or pending_runner_identity(self)
                 )
             ),
             "fields": sorted(self.body),
-            "body_sha256": plan_digest(self.body),
+            "body_sha256": self.request_digest,
             "plan_digest": self.digest,
             "one_time_sink_required": self.operation == "create"
             and self.kind == "gitlab_runner",
@@ -289,6 +380,12 @@ class ActionPlan(SkillAction):
                 raise ActionError("runner_tags_invalid_shape")
         if self.kind == "gitlab_runner" and self.operation == "delete":
             result["runner_snapshot"] = self.runner_snapshot
+        if (
+            self.kind == "gitlab_runner"
+            and self.operation in RUNNER_CONTROLS
+            and self.runner_snapshot is not None
+        ):
+            result["runner_control"] = self.runner_snapshot
         return result
 
 
@@ -694,7 +791,15 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "gitlab_wiki": ("create", "update"),
         "gitlab_repository": ("commit",),
         "gitlab_merge_request": ("create", "update"),
-        "gitlab_runner": ("assign", "create", "delete", "get", "list", "tag"),
+        "gitlab_runner": (
+            "assign",
+            "create",
+            "delete",
+            "get",
+            "list",
+            "tag",
+            *RUNNER_CONTROLS,
+        ),
     }
     result.set_defaults(kind=kind)
     result.add_argument(
@@ -778,12 +883,12 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
     result.add_argument(
         "--live-plan",
         action="store_true",
-        help="read group assignment or runner deletion identity for an apply-ready plan",
+        help="read target and runner state for an apply-ready plan",
     )
     result.add_argument(
         "--runner-id",
         type=int,
-        help="numeric runner ID; required for assign, tag, and delete",
+        help="numeric runner ID; required for existing-runner mutations",
     )
     result.add_argument(
         "--job-id", type=int, help="get the runner related to one project job ID"
@@ -794,13 +899,15 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
         help="runner scope for create",
     )
     result.add_argument(
-        "--description", action=SingleValue, help="server-visible runner recovery key"
+        "--description",
+        action=SingleValue,
+        help="runner description for create, reads, or set-name",
     )
     result.add_argument(
         "--protected",
         choices=tuple(PROTECTION_VALUES),
         action=SingleValue,
-        help="create: protected or unprotected runner refs; omission uses provider default",
+        help="create or set-protected: exact protection setting; create omission uses provider default",
     )
     result.add_argument(
         "--limit",
@@ -830,6 +937,8 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
         default=[],
         help="runner tag for create or tag; repeat to add several",
     )
+    result.add_argument("--from-tag", action=SingleValue, help="old tag for rename-tag")
+    result.add_argument("--to-tag", action=SingleValue, help="new tag for rename-tag")
     result.add_argument(
         "--token-out", metavar="PATH", help="create-only one-time token destination"
     )

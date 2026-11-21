@@ -1,63 +1,80 @@
-# Build, publish and configure a toolbox-backed runner
+# Publish a prepared toolbox and configure its runner
 
-`bin/image_build_readiness.py chain` builds a toolbox, publishes it to Harbor, and creates/configures a GitLab
-runner and manager using that image. The runner remains available to the caller after the command succeeds.
-Use [the separate probe](podman-readiness.md) for Kubernetes-only runtime proof.
+`bin/image_build_readiness.py chain` copies the target's prepared CI toolbox
+to a consumer repository in Harbor and configures a GitLab runner with the
+published image digest. The runner and its Kubernetes namespace remain
+available after the command succeeds. Use the [Podman probe](podman-readiness.md)
+for a standalone Kubernetes runtime check.
 
-## Inputs
+## Prepare the target once
 
-Configure Kubernetes, GitLab and Harbor in your [target file](access.md). The chain uses `kubectl`, `oc`, `glab`
-and `skopeo` on the execution host; its toolbox build uses OpenShift. The standalone probe does not require
-GitLab or Harbor. Missing chain provider configuration produces a blocked result before mutation.
-The selected identities need OpenShift Secret/BuildConfig/Build create/read/delete and namespace permissions,
-GitLab runner creation/read access, and Harbor pull/push access. SCC permissions are
-described below; a live plan does not prove every subsequent write is authorized.
+Use `toolbox.py create` with the [toolbox specification](../schemas/toolbox.schema.json)
+to build and publish the shared image. Include the CI tools your jobs need,
+the runner's `gitlab-runner`, `git`, `podman`, `install` and `cat` commands,
+and Bash at `/bin/bash`. Choose an image compatible with the target workers.
 
-Supply these inputs:
+The selected Harbor table in the [target file](access.md) sets
+`reference_toolbox` to the published artifact within its configured project,
+such as `ci-skills-toolbox:stable` or the same repository pinned by digest.
+The chain reads this setting at runtime. Its identity needs pull access to
+the reference and pull and push access to the consumer repository.
+The chain also needs GitLab runner permissions and Kubernetes workload
+permissions, including [SCC access](openshift-scc.md) on OpenShift.
 
-- `--toolbox-spec PATH`: the existing [toolbox specification](../schemas/toolbox.schema.json), with
-  `gitlab-runner`, `git`, `podman`, `bash`, `install` and `cat` in `requiredCommands`, with Bash at
-  `/bin/bash`. Select an image and dependencies compatible with the worker's architecture; the chain builds and
-  publishes this toolbox itself.
-- `--project GROUP/PROJECT` or `--group GROUP`: the runner's owning project or group.
-- `--runner-label LABEL`, `--runner-description TEXT`: the runner tag and description.
-  Repeat `--runner-label` for additional tags.
+## Name and select the consumer
 
-See [runner management](gitlab-runner-manager.md) for the shell runner's workload and explicit deletion, and
-[SCC access](openshift-scc.md) for its OpenShift authorization. The chain does not run a probe or consumer CI job.
+`<runner_name> = <project_name> = <toolbox_name>`. The caller's
+`--project-name` takes precedence over the selected repository's leaf name.
+For `team/sample_project`, GitLab's default runner description and scheduling
+tag and Harbor's consumer repository and default image tag are all
+`sample_project`. Kubernetes uses the DNS-safe base `sample-project`, with
+existing ownership suffixes where needed. The GitLab project selection and
+the configured Harbor host and project retain their original identities.
+
+`--namespace` selects an existing caller-owned runtime namespace. An optional
+`--toolbox-spec` retains explicit publication fields and reports the spec's
+build namespace and app without editing those resources. If an explicit
+runner description, scheduling tags or toolbox repository conflicts with the
+consumer name, the live plan shows the explicit and expected values and
+blocks apply. For later changes to a runner record, use the
+[runner controls](gitlab-runner.md#manage-a-runner-record).
 
 ## Plan and apply
 
-`CI_SKILLS_ROOT` is the installed skill directory returned by the installer. The example uses a project runner;
-replace `team/project`, the toolbox file, description and label with your selections.
+`CI_SKILLS_ROOT` is the installed skill directory reported by the installer.
+Run from the consumer repository root. Without an explicit `--binding`, the
+[target resolver](access.md#where-the-target-file-comes-from) uses
+`CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
+`~/.ci-skills/target.toml`. The selected GitLab route identifies the
+Kubernetes and Harbor tables. Those tables provide the Kubernetes context,
+API server, kubeconfig selection, and prepared Harbor toolbox. Relative
+credential paths resolve beside the selected target file.
+
+`image_build_readiness.py --describe --json` gives the chain inputs and
+result schema. `reference.py image_build_readiness.py --json` lists the
+chain's related tools and references.
+
+A project path is enough to select a project runner. A group runner takes
+`--group` and `--project-name`.
 
 ```bash
-chain_args=(
-  chain --project team/project
-  --toolbox-spec ./runner-toolbox.json
-  --runner-description toolbox-runner --runner-label container-builds
-)
-conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py" \
-  "${chain_args[@]}" --live-plan --json
-# Use that plan's plan_digest and repeat the same inputs.
-conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py" \
-  "${chain_args[@]}" --apply --confirm-plan DIGEST_FROM_PLAN --json
+chain=(conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py")
+"${chain[@]}" chain --project team/sample_project --dry-run --json
+"${chain[@]}" chain --project team/sample_project --live-plan --json
+"${chain[@]}" chain --project team/sample_project --apply --confirm-plan DIGEST_FROM_PLAN --json
 ```
 
-Use `--node NAME` to select a worker and `--namespace NAME` to use an existing runtime namespace.
-Without `--namespace`, the command creates the runner's namespace and returns its name. `--help` lists the
-runtime resource options. `--dry-run` reads no provider API and cannot authorize apply.
+The dry run reads no provider API. The live plan resolves the Harbor source,
+the current destination tag and the Ready worker. Apply checks the live plan
+again at the publication boundary and uses the exact published digest in the
+runner deployment. Keep publishers of the same destination tag serialized.
+The registry copy API has no atomic compare-and-set for an external writer
+that changes the tag during publication. The
+[result schema](../schemas/results/image-build-readiness.schema.json) carries
+the plan, publication and runner deployment evidence.
 
-## Results and lifetime
-
-The [result schema](../schemas/results/image-build-readiness.schema.json) distinguishes `operation: chain`
-from `probe`. The chain returns the existing build, `HarborPush` publication and runner deployment records.
-It ends at `DeployManagerRunner`, using the published toolbox image; there is no separate verification stage.
-
-The successful chain retains the runner, manager, required SCC binding and runtime namespace. The published
-image, reusable toolbox BuildConfig and build namespace also remain. Removal uses the existing explicit runner
-and toolbox lifecycle commands; success does not trigger teardown. A failed or incomplete chain reports
-`BLOCKED` with the observed records.
-
-Online/runtime proof, consumer-job execution and disposal of live-test resources belong to external acceptance
-through installed-skill invocations by the consumer agent, not this combo.
+The chain preserves existing runner and namespace identities. If the selected
+scope already has a runner manager, reuse that runner through
+[runner management](gitlab-runner-manager.md). A failed or incomplete chain
+reports `BLOCKED` and any cleanup observations. Consumer job execution and
+disposal of test resources belong to live acceptance.
