@@ -259,6 +259,9 @@ def test_delete_applied_record_reports_what_the_before_read_found(
     assert record[BEFORE_FIELD] == expected
     assert record[AFTER_FIELD] == recorded[AFTER_FIELD]
     assert record[OWNERSHIP_FIELD] == recorded[OWNERSHIP_FIELD]
+    assert EVIDENCE.check_agent_receipt(_result(invocation)) == (
+        () if registered else (EVIDENCE_TEST.DELETE_IDENTITY_UNVERIFIED,)
+    )
 
 
 def _ownership_replaced(invocation: SimpleNamespace) -> None:

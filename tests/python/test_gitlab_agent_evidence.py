@@ -594,6 +594,9 @@ def test_live_delete_applied_receipt_rejects_one_broken_invariant(
             (DELETE_IDENTITY_UNVERIFIED,),
             id="replica-set-and-secret-gone",
         ),
+        pytest.param(
+            (POD_KIND,), (DELETE_IDENTITY_UNVERIFIED,), id="recorded-pod-gone"
+        ),
     ),
 )
 def test_delete_applied_accepts_runtime_rows_already_gone_before_delete(
@@ -617,6 +620,49 @@ def test_delete_applied_accepts_runtime_rows_already_gone_before_delete(
     record[BEFORE_FIELD][RESOURCES_FIELD] = rows
 
     assert EVIDENCE.check_agent_receipt(receipt) == expected
+
+
+def test_delete_applied_refuses_absent_runtime_row_the_run_did_not_create() -> None:
+    """Refuse the ABSENT exception for a ReplicaSet row not marked created by the run.
+
+    Only an object this run created may already be gone before the delete. A row
+    with ``created`` false must read PRESENT before and after, so a ReplicaSet row
+    read ABSENT before is refused.
+    """
+    receipt = json.loads(DELETE_APPLIED_RECEIPT)
+    record = _record(receipt)
+    for rows in (_owned_rows(record), record[AFTER_FIELD][RESOURCES_FIELD]):
+        (row,) = _rows_of_kind(rows, REPLICA_SET_KIND)
+        row[CREATED_FIELD] = False
+    (after_row,) = _rows_of_kind(record[AFTER_FIELD][RESOURCES_FIELD], REPLICA_SET_KIND)
+    after_row[STATE_FIELD] = TERMS.PRESENT
+    before = [dict(item) for item in _owned_rows(record)]
+    (before_row,) = _rows_of_kind(before, REPLICA_SET_KIND)
+    before_row[STATE_FIELD] = TERMS.ABSENT
+    record[BEFORE_FIELD][RESOURCES_FIELD] = before
+
+    assert EVIDENCE.check_agent_receipt(receipt) == (DELETE_IDENTITY_UNVERIFIED,)
+
+
+@pytest.mark.parametrize("kind", (REPLICA_SET_KIND, LEASE_KIND))
+def test_connect_applied_receipt_refuses_runtime_row_absent_after_connect(
+    kind: str,
+) -> None:
+    """Keep connect evidence strict: every recorded row reads PRESENT after connect.
+
+    The ABSENT exception for ReplicaSet and Lease rows applies only to the before
+    read of a delete.
+
+    :param kind: Runtime kind whose recorded row reads ABSENT in ``after``.
+    """
+    receipt = json.loads(CONNECT_APPLIED_RECEIPT)
+    record = _record(receipt)
+    rows = [dict(item) for item in _owned_rows(record)]
+    (row,) = _rows_of_kind(rows, kind)
+    row[STATE_FIELD] = TERMS.ABSENT
+    record[AFTER_FIELD][RESOURCES_FIELD] = rows
+
+    assert EVIDENCE.check_agent_receipt(receipt) == (CONNECTION_UNVERIFIED,)
 
 
 def test_live_resumed_delete_receipt_is_not_tracked_delete_evidence() -> None:

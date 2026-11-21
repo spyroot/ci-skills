@@ -700,7 +700,7 @@ def test_tracked_delete_accepts_recorded_runtime_rows_already_gone(
 ) -> None:
     """A first delete does not require recorded ReplicaSet or Lease objects to exist.
 
-    delete.py excludes ``_RUNTIME_KINDS`` from the rows that must be present before
+    delete.py excludes ``terms.AGENT_RUNTIME_KINDS`` from the rows that must be present before
     the first write; it deletes the ones still present and reports every one ABSENT.
     ``AgentCleanup.present`` names only the objects read present before the writes.
 
@@ -718,7 +718,7 @@ def test_tracked_delete_accepts_recorded_runtime_rows_already_gone(
     deleted = {item.args for item in case.kube.delete.call_args_list}
     assert deleted.isdisjoint(missing)
     for key, row in case.rows.items():
-        if key[0] in (REPLICA_SET_KIND, LEASE_KIND) and key not in missing:
+        if key[0] in TERMS.AGENT_RUNTIME_KINDS and key not in missing:
             case.kube.delete.assert_any_call(*key, expected_uid=row[UID])
     assert {_identity(row): row[STATE] for row in result.resources} == {
         key: ABSENT if row["created"] else PRESENT for key, row in case.rows.items()

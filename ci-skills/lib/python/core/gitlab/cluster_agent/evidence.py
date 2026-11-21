@@ -171,8 +171,12 @@ def _connected_snapshot(
         and _resource_identities(snapshot) == _resource_identities(owner)
         and all(
             item.get("state") == PRESENT
-            or (item.get("kind") in absent_kinds and item.get("state") == ABSENT)
-            for item in _resource_index(snapshot).values()
+            or (
+                kind in absent_kinds
+                and item.get("created") is True
+                and item.get("state") == ABSENT
+            )
+            for (kind, _, _), item in _resource_index(snapshot).items()
         )
     )
 
