@@ -11,7 +11,6 @@ import json
 from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import pytest
@@ -36,10 +35,12 @@ from test_image_build_chain import (
     NODE,
     PODMAN,
     READINESS,
+    TOOLBOX_ACTIONS,
     TOOLBOX_IMAGE,
     ChainCluster,
     JournalCallback,
     _args,
+    _harbor,
     _lifecycle_executor,
     _prepared_action,
     _target,
@@ -51,9 +52,12 @@ MODEL = import_script_module("lib.python.core.kubernetes.image_build_chain.model
 STATUS = import_script_module("lib.python.sys.status")
 
 if TYPE_CHECKING:
+    from argparse import Namespace
+
     from lib.python.core.json_types import JSONObject
     from lib.python.core.kubernetes.image_build_chain import ImageBuildChainState
     from lib.python.core.target import Target
+    from lib.python.core.toolbox_actions import WorkflowAction
 
 
 def _validator() -> Draft202012Validator:
@@ -297,16 +301,25 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         return target
 
     monkeypatch.setattr(MODEL, "bind_sources", bind)
-    monkeypatch.setattr(
-        MODEL,
-        "WorkflowAction",
-        lambda *_a, **_k: SimpleNamespace(
+
+    def toolbox(args: Namespace, **kwargs: object) -> WorkflowAction:
+        """Construct the real toolbox action from the chain's toolbox inputs.
+
+        :param args: Toolbox namespace built by the chain model.
+        :param **kwargs: Shared chain state and naming base passed by the chain model.
+        :returns: Toolbox action holding the fixture specification without file reads.
+        """
+        selected = TOOLBOX_ACTIONS.WorkflowAction(
+            args,
             spec=template.toolbox.spec,
-            runner=template.toolbox.runner,
-            resolved_base=None,
-            prepare=lambda: None,
-        ),
-    )
+            resolved_base=template.toolbox.resolved_base,
+            **kwargs,
+        )
+        selected.runner = template.toolbox.runner
+        monkeypatch.setattr(selected, "prepare", lambda: None)
+        return selected
+
+    monkeypatch.setattr(MODEL, "WorkflowAction", toolbox)
     monkeypatch.setattr(
         MODEL,
         "prepare_start_plan",
@@ -321,6 +334,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         """
         state.selected_node = NODE
         state.kubernetes = ChainCluster()
+        state.harbor = _harbor()
 
     def workflow(action):
         assert not explicit, "dry-run entered provider callbacks"

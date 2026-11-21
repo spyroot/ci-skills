@@ -39,6 +39,7 @@ SCOPES = import_script_module("lib.python.core.runner_scope")
 IDENTITY = import_script_module("lib.python.core.runner_identity")
 TARGET = import_script_module("lib.python.core.target")
 STATUS = import_script_module("lib.python.sys.status")
+TOOLBOX = import_script_module("lib.python.core.toolbox")
 TOOLBOX_ACTIONS = import_script_module("lib.python.core.toolbox_actions")
 VERIFICATION = import_script_module(
     "lib.python.core.kubernetes.image_build_chain.verification"
@@ -87,6 +88,7 @@ NAMESPACE_KIND: Final = "Namespace"
 CLUSTER_NAMESPACE: Final = ""
 RUNNER_ID = 73
 TOOLBOX_IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
+EMPTY_DOCKER_CONFIG: Final = b'{"auths":{}}'
 
 
 def _read_nodes(*args: str) -> JSONObject:
@@ -260,6 +262,18 @@ def _target() -> TARGET.Target:
     )
 
 
+def _harbor() -> SimpleNamespace:
+    """Build the authenticated Harbor boundary read by toolbox candidate selection.
+
+    :returns: Target registry, private config, and a candidate tag with no digest.
+    """
+    return SimpleNamespace(
+        target=_target().harbor,
+        dockerconfig=EMPTY_DOCKER_CONFIG,
+        digest=lambda _repository, _reference: None,
+    )
+
+
 def _runner_plan() -> ActionPlan:
     """Build the existing runner-scope plan without a consumer pipeline.
 
@@ -311,26 +325,32 @@ def _prepared_action(
         action.args.runner_description, IDENTITY.NameSource.EXPLICIT
     )
     action.manager_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, False)
-    action.toolbox = SimpleNamespace(
-        resolved_base=None,
-        repository="toolbox/ci",
-        spec=SimpleNamespace(
-            fingerprint="sha256:toolbox-spec",
-            base_image="registry.example.test/base@sha256:" + "e" * 64,
-            image_repository="toolbox/ci",
-            image_tag="unit",
-            namespace=CALLER_NAMESPACE,
-            app="ci13-toolbox",
-        ),
-        runner=RUNNER.RunnerAction(
-            namespace=CALLER_NAMESPACE,
-            name="ci13-toolbox",
-            source_root="",
-            labels=(),
-            timeout=action.args.timeout,
-        ),
-    )
     action.mode = PODMAN.ProbeMode.APPLY if apply else PODMAN.ProbeMode.LIVE_PLAN
+    action.explicit_description = action.args.runner_description
+    action.explicit_tags = tuple(action.args.runner_label)
+    specification = SimpleNamespace(
+        fingerprint="sha256:toolbox-spec",
+        base_image="registry.example.test/base@sha256:" + "e" * 64,
+        image_repository="toolbox/ci",
+        image_tag="unit",
+        namespace=CALLER_NAMESPACE,
+        app="ci13-toolbox",
+    )
+    action.toolbox = TOOLBOX_ACTIONS.WorkflowAction(
+        action._toolbox_args(),
+        spec=specification,
+        resolved_base=specification.base_image,
+        context=action.state,
+        naming_base=action.naming_base,
+    )
+    action.toolbox.repository_identity = action.repository_identity
+    action.toolbox.runner = RUNNER.RunnerAction(
+        namespace=CALLER_NAMESPACE,
+        name="ci13-toolbox",
+        source_root="",
+        labels=(),
+        timeout=action.args.timeout,
+    )
     action.state.args = action.args
     return action
 
@@ -444,6 +464,7 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     action.args.confirm_plan = confirmation
     action.state.selected_node = NODE
     action.state.kubernetes = ChainCluster()
+    action.state.harbor = _harbor()
     mutations: list[str] = []
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
         [
@@ -459,6 +480,11 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     assert mutations == []
     assert not hasattr(action.state, "run_scope")
     assert not hasattr(action.state, "created_runner_id")
+    candidate = action.toolbox.build_candidate
+    assert candidate is not None
+    assert candidate.candidate_reference.startswith(
+        action.repository_identity.name + TOOLBOX.BUILD_TAG_SEPARATOR
+    )
 
 
 @pytest.mark.parametrize("outer_run_id", (None, "caller-chain-run"))
@@ -609,7 +635,7 @@ def _lifecycle_executor(
     monkeypatch.setattr(
         runner_manager.GITLAB_API, "_lock_root", lambda: tmp_path / "locks"
     )
-    state.harbor = SimpleNamespace(dockerconfig=b'{"auths":{}}')
+    state.harbor = _harbor()
     state.runner_runtime = runner_manager.CALLBACKS.RunnerRuntime(
         init_command=("/bin/true",),
         command=("gitlab-runner",),

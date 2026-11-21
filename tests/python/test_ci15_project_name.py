@@ -38,6 +38,10 @@ DEPLOY: Final = "deploy"
 PROBE: Final = "probe"
 RUNNER_KIND: Final = runner_tests.RUNNERS.RUNNER_KIND
 FIELD_PROJECT_NAME: Final = "project_name"
+BUILD_FINGERPRINT: Final = "0123456789abcdef" * 4
+SHORT_CONSUMER_BASE: Final = "consumer"
+LONG_CONSUMER_BASE: Final = "consumer-" * 10
+INVALID_CONSUMER_BASES: Final = ("", "!!!", "---")
 PARSER_CASES: Final = (
     (GITHUB, contract_tests.CREATE_ACTION),
     (contract_tests.MANAGER, DEPLOY),
@@ -479,3 +483,49 @@ def test_project_name_build_reuse_keeps_every_original_proof_requirement(
             assert result["digest"] == digest
     assert cluster.objects == protected
     assert cluster.applied == cluster.deleted == []
+
+
+@pytest.mark.parametrize(
+    "name_prefix",
+    (None, SHORT_CONSUMER_BASE, LONG_CONSUMER_BASE),
+    ids=("omitted", "short", "over-budget"),
+)
+def test_project_name_build_candidate_tag_is_bounded_and_keeps_fingerprint(
+    name_prefix: str | None,
+) -> None:
+    """A consumer base names the candidate tag without losing its content suffix.
+
+    :param name_prefix: Omitted, short, or over-budget consumer naming base.
+    """
+    toolbox = callback_tests.TOOLBOX
+    suffix = BUILD_FINGERPRINT[: toolbox.FINGERPRINT_TAG_LENGTH]
+    expected = (
+        toolbox.BUILD_TAG_PREFIX + suffix
+        if name_prefix is None
+        else name_prefix[: toolbox.DNS_LABEL_LIMIT].rstrip("-")
+        + toolbox.BUILD_TAG_SEPARATOR
+        + suffix
+    )
+
+    tag = toolbox.build_candidate_reference(BUILD_FINGERPRINT, name_prefix=name_prefix)
+
+    assert tag == expected
+    assert len(tag) <= (
+        toolbox.DNS_LABEL_LIMIT
+        + len(toolbox.BUILD_TAG_SEPARATOR)
+        + toolbox.FINGERPRINT_TAG_LENGTH
+    )
+
+
+@pytest.mark.parametrize("name_prefix", INVALID_CONSUMER_BASES)
+def test_project_name_build_candidate_tag_rejects_base_without_dns_token(
+    name_prefix: str,
+) -> None:
+    """A present consumer base that normalizes to nothing never falls back to legacy.
+
+    :param name_prefix: Consumer base with no DNS-safe characters.
+    """
+    with pytest.raises(ValueError, match="run_scope_kind_invalid"):
+        callback_tests.TOOLBOX.build_candidate_reference(
+            BUILD_FINGERPRINT, name_prefix=name_prefix
+        )

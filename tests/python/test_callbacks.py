@@ -19,7 +19,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
-from typing import TYPE_CHECKING, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Final, Optional, TypeAlias, Union
 
 import pytest
 from conftest import SKILL_ROOT, import_script_module
@@ -55,6 +55,7 @@ SKILL_STATE = import_script_module("lib.python.core.abstract.skill_state")
 TARGET = import_script_module("lib.python.core.target")
 TOOLBOX = import_script_module("lib.python.core.toolbox")
 TOOLBOX_ACTIONS = import_script_module("lib.python.core.toolbox_actions")
+TOOLBOX_CREATE_ACTION: Final = "create"
 
 
 if TYPE_CHECKING:
@@ -1438,7 +1439,7 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
             """
             return
 
-    workflow = TOOLBOX_ACTIONS.WorkflowAction(Namespace())
+    workflow = TOOLBOX_ACTIONS.WorkflowAction(Namespace(action=TOOLBOX_CREATE_ACTION))
     workflow.spec = Spec()
     workflow.resolved_base = "registry.example.test/base@sha256:" + "b" * 64
     context = DELIVERY_STATE.DeliveryState()
