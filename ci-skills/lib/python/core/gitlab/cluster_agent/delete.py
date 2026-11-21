@@ -32,7 +32,12 @@ from lib.python.core.gitlab.cluster_agent.selection import (
     ConnectSelection,
     release_name,
 )
-from lib.python.core.gitlab.cluster_agent.terms import ABSENT, DELETE, PRESENT
+from lib.python.core.gitlab.cluster_agent.terms import (
+    ABSENT,
+    AGENT_POD_LIMIT,
+    DELETE,
+    PRESENT,
+)
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.helm.native import HelmClient, HelmRelease
 from lib.python.core.helm.storage import (
@@ -49,13 +54,15 @@ from lib.python.core.json_types import (
 )
 from lib.python.core.kubernetes.agent_namespace import verify_agent_namespace_cleanup
 from lib.python.core.kubernetes.gitlab_agent import (
-    LEASE_API_VERSION,
-    LEASE_KIND,
-    REPLICA_SET_API_VERSION,
-    REPLICA_SET_KIND,
     agent_lease_name,
     read_agent_cluster_scope,
     read_agent_lease,
+)
+from lib.python.core.kubernetes.kinds import (
+    APPS_API_VERSION,
+    COORDINATION_API_VERSION,
+    LEASE_KIND,
+    REPLICA_SET_KIND,
 )
 from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
@@ -87,15 +94,14 @@ _REQUIRED_COUNTS: Final = {
 }
 _KIND_VERSIONS: Final = {
     **dict.fromkeys((*_REQUIRED_COUNTS, "Pod"), "v1"),
-    "Deployment": "apps/v1",
+    "Deployment": APPS_API_VERSION,
     "ClusterRoleBinding": "rbac.authorization.k8s.io/v1",
-    REPLICA_SET_KIND: REPLICA_SET_API_VERSION,
-    LEASE_KIND: LEASE_API_VERSION,
+    REPLICA_SET_KIND: APPS_API_VERSION,
+    LEASE_KIND: COORDINATION_API_VERSION,
 }
 # Objects the Agent workload created after install. Connect records them; delete
 # removes the ones still present and accepts the ones already gone.
 _RUNTIME_KINDS: Final = frozenset((REPLICA_SET_KIND, LEASE_KIND))
-_MAX_REPLICA_SETS: Final = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +137,11 @@ class AgentCleanup:
         :type: frozenset[str]
 
         UIDs of the owned resources that existed at that same read.
+
+    .. attribute :: release_present
+        :type: bool
+
+        The Helm release existed at that same read.
     """
 
     ownership: RecoveryRecord
@@ -139,6 +150,7 @@ class AgentCleanup:
     agent_present: bool
     token_present: bool
     present: frozenset[str]
+    release_present: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,11 +187,15 @@ def _original_resources(
             raise KubernetesError(_RECORD_MISMATCH)
         collected.append(_Resource(row, kind, name, scope, uid, version, created))
     counts = Counter(item.kind for item in collected)
-    valid_pods = counts["Pod"] == 0 if installation_only else 1 <= counts["Pod"] <= 10
+    valid_pods = (
+        counts["Pod"] == 0
+        if installation_only
+        else 1 <= counts["Pod"] <= AGENT_POD_LIMIT
+    )
     valid_runtime = (
         counts[REPLICA_SET_KIND] == counts[LEASE_KIND] == 0
         if installation_only
-        else counts[REPLICA_SET_KIND] <= _MAX_REPLICA_SETS and counts[LEASE_KIND] <= 1
+        else counts[REPLICA_SET_KIND] <= AGENT_POD_LIMIT and counts[LEASE_KIND] <= 1
     )
     if (
         any(counts[kind] != count for kind, count in _REQUIRED_COUNTS.items())
@@ -268,27 +284,36 @@ def _delete_resource(
 def _unrecorded_lease(
     kubernetes: KubernetesService,
     deadline: RequestDeadline,
-    namespace: str,
+    scope: tuple[str, str, str],
     agent: AgentRegistration,
     resources: tuple[_Resource, ...],
 ) -> frozenset[str]:
-    """Delete the agentk Lease of a record made before connect recorded it.
+    """Delete the agentk Lease of a record that has no Lease row.
 
-    Only for a run-owned namespace whose ownership record has no Lease row: the Lease
-    named after the recorded Agent ID is deleted by its UID, and that UID is returned so
-    the namespace inventory accepts events about it.
+    A record has no Lease row when it predates Lease recording, when it is a PENDING
+    record under compensation, or when no connected Pod held the Lease during
+    connect. Only in a run-owned namespace, after its cluster and namespace UIDs read
+    back unchanged, the Lease named after the recorded Agent ID is deleted by its UID,
+    and that UID is returned so the namespace inventory accepts events about it.
 
     :param kubernetes: Bound Kubernetes service of the recorded installation.
     :param deadline: Shared delete deadline.
-    :param namespace: Verified run-owned namespace.
+    :param scope: Run-owned namespace, recorded cluster UID and namespace UID.
     :param agent: Recorded Agent registration.
     :param resources: Recorded resource rows.
     :returns: The deleted Lease UID, or an empty set when the record has a Lease row
         or no such Lease exists.
-    :raises KubernetesError: The Lease identity or its deletion cannot be verified.
+    :raises KubernetesError: The namespace changed, or the Lease identity or its
+        deletion cannot be verified.
     """  # noqa: DOC503 - Shared deadline and delete propagate their errors.
     if any(item.kind == LEASE_KIND for item in resources):
         return frozenset()
+    namespace, cluster_uid, namespace_uid = scope
+    if deadline.call(read_agent_cluster_scope, kubernetes, namespace) != (
+        cluster_uid,
+        namespace_uid,
+    ):
+        raise KubernetesError("agent_delete_scope_mismatch")
     lease = deadline.call(read_agent_lease, kubernetes, namespace, agent.id)
     if lease is None:
         return frozenset()
@@ -300,12 +325,12 @@ def _unrecorded_lease(
             LEASE_KIND,
             agent_lease_name(agent.id),
             namespace,
-            lease[1],
-            LEASE_API_VERSION,
+            lease.uid,
+            COORDINATION_API_VERSION,
             True,
         ),
     )
-    return frozenset((lease[1],))
+    return frozenset((lease.uid,))
 
 
 @dataclass(frozen=True, slots=True)
@@ -625,7 +650,11 @@ def _delete_tracked(
             scope.run_id,
             frozenset(item.uid for item in resources)
             | _unrecorded_lease(
-                kubernetes, deadline, scope.namespace, agent, resources
+                kubernetes,
+                deadline,
+                (scope.namespace, cluster_uid, namespace_uid),
+                agent,
+                resources,
             ),
             timeout=deadline.remaining(),
         )
@@ -660,4 +689,5 @@ def _delete_tracked(
         before.agent_present,
         before.token_present,
         present,
+        before.release_present,
     )

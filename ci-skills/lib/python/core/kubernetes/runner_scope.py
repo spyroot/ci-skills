@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Final
 
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, json_object
+from lib.python.core.kubernetes.kinds import (
+    NAMESPACE_KIND,
+)
 from lib.python.core.kubernetes.kubernetes import (
     K8SCallback,
     KubernetesError,
@@ -41,7 +44,6 @@ from lib.python.sys.status import APPLIED, NO_OP, PASS
 if TYPE_CHECKING:
     from lib.python.core.toolbox_actions import WorkflowAction
 
-NAMESPACE_KIND: Final = "Namespace"
 UID_FIELD: Final = "uid"
 LABELS_FIELD: Final = "labels"
 EXPLICIT_NAMESPACE_MISSING: Final = "selected_namespace_missing"
@@ -53,9 +55,6 @@ NAMESPACE_RESOURCE: Final = "namespaces"
 GET_VERB: Final = "get"
 SELECTOR_OPTION: Final = "-l"
 JSON_OPTIONS: Final = ("-o", "json")
-DEPLOYMENT_KIND: Final = "Deployment"
-SECRET_KIND: Final = "Secret"
-ROLE_BINDING_KIND: Final = "RoleBinding"
 DEPLOYMENT_RESOURCE: Final = "deployments"
 NAMESPACE_OPTION: Final = "--namespace"
 SPEC_FIELD: Final = "spec"

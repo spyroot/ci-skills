@@ -27,7 +27,7 @@ from lib.python.core.gitlab.cluster_agent.selection import (
     IMAGE_TAG,
     ConnectSelection,
 )
-from lib.python.core.gitlab.cluster_agent.terms import PRESENT
+from lib.python.core.gitlab.cluster_agent.terms import AGENT_POD_LIMIT, PRESENT
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.json_types import (
     JSONObject,
@@ -37,23 +37,23 @@ from lib.python.core.json_types import (
     json_string,
 )
 from lib.python.core.kubernetes.gitlab_agent import (
-    LEASE_API_VERSION,
-    LEASE_KIND,
-    REPLICA_SET_API_VERSION,
-    REPLICA_SET_KIND,
     AgentPodExpectation,
     AgentPodObservation,
     agent_lease_name,
     correlate_agent_pod,
     read_agent_cluster_scope,
     read_agent_lease,
-    read_agent_replica_set,
+)
+from lib.python.core.kubernetes.kinds import (
+    APPS_API_VERSION,
+    COORDINATION_API_VERSION,
+    LEASE_KIND,
+    REPLICA_SET_KIND,
 )
 from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
 from lib.python.core.oci import ImageManifestIdentity
 
 _CHART_CONTAINER: Final = "gitlab-agent"
-_CONNECTION_LIMIT: Final = 10
 _POLL_SECONDS: Final = 5.0
 
 
@@ -200,55 +200,65 @@ def _held_by(holder: str, pods: dict[str, str]) -> bool:
 
 def _runtime_rows(
     kubernetes: KubernetesService,
-    correlation: AgentPodExpectation,
+    namespace: str,
     agent_id: int,
-    pods: dict[str, str],
+    connections: tuple[ConnectedAgentPod, ...],
     deadline: RequestDeadline,
 ) -> tuple[JSONObject, ...]:
-    """Read the objects the connected Agent workload created, for the ownership record.
+    """Build ownership rows for the objects the connected Agent workload created.
+
+    The ReplicaSets come from the Pod correlation that proved each connection. The
+    Lease wait uses at most half of the remaining deadline, so persistence and any
+    compensation keep the other half. When no connected Pod holds the Lease by then,
+    no Lease row is returned; delete then treats the record as one without a Lease
+    row.
 
     :param kubernetes: Bound Kubernetes service of the recorded installation.
-    :param correlation: Recorded Deployment identity of the installation.
+    :param namespace: Namespace of the Agent installation.
     :param agent_id: Native GitLab Agent ID.
-    :param pods: Connected Agent Pod names mapped to their UIDs.
-    :param deadline: Shared proof deadline; the Lease wait ends with it.
-    :returns: One row per controlling ReplicaSet and one row for the agentk Lease,
-        each marked created by this run.
-    :raises KubernetesError: The Pod, ReplicaSet or Lease identity does not match.
+    :param connections: Verified connections with their correlated Pods.
+    :param deadline: Shared proof deadline.
+    :returns: One row per controlling ReplicaSet, then the Lease row when a
+        connected Pod holds it; each row is marked created by this run.
+    :raises KubernetesError: The Lease read back is not that Lease.
     """  # noqa: DOC503 - The shared deadline propagates its expiry error.
-    namespace = correlation.namespace
+    pods = {entry.connection.pod_name: entry.pod.uid for entry in connections}
     replica_sets = sorted(
         {
-            deadline.call(read_agent_replica_set, kubernetes, name, correlation)
-            for name in sorted(pods)
+            (entry.pod.replica_set_name, entry.pod.replica_set_uid)
+            for entry in connections
         }
     )
+    rows: list[JSONObject] = [
+        observed_resource(
+            REPLICA_SET_KIND,
+            name,
+            namespace,
+            uid,
+            created=True,
+            api_version=APPS_API_VERSION,
+        )
+        for name, uid in replica_sets
+    ]
+    stop = time.monotonic() + deadline.remaining() / 2
     while True:
         lease = deadline.call(read_agent_lease, kubernetes, namespace, agent_id)
-        if lease is not None and _held_by(lease[0], pods):
-            break
-        time.sleep(min(_POLL_SECONDS, deadline.remaining()))
-    return (
-        *(
-            observed_resource(
-                REPLICA_SET_KIND,
-                name,
-                namespace,
-                uid,
-                created=True,
-                api_version=REPLICA_SET_API_VERSION,
+        if lease is not None and _held_by(lease.holder, pods):
+            rows.append(
+                observed_resource(
+                    LEASE_KIND,
+                    agent_lease_name(agent_id),
+                    namespace,
+                    lease.uid,
+                    created=True,
+                    api_version=COORDINATION_API_VERSION,
+                )
             )
-            for name, uid in replica_sets
-        ),
-        observed_resource(
-            LEASE_KIND,
-            agent_lease_name(agent_id),
-            namespace,
-            lease[1],
-            created=True,
-            api_version=LEASE_API_VERSION,
-        ),
-    )
+            return tuple(rows)
+        left = stop - time.monotonic()
+        if left <= 0:
+            return tuple(rows)
+        time.sleep(min(_POLL_SECONDS, left))
 
 
 def _active_connections(
@@ -312,7 +322,7 @@ def read_agent_connectivity(
     ):
         raise KubernetesError("agent_connection_registration_mismatch")
     active = _active_connections(provider, selection, agent, deadline, wait=wait)
-    if len(active) > _CONNECTION_LIMIT or len(
+    if len(active) > AGENT_POD_LIMIT or len(
         {item.connection_id for item in active}
     ) != len(active):
         raise KubernetesError("agent_connection_metadata_mismatch")
@@ -375,12 +385,11 @@ def confirm_fresh_agent_connection(
         wait=True,
     )
     pods = {entry.connection.pod_name: entry.pod.uid for entry in connections}
-    _, correlation, _ = _installation(gitlab, selection, record, image)
     runtime = _runtime_rows(
         kubernetes,
-        correlation,
+        selection.scope.namespace,
         json_integer(record.document.get("agent_id")),
-        pods,
+        connections,
         deadline,
     )
     cluster_uid, namespace_uid = _scope(record)

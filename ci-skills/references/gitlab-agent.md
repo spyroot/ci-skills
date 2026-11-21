@@ -131,14 +131,16 @@ configuration commit. Additional project sharing remains outside this command.
 ## Runtime objects and delete
 
 After agentk connects, the Agent workload has created two objects that the chart does not list: the ReplicaSet that
-controls the agentk Pods, and agentk's leader-election Lease `agent-<agent_id>-lock`. Connect records both in the
-ownership rows: the ReplicaSet only when its controller is the recorded Deployment, the Lease only when a connected
-Pod holds it. Delete removes each by UID when present and accepts it when already gone; the pre-delete namespace
-inventory then accepts events about them. The inventory reads only namespaced types that support `list` and
-`delete`, because deleting a namespace cannot destroy a read-only projection such as `packagemanifests`.
+controls the agentk Pods, and agentk's leader-election Lease `agent-<agent_id>-lock`. Connect records the ReplicaSet
+that the Pod correlation proved is owned by the recorded Deployment, and the Lease when a connected Pod holds it
+within half of the remaining connect time. Delete removes each by UID when present and accepts it when already gone;
+the pre-delete namespace inventory then accepts events about them. The inventory reads only namespaced types that
+support `list` and `delete`, because deleting a namespace cannot destroy a read-only projection such as
+`packagemanifests`.
 
-A record made before connect recorded the Lease gets one exception in a run-owned namespace: delete removes the
-Lease named after the recorded Agent ID by its UID.
+A record without a Lease row (written before Lease recording, a PENDING record under compensation, or a connect
+whose Lease was not held in time) gets one rule in a run-owned namespace: after the namespace UID reads back
+unchanged, delete removes the Lease named after the recorded Agent ID by its UID.
 
 ## Token path
 

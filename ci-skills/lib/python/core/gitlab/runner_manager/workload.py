@@ -16,6 +16,11 @@ from lib.python.core.abstract.callback import (
 )
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject
+from lib.python.core.kubernetes.kinds import (
+    DEPLOYMENT_KIND,
+    ROLE_BINDING_KIND,
+    SECRET_KIND,
+)
 from lib.python.core.kubernetes.kubernetes import (
     K8SCallback,
     KubernetesError,
@@ -39,9 +44,6 @@ from lib.python.core.kubernetes.runner import (
     PullImage,
 )
 from lib.python.core.kubernetes.runner_scope import (
-    DEPLOYMENT_KIND,
-    ROLE_BINDING_KIND,
-    SECRET_KIND,
     observe_namespace,
     scope_key,
 )

@@ -19,3 +19,6 @@ PRESENT: Final = "PRESENT"
 ABSENT: Final = "ABSENT"
 # Only the ownership record names the token; this invocation did not read it natively.
 RECORDED: Final = "RECORDED"
+
+# Most agentk Pods, and so ReplicaSets, one run connects and records.
+AGENT_POD_LIMIT: Final = 10

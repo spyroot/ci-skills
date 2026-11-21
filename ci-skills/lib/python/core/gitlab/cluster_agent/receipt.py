@@ -45,7 +45,12 @@ from lib.python.core.json_types import (
     json_objects,
     json_string,
 )
-from lib.python.core.kubernetes.runner_scope import SECRET_KIND
+from lib.python.core.kubernetes.kinds import (
+    LEASE_KIND,
+    POD_KIND,
+    REPLICA_SET_KIND,
+    SECRET_KIND,
+)
 from lib.python.core.report import report
 from lib.python.core.schema import validate_specification
 from lib.python.sys.status import APPLIED, NO_OP, PASS, PLANNED, UNKNOWN, VERIFIED
@@ -66,6 +71,8 @@ _NOT_VERIFIED: Final = "NOT_VERIFIED"
 _LOGICAL_SCOPE: Final = "LOGICAL_SCOPE"
 _NOT_CHECKED: Final = "NOT_CHECKED"
 _TRACKED_IDENTITIES: Final = "TRACKED_IDENTITIES"
+# Objects the Deployment controller or agentk created, not the selected kubeconfig.
+_WORKLOAD_KINDS: Final = frozenset((POD_KIND, REPLICA_SET_KIND, LEASE_KIND))
 _CONNECTED: Final = "CONNECTED"
 _RESULT_MISMATCH: Final = "agent_receipt_native_observation_mismatch"
 _REPORT_KIND: Final = "GitLabAgent"
@@ -248,6 +255,11 @@ def _deleted_record(
         ).value,
         # Rows equal to ownership.resources are written once, as null.
         "resources": None if observed == owned else observed,
+        **(
+            {}
+            if cleanup.release_present
+            else {"release_revision": None, "release_storage_uid": None}
+        ),
         "connection_ids": [],
     }
     after: dict[str, JSONValue] = {
@@ -314,7 +326,10 @@ def _credentials(
             "uid": item["uid"],
         }
         for item in owned
-        if operation == CONNECT and action == APPLIED and item.get("created") is True
+        if operation == CONNECT
+        and action == APPLIED
+        and item.get("created") is True
+        and item.get("kind") not in _WORKLOAD_KINDS
     ]
     agent: JSONObject = {
         "state": PLANNED if operation == CONNECT and action == PLANNED else ABSENT,
