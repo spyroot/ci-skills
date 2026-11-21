@@ -420,6 +420,37 @@ def test_project_name_probe_rejects_blank_even_with_explicit_namespace(
 
 
 @pytest.mark.parametrize(
+    ("project_name", "expected_prefix"),
+    (
+        ("Sample_Project", "sample-project"),
+        (
+            "a" * (probe_tests.RUN_SCOPE.DNS_LABEL_LIMIT + 1),
+            "a" * probe_tests.RUN_SCOPE.DNS_LABEL_LIMIT,
+        ),
+    ),
+    ids=("normalized", "prefix-at-dns-limit"),
+)
+def test_project_name_build_candidate_normalizes_and_bounds_prefix(
+    legacy_toolbox_spec: callback_tests.TOOLBOX.ToolboxSpec,
+    project_name: str,
+    expected_prefix: str,
+) -> None:
+    """Generate the internal build tag from a bounded consumer name.
+
+    :param legacy_toolbox_spec: Existing explicit toolbox inputs and fingerprint.
+    :param project_name: Consumer base before DNS normalization.
+    :param expected_prefix: Normalized consumer portion of the tag.
+    """
+    toolbox = callback_tests.TOOLBOX
+    fingerprint = legacy_toolbox_spec.fingerprint
+    suffix = fingerprint[: toolbox.FINGERPRINT_TAG_LENGTH]
+
+    tag = toolbox.build_candidate_reference(fingerprint, name_prefix=project_name)
+
+    assert tag == f"{expected_prefix}-build-{suffix}"
+
+
+@pytest.mark.parametrize(
     "changed",
     (None, "ownership", "fingerprint", "image", "digest-format", "registry-digest"),
 )

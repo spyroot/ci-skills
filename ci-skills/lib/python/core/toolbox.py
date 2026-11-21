@@ -41,7 +41,7 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesService,
 )
 from lib.python.core.kubernetes.resources import ResourceSet
-from lib.python.core.kubernetes.run_scope import dns_token
+from lib.python.core.kubernetes.run_scope import DNS_LABEL_LIMIT, dns_token
 from lib.python.core.runtime import error_class
 from lib.python.core.schema import (
     TOOLBOX_SCHEMA,
@@ -572,7 +572,7 @@ def build_candidate_reference(
     :raises ValueError: A present prefix has no valid DNS token.
     """  # noqa: DOC502 - Shared DNS normalization validates the consumer base.
     prefix = (
-        f"{dns_token(name_prefix)}-build-"
+        f"{dns_token(name_prefix, limit=DNS_LABEL_LIMIT)}-build-"
         if name_prefix is not None
         else BUILD_TAG_PREFIX
     )
