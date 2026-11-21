@@ -367,16 +367,25 @@ class ChainHarbor(REGISTRY.HarborService):
         self.reads.append((destination, observed))
         return observed
 
-    def copy(self, source: str, destination: str) -> str:
+    def copy(
+        self,
+        source: str,
+        destination: str,
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> str:
         """Publish the observed source artifact under a distinct destination.
 
         :param source: Digest-pinned source selected by live confirmation.
         :param destination: Fully qualified mutable destination tag.
+        :param before_write: Optional destination guard before publication.
         :returns: Digest copied by the registry transport.
         """
+        digest = self.inspect(source)
+        if before_write is not None:
+            before_write()
         self.journal.append("harbor-push")
         self.copies.append((source, destination))
-        digest = self.inspect(source)
         self.tags[destination] = digest
         return digest
 
@@ -388,6 +397,62 @@ class ChainHarbor(REGISTRY.HarborService):
         :returns: Whether the tag was present before removal.
         """
         return self.tags.pop(self.image(repository, tag), None) is not None
+
+
+@pytest.mark.parametrize("drift_at", ("collect", "before-native-copy"))
+def test_chain_publication_preserves_a_changed_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_at: str,
+) -> None:
+    """Reject one changed destination without publishing or rolling it back.
+
+    :param tmp_path: Fake registry credentials path supplied to the transport.
+    :param monkeypatch: Inject a change only during the copy source read.
+    :param drift_at: Observation point where an external writer changes the tag.
+    """
+    action = _prepared_action()
+    state = action.state
+    registry = ChainHarbor(tmp_path, [])
+    state.harbor = registry
+    state.source_image = registry.image(REFERENCE_REPOSITORY, TOOLBOX_DIGEST)
+    repository = action.naming_base.value
+    tag = repository
+    destination = registry.image(repository, tag)
+    external_digest = "sha256:" + "e" * 64
+    confirmed = REGISTRY.TagSnapshot(registry, repository, tag, None)
+    publisher = REGISTRY.HarborPush(REGISTRY.PushAction(repository, tag, confirmed))
+    publisher.bind(state)
+    if drift_at == "collect":
+        registry.tags[destination] = external_digest
+        with pytest.raises(REGISTRY.APIError, match="toolbox_destination_changed"):
+            publisher.collect()
+    else:
+        publisher.collect()
+        inspect = registry.inspect
+        reads = []
+
+        def changed_after_source_read(image: str) -> str:
+            """Change the tag while the transport resolves the same source again.
+
+            :param image: Immutable reference to pass to the normal fake source read.
+            :returns: Unchanged source digest.
+            """
+            digest = inspect(image)
+            reads.append(image)
+            if len(reads) == 2:
+                registry.tags[destination] = external_digest
+            return digest
+
+        monkeypatch.setattr(registry, "inspect", changed_after_source_read)
+        with pytest.raises(REGISTRY.APIError, match="toolbox_destination_changed"):
+            publisher.run()
+
+    state.failed = True
+    assert publisher.cleanup() == {}
+    assert registry.copies == []
+    assert registry.tags[destination] == external_digest
+    assert confirmed.prior_digest is None
 
 
 def _mock_chain_auth(

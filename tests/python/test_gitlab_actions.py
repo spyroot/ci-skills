@@ -13,6 +13,7 @@ from collections.abc import Mapping, MutableSequence, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -717,6 +718,63 @@ def test_runner_control_rejects_changed_or_unsafe_state_without_mutation(
                 for error in refusal["errors"]
             )
     assert api.writes == []
+
+
+@pytest.mark.parametrize(
+    ("field", "changed", "reason"),
+    (
+        ("value", "f" * 40, "confirm_plan_mismatch_rerun_live_plan"),
+        ("verified", False, "skill_revision_unverified"),
+    ),
+    ids=("different-source-revision", "unverified-source"),
+)
+def test_runner_control_rejects_plan_from_other_or_unverified_skill(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    runner_control_api: RunnerControlAPI,
+    field: str,
+    changed: JSONValue,
+    reason: str,
+) -> None:
+    """Reject a plan when one source invariant changes without a provider change.
+
+    :param capsys: Report capture for the real workflow.
+    :param monkeypatch: Change the authenticated invocation's skill provenance.
+    :param runner_control_api: Provider fake, unchanged between plan and apply.
+    :param field: Sole provenance field to change from the live plan.
+    :param changed: Observed value for the selected field during apply.
+    :param reason: Expected refusal diagnostic.
+    """
+    plan = _runner_control_report(
+        capsys, BIND_PROJECT_ARGS, STATUS.PLANNED, "--live-plan"
+    )
+    bind = GITLAB_ACTION.bind_gitlab_session
+    revision = dict(plan["skill"]["revision"])
+    assert revision[field] != changed
+    revision[field] = changed
+
+    def bind_changed_skill(*args: object, **kwargs: object) -> BoundGitLabSession:
+        """Return the same session identity with the changed skill revision.
+
+        :param *args: Args supplied by the real binding boundary.
+        :param **kwargs: Scope and credential options supplied by that boundary.
+        :returns: Session with changed source provenance and original target.
+        """
+        session = bind(*args, **kwargs)
+        return replace(session, skill={**session.skill, "revision": revision})
+
+    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", bind_changed_skill)
+    blocked = _runner_control_report(
+        capsys,
+        BIND_PROJECT_ARGS,
+        STATUS.BLOCKED,
+        "--apply",
+        "--confirm-plan",
+        plan["plan_digest"],
+    )
+    assert blocked["mutated"] is False
+    assert any(reason in error["reason"] for error in blocked["errors"])
+    assert runner_control_api.writes == []
 
 
 def test_runner_control_uses_native_get_to_verify_the_update(
@@ -1571,10 +1629,44 @@ def test_wiki_update_accepts_provider_normalized_title() -> None:
     assert result["action"] == STATUS.APPLIED and result["verified"] is True
 
 
-def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
-    """Rollback a partial group assignment after one project fails read-back.
-    :returns: None; assertions in the body validate the regression.
+def test_runner_group_assign_verifies_each_project_and_marks_partial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Hold the shared runner guard through assignment and rollback.
+
+    :param monkeypatch: Observe the native API and actual per-runner guard boundary.
+    :param tmp_path: Private test lock directory.
     """
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    guard = RUNNERS.runner_update_guard
+    locked = False
+
+    @contextmanager
+    def track_guard(origin: str, runner_id: int) -> Iterator[None]:
+        """Track the shared guard while retaining its actual locking behavior.
+
+        :param origin: Exact origin used for both assignment and binding.
+        :param runner_id: Exact runner whose mutations must be serialized.
+        """
+        nonlocal locked
+        assert origin == plan.origin and runner_id == plan.resource_id
+        with guard(origin, runner_id):
+            locked = True
+            try:
+                yield
+            finally:
+                locked = False
+
+    class GuardedAPI(FakeAPI):
+        """Require the runner guard around every assignment and recovery call."""
+
+        def _next(
+            self, method: str, endpoint: str, body: Optional[JSONValue] = None
+        ) -> JSONValue:
+            assert locked, (method, endpoint)
+            return super()._next(method, endpoint, body)
+
+    monkeypatch.setattr(RUNNERS, "runner_update_guard", track_guard)
     plan = _plan(
         "gitlab_runner",
         "assign",
@@ -1584,7 +1676,7 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
         project_ids=(11, 12),
     )
     projects = _list("groups/42/projects?include_subgroups=true&with_shared=false")
-    api = FakeAPI(
+    api = GuardedAPI(
         {
             ("GET", "runners/7"): [
                 {"id": 7, "runner_type": "project_type", "projects": []},

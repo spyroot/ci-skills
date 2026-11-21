@@ -28,6 +28,7 @@ from lib.python.core.gitlab.runner_manager import (
     GitLabRunnerManagerState,
 )
 from lib.python.core.gitlab.runner_manager.action import MANAGER_ROLE
+from lib.python.core.harbor.registry_mirror import is_registry_digest
 from lib.python.core.json_types import JSONObject, copy_json
 from lib.python.core.kubernetes.podman_probe import PROBE_KIND, ProbeMode
 from lib.python.core.kubernetes.run_scope import RUN_ID_LIMIT, RunScope
@@ -63,7 +64,6 @@ CHAIN_OPERATION: Final = "chain"
 RUNNER_TOKEN_NAME: Final = "runner-token"
 REGISTRY_COMPONENT: Final = re.compile(r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*")
 REGISTRY_TAG: Final = re.compile(r"[\w][\w.-]{0,127}", re.ASCII)
-REGISTRY_DIGEST: Final = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 @dataclass
@@ -361,10 +361,17 @@ class ImageBuildChainAction(SkillAction):
         repository, separator, reference = harbor.reference_toolbox.partition("@")
         if not separator:
             repository, separator, reference = repository.rpartition(":")
-        pattern = REGISTRY_DIGEST if separator == "@" else REGISTRY_TAG
-        if not all(
-            REGISTRY_COMPONENT.fullmatch(part) for part in repository.split("/")
-        ) or not pattern.fullmatch(reference):
+        valid_reference = (
+            is_registry_digest(reference)
+            if separator == "@"
+            else REGISTRY_TAG.fullmatch(reference) is not None
+        )
+        if (
+            not all(
+                REGISTRY_COMPONENT.fullmatch(part) for part in repository.split("/")
+            )
+            or not valid_reference
+        ):
             raise ValueError(
                 "harbor_reference_toolbox_invalid: provide repository:tag or repository@sha256:digest"
             )

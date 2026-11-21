@@ -2003,6 +2003,223 @@ def test_targeted_chain_requires_matching_independent_runner_read(failure: str) 
     assert f"toolbox-runner.json:{reason}" in rejected["problems"]
 
 
+@pytest.fixture(scope="module")
+def copy_chain_baseline() -> str:
+    """Store complete copy delivery and independent runner proof as immutable JSON.
+
+    :returns: Serialized receipts retaining the historical native deployment.
+    """
+    receipts = _candidate_delivery_receipts(_access_setup())
+    chain = receipts["toolbox-runner.json"]
+    records = chain["records"]
+    publish = next(row for row in records if row["callback"] == "HarborPush")
+    host, project, repository = publish["image"].split("@", 1)[0].split("/", 2)
+    source = f"{host}/{project}/reference-toolbox@{publish['digest']}"
+    chain["plan"]["toolbox"].update(
+        mode="copy",
+        source_image=source,
+        origin=f"https://{host}",
+        project=project,
+        repository=repository,
+    )
+    next(row for row in records if row["callback"] == "ConfirmWorkflow")["image"] = (
+        source
+    )
+    chain["records"] = [row for row in records if row["callback"] != "HarborBuild"]
+    chain["summary"]["record_count"] = len(chain["records"])
+    return json.dumps(receipts)
+
+
+@pytest.mark.parametrize(
+    ("callback", "field", "replacement"),
+    (
+        (None, "", ""),
+        ("plan", "source_image", "harbor.example.test/hott/reference:latest"),
+        ("ConfirmWorkflow", "image", "harbor.example.test/hott/other:latest"),
+        ("ResolveChainPlan", "plan_digest", "b" * 64),
+        ("HarborPush", "digest", "sha256:" + "b" * 64),
+        ("DeployManagerRunner", "image_id", "containerd://sha256:" + "b" * 64),
+        ("DeployManagerRunner", "pods", []),
+    ),
+)
+def test_targeted_copy_chain_requires_native_digest_continuity(
+    copy_chain_baseline: str,
+    callback: str | None,
+    field: str,
+    replacement: JSONValue,
+) -> None:
+    """Accept a copy and reject one broken link at a time.
+
+    :param copy_chain_baseline: Immutable verified-chain fixture decoded per case.
+    :param callback: Source of the one observation under test.
+    :param field: Receipt field supplied by that observation.
+    :param replacement: Deliberately wrong or missing observation value.
+    """
+    receipts = json.loads(copy_chain_baseline)
+    chain = receipts["toolbox-runner.json"]
+    if callback == "plan":
+        chain["plan"]["toolbox"][field] = replacement
+    elif callback is not None:
+        row = next(item for item in chain["records"] if item["callback"] == callback)
+        target = row["pods"][0] if field == "image_id" else row
+        target[field] = replacement
+    result = ACCEPTANCE.evaluate(
+        {}, receipts, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
+    )
+    if callback is None:
+        assert result["status"] == STATUS.PASS, result["problems"]
+        assert set(result["accepted"]) == set(receipts)
+    else:
+        assert result["status"] == STATUS.BLOCKED
+        assert "toolbox-runner.json:delivery_image_mismatch" in result["problems"]
+
+
+@pytest.fixture(scope="module", params=tuple(ACCEPTANCE.RUNNER_CONTROLS))
+def runner_control_pair_baseline(request: pytest.FixtureRequest) -> str:
+    """Retain an immutable applied and repeat no-op pair for each control.
+
+    :param request: Fixture selection naming the runner operation.
+    :returns: Serialized pair rendered through the real action result builder.
+    """
+    operation = request.param
+    setup = _access_setup()
+    access = setup["gitlab-access.json"]
+    project = access["target"]
+    before = {
+        "description": "unit-runner",
+        "project_ids": [project["id"]],
+        "tag_list": ["original", "preserved"],
+        "locked": False,
+        "access_level": "ref_protected",
+    }
+    field = ACCEPTANCE.RUNNER_CONTROLS[operation]
+    selected = {
+        "description": "renamed-runner",
+        "tag_list": ["preserved", "renamed"],
+        "locked": True,
+        "access_level": "not_protected",
+    }
+    desired = {**before, field: selected[field]}
+    body = (
+        {"from_tag": "original", "to_tag": "renamed"}
+        if field == "tag_list"
+        else {field: selected[field]}
+    )
+    pair = {}
+    for action, prior in ((STATUS.APPLIED, before), (STATUS.NO_OP, desired)):
+        snapshot = {
+            "runner_id": 107,
+            "project_id": project["id"],
+            "before": prior,
+            "desired": desired,
+        }
+        plan = replace(
+            _plan("gitlab_runner", operation, body, resource_id=107),
+            origin=access["origin"],
+            target_reference=project["full_path"],
+            runner_snapshot=snapshot,
+        )
+        record = {
+            "id": 107,
+            "action": action,
+            "verified": True,
+            "mutated": action == STATUS.APPLIED,
+            "runner_control": snapshot,
+            "observed": desired,
+        }
+        receipt = _tag_output(plan, record)
+        for key in (
+            "execution_host",
+            "credential_source",
+            "credential_digest",
+            "target_source",
+        ):
+            receipt[key] = access[key]
+        receipt["identity"] = {
+            **access["identity"],
+            "web_url": f"{access['origin']}/{access['identity']['username']}",
+        }
+        receipt["verified_target"] = {
+            **project,
+            "web_url": f"{access['origin']}/{project['full_path']}",
+        }
+        receipt["captured_at"] = (
+            NOW - timedelta(days=1) + timedelta(seconds=len(pair))
+        ).isoformat()
+        receipt["skill"].update(
+            {DIGEST_VALUE_KEY: _digest(), FUNCTIONAL_DIGEST_KEY: _functional_digest()}
+        )
+        pair[f"{action}.json"] = receipt
+    return json.dumps(pair)
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    (
+        (None, ""),
+        ("runner-id", "runner_control_readback_unproven"),
+        ("project", "runner_control_readback_unproven"),
+        ("missing-field-change", "runner_control_readback_unproven"),
+        ("mutated", "runner_control_readback_unproven"),
+        ("observed", "runner_control_readback_unproven"),
+        ("missing-repeat", "repeat_readback_missing"),
+        ("changed-repeat-intent", "repeat_readback_mismatch"),
+        ("same-confirmation", "repeat_readback_mismatch"),
+    ),
+)
+def test_targeted_runner_controls_require_exact_readback_and_repeat(
+    runner_control_pair_baseline: str, failure: str | None, reason: str
+) -> None:
+    """Classify a single runner identity, field, or repeat invariant violation.
+
+    :param runner_control_pair_baseline: Immutable complete pair for one control.
+    :param failure: Sole invariant changed independently for this case.
+    :param reason: Expected acceptance diagnostic suffix.
+    """
+    pair = json.loads(runner_control_pair_baseline)
+    applied = pair["APPLIED.json"]
+    noop = pair["NO_OP.json"]
+    if failure == "runner-id":
+        applied["plan"]["resource_id"] += 1
+    elif failure == "project":
+        applied["verified_target"]["id"] += 1
+    elif failure == "missing-field-change":
+        for control in (
+            applied["plan"]["runner_control"],
+            applied["records"][0]["runner_control"],
+            applied["readback"]["runner_control"],
+        ):
+            control["before"] = deepcopy(control["desired"])
+    elif failure == "mutated":
+        applied["readback"]["mutated"] = False
+        applied["records"][0]["mutated"] = False
+    elif failure == "observed":
+        for readback in (applied["readback"], applied["records"][0]):
+            readback["observed"]["description"] = "unexpected"
+    elif failure == "missing-repeat":
+        del pair["NO_OP.json"]
+    elif failure == "changed-repeat-intent":
+        noop["plan"]["body_sha256"] = "b" * 64
+    elif failure == "same-confirmation":
+        noop["plan_digest"] = noop["plan"]["plan_digest"] = applied["plan_digest"]
+    result = ACCEPTANCE.evaluate(
+        {}, pair, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
+    )
+    if failure is None:
+        assert result["status"] == STATUS.PASS, result["problems"]
+        assert set(result["accepted"]) == set(pair)
+        if applied["operation"] == "rename-tag":
+            setup = _access_setup()
+            complete = _complete_receipts(setup)
+            complete.update(pair)
+            aggregate = _evaluate(setup, complete)
+            assert aggregate["status"] == STATUS.PASS, aggregate["problems"]
+            assert set(pair) <= set(aggregate["accepted"])
+    else:
+        assert result["status"] == STATUS.BLOCKED
+        assert any(problem.endswith(f":{reason}") for problem in result["problems"])
+
+
 def test_aggregate_acceptance_requires_the_delivered_chain() -> None:
     """Reject the old complete operation set when delivered chain proof is absent.
 

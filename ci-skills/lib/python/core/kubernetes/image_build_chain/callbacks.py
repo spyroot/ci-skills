@@ -245,27 +245,6 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
         }
 
 
-class ConfirmChainDestination(
-    LocalCallback[ImageBuildChainState, ImageBuildChainAction]
-):
-    """Reject destination changes between live confirmation and publication."""
-
-    def run(self) -> JSONObject:
-        """Re-read the destination tag before invoking the push callback.
-
-        :returns: Verified unchanged destination.
-        :raises ValueError: Harbor now reports a different destination digest.
-        :raises APIError: Harbor destination cannot be read.
-        """  # noqa: DOC503 - the bound Harbor client propagates read failures.
-        toolbox = self.action.toolbox
-        if (
-            self.state.harbor.digest(toolbox.repository, toolbox.args.tag)
-            != self.action.destination_digest
-        ):
-            raise ValueError("toolbox_destination_changed_rerun_live_plan")
-        return {"verified": True}
-
-
 class ConfirmChainManager(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
     """Recheck the confirmed manager identity after build and provider creation."""
 

@@ -54,7 +54,10 @@ chain=(conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.
 
 The dry run reads no provider API. The live plan resolves the Harbor source,
 the current destination tag and the Ready worker. Apply checks the live plan
-again and uses the exact published digest in the runner deployment. The
+again at the publication boundary and uses the exact published digest in the
+runner deployment. Keep publishers of the same destination tag serialized.
+The registry copy API has no atomic compare-and-set for an external writer
+that changes the tag during publication. The
 [result schema](../schemas/results/image-build-readiness.schema.json) carries
 the plan, publication and runner deployment evidence.
 

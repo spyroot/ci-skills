@@ -7,19 +7,13 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-import errno
-import fcntl
-import hashlib
-import json
 import os
 import re
-import stat
-import time
 from collections import Counter
-from collections.abc import Iterator, MutableSequence, Sequence
+from collections.abc import Iterator, MutableSequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 from urllib.parse import parse_qsl, urlsplit
 
 from lib.python.core.cli_api import (
@@ -34,8 +28,8 @@ from lib.python.core.cli_api import (
 from lib.python.core.cli_api import APIError as GitLabAPIError
 from lib.python.core.cli_api import APISession, CLIAPIClient, validate_endpoint
 from lib.python.core.json_types import JSONObject
+from lib.python.core.resource_guard import locked_resource
 
-CREATE_LOCK_WAIT_SECONDS = 30
 _UNCERTAIN_WRITE = frozenset(
     {
         "timeout",
@@ -159,55 +153,6 @@ class CreateGuard:
 
 
 @contextmanager
-def _locked_descriptor(identity: Sequence[Union[str, int]]) -> Iterator[int]:
-    """Hold an exclusive local lock for one provider resource identity.
-
-    :param identity: Provider and resource identifiers, without credentials.
-    :yields: Open locked file descriptor until the caller's scope exits.
-    :ytype: int
-    :raises GitLabAPIError: Lock directory/file metadata is unsafe or acquisition
-        exceeds its deadline.
-    :raises OSError: Lock file creation, locking, or cleanup fails.
-    """
-    root = _lock_root()
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    metadata = root.lstat()
-    if (
-        not stat.S_ISDIR(metadata.st_mode)
-        or metadata.st_uid != os.getuid()
-        or metadata.st_mode & 0o077
-    ):
-        raise GitLabAPIError("resource_lock_directory_unsafe")
-    encoded = json.dumps(identity, separators=(",", ":"))
-    name = hashlib.sha256(encoded.encode("utf-8")).hexdigest() + ".lock"
-    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(root / name, flags, 0o600)
-    try:
-        metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or metadata.st_mode & 0o077
-        ):
-            raise GitLabAPIError("resource_lock_file_unsafe")
-        deadline = time.monotonic() + CREATE_LOCK_WAIT_SECONDS
-        while True:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if exc.errno not in (errno.EAGAIN, errno.EACCES):
-                    raise
-                if time.monotonic() >= deadline:
-                    raise GitLabAPIError("resource_lock_timeout") from exc
-                time.sleep(0.05)
-        yield descriptor
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
-
-
-@contextmanager
 def create_guard(
     origin: str, target_kind: str, target_id: int, kind: str, title: str
 ) -> Iterator[CreateGuard]:
@@ -223,7 +168,9 @@ def create_guard(
     :raises GitLabAPIError: If the lock or recovery marker is unsafe.
     :raises OSError: Acquiring, reading, or releasing the resource lock fails.
     """  # noqa: DOC502 - lock failures propagate from the context manager
-    with _locked_descriptor([origin, target_kind, target_id, kind, title]) as fd:
+    with locked_resource(
+        _lock_root(), [origin, target_kind, target_id, kind, title]
+    ) as fd:
         yield CreateGuard(fd)
 
 
@@ -238,7 +185,7 @@ def runner_update_guard(origin: str, runner_id: int) -> Iterator[None]:
     :raises GitLabAPIError: If the local lock cannot be acquired safely.
     :raises OSError: Accessing or releasing the resource lock fails.
     """  # noqa: DOC502 - lock failures propagate from the context manager
-    with _locked_descriptor([origin, "runner", runner_id]):
+    with locked_resource(_lock_root(), [origin, "runner", runner_id]):
         yield
 
 

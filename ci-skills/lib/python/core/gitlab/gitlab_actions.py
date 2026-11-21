@@ -16,7 +16,8 @@ from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Optional, Union
+from types import MappingProxyType
+from typing import Final, Optional, Union
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.catalog import PROJECT_NAMING_OPTIONS, ROUTED_RESULT_SCHEMA_VERSION
@@ -34,7 +35,14 @@ from lib.python.core.runtime import sanitize
 from lib.python.core.target import GitLabOperationTarget, GitLabRoute
 from lib.python.sys.status import BLOCKED, PASS, exit_code
 
-RUNNER_CONTROLS = ("rename-tag", "bind-project", "set-protected", "set-name")
+RUNNER_CONTROLS: Final = MappingProxyType(
+    {
+        "rename-tag": "tag_list",
+        "bind-project": "locked",
+        "set-protected": "access_level",
+        "set-name": "description",
+    }
+)
 
 
 class ActionError(ValueError):

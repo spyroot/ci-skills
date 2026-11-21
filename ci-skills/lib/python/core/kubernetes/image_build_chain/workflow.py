@@ -19,7 +19,12 @@ from lib.python.core.gitlab.runner_manager import (
     SelectManagerPlanScope,
     workload_action,
 )
-from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
+from lib.python.core.harbor.registry_mirror import (
+    HarborAuth,
+    HarborPush,
+    PushAction,
+    TagSnapshot,
+)
 from lib.python.core.kubernetes.kubernetes import K8SAuth
 from lib.python.core.kubernetes.podman_probe import ProbeMode
 from lib.python.core.kubernetes.run_scope import (
@@ -30,7 +35,6 @@ from lib.python.core.kubernetes.scc_access import EnsureSCCAccess
 from lib.python.core.toolbox_actions import ConfirmWorkflow
 
 from .callbacks import (
-    ConfirmChainDestination,
     ConfirmChainManager,
     CreateRunnerRecord,
     DeferredComponent,
@@ -75,11 +79,19 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
         callbacks.extend(
             (
                 CleanupChain(action),
-                ConfirmChainDestination(action),
                 DeferredComponent(
                     action,
-                    lambda _: HarborPush(
-                        PushAction(action.toolbox.repository, action.toolbox.args.tag)
+                    lambda state: HarborPush(
+                        PushAction(
+                            action.toolbox.repository,
+                            action.toolbox.args.tag,
+                            confirmed=TagSnapshot(
+                                state.harbor,
+                                action.toolbox.repository,
+                                action.toolbox.args.tag,
+                                action.destination_digest,
+                            ),
+                        )
                     ),
                 ),
                 CreateRunnerRecord(action),

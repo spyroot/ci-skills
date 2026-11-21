@@ -40,6 +40,8 @@ Use `--live-plan` in place of `--dry-run` for the four new controls. Then repeat
 the same inputs with `--apply --confirm-plan DIGEST_FROM_PLAN`. Apply checks
 the live state again before writing and reads the native result independently.
 A fresh live plan after a verified change can be confirmed for a `NO_OP`.
+Skill invocations sharing the runner lock directory serialize assignment and
+control writes. Coordinate external runner updates during a confirmed change.
 
 ## Global section
 

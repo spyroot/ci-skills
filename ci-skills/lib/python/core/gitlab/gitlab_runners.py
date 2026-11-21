@@ -26,6 +26,7 @@ from lib.python.core.gitlab.gitlab_actions import (
     _pages,
     _positive,
     _required_text,
+    _verified_skill_revision,
 )
 from lib.python.core.gitlab.gitlab_api import (
     CreateGuard,
@@ -674,11 +675,24 @@ class AttachToProject(GitLabOperation):
 
         :returns: Provider record with independent read-back evidence.
         :raises ActionError: If runner identity or project scope is invalid.
+        :raises GitLabAPIError: The runner lock or initial membership reads fail.
+        :raises OSError: The runner guard cannot be accessed.
+        """  # noqa: DOC502 - lock and assignment errors propagate.
+        plan = self.plan
+        runner_id = _positive(plan.resource_id, "runner_id")
+        with runner_update_guard(plan.origin, runner_id):
+            return self._attach(runner_id)
+
+    def _attach(self, runner_id: int) -> JSONObject:
+        """Assign and reconcile projects while the caller holds the runner guard.
+
+        :param runner_id: Exact runner ID protected by the caller's guard.
+        :returns: Verified assignments or observed rollback evidence.
+        :raises ActionError: Runner identity or project scope is invalid.
         :raises GitLabAPIError: Initial runner or membership reads fail.
         """  # noqa: DOC503 - initial identity and membership reads propagate failures
         api, session = self.gitlab.api, self.gitlab.session
-        plan, target_id = self.plan, self.gitlab.target_id
-        runner_id = _positive(plan.resource_id, "runner_id")
+        target_id = self.gitlab.target_id
         identifiers = self._selected_projects(runner_id)
         baseline = _membership_snapshot(api, session, runner_id, identifiers)
 
@@ -1145,12 +1159,6 @@ class RunnerControlScopeError(ActionError):
 class RunnerControl(GitLabOperation):
     """Plan and verify one exact GitLab project runner field update."""
 
-    _FIELDS: Final = {
-        "rename-tag": "tag_list",
-        "bind-project": "locked",
-        "set-protected": "access_level",
-        "set-name": "description",
-    }
     _PROJECT_COUNT: Final = (
         "query RunnerProjects($id: CiRunnerID!) { runner(id: $id) { id projectCount } }"
     )
@@ -1177,6 +1185,7 @@ class RunnerControl(GitLabOperation):
         ):
             raise ActionError("runner_control_rejects_unrelated_options")
         runner_id = _positive(args.runner_id, "runner_id")
+        field = RUNNER_CONTROLS[operation]
         if operation == "rename-tag":
             tags = _requested_tags(
                 [
@@ -1189,11 +1198,11 @@ class RunnerControl(GitLabOperation):
             protection = parse_protected(getattr(args, "protected", None))
             if protection is None:
                 raise ActionError("set_protected_requires_protected")
-            body = {"access_level": protection}
+            body = {field: protection}
         elif operation == "set-name":
-            body = {"description": _required_text(args.description, "description")}
+            body = {field: _required_text(args.description, field)}
         else:
-            body = {"locked": True}
+            body = {field: True}
         return PreparedOperation(body, resource_id=runner_id)
 
     @classmethod
@@ -1286,7 +1295,7 @@ class RunnerControl(GitLabOperation):
         runner_id = _positive(plan.resource_id, "runner_id")
         before = cls.observe(api, session, runner_id, project_id)
         desired = dict(before)
-        field = cls._FIELDS[plan.operation]
+        field = RUNNER_CONTROLS[plan.operation]
         if plan.operation == "bind-project" and before["project_ids"] != [project_id]:
             projects = before["project_ids"]
             assert isinstance(projects, list)
@@ -1326,6 +1335,11 @@ class RunnerControl(GitLabOperation):
         self.state.mutated = False
         if snapshot is None:
             raise ActionError("runner_control_requires_live_plan")
+        revision = _verified_skill_revision(service.session)
+        if revision is None:
+            raise ActionError("skill_revision_unverified")
+        if plan.revision != revision:
+            raise ActionError("runner_control_revision_mismatch")
         before = _object(snapshot.get("before"), "runner_control_before")
         desired = _object(snapshot.get("desired"), "runner_control_desired")
         with runner_update_guard(plan.origin, runner_id):
@@ -1343,7 +1357,7 @@ class RunnerControl(GitLabOperation):
                     "mutated": False,
                     "observed": before,
                 }
-            field = self._FIELDS[plan.operation]
+            field = RUNNER_CONTROLS[plan.operation]
             self.state.mutated = None
             try:
                 service.api.put_json(

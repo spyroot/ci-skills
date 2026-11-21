@@ -179,7 +179,10 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
         self.state.session = session
         if (
             plan.kind == "gitlab_runner"
-            and plan.operation in {"tag", "get", "list", "delete"}
+            and (
+                plan.operation in RUNNER_CONTROLS
+                or plan.operation in {"tag", "get", "list", "delete"}
+            )
             and _verified_skill_revision(session) is None
         ):
             raise ActionError("skill_revision_unverified")
@@ -225,6 +228,12 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
         )
 
         if plan.operation in RUNNER_CONTROLS:
+            revision = _verified_skill_revision(service.session)
+            if revision is None:
+                raise ActionError("skill_revision_unverified")
+            if plan.revision is not None and plan.revision != revision:
+                raise ActionError("runner_control_revision_mismatch")
+            plan = replace(plan, revision=revision)
             try:
                 snapshot = RunnerControl.snapshot(
                     service.api, service.session, plan, service.target_id
@@ -307,10 +316,17 @@ class GitLabOperation(GitlabCallback[ActionPlan]):
 
         :returns: Empty mapping because phase bookkeeping adds no operation data.
         :raises ActionError: Shared planning changed the declared action beyond its
-            authenticated membership or deletion snapshot.
+            authenticated provider snapshot or runner-control revision.
         """
+        plan = self.state.plan
+        revision = (
+            self.action.revision
+            if plan.kind == "gitlab_runner" and plan.operation in RUNNER_CONTROLS
+            else plan.revision
+        )
         declared = replace(
-            self.state.plan,
+            plan,
+            revision=revision,
             project_ids=self.action.project_ids,
             runner_snapshot=self.action.runner_snapshot,
         )

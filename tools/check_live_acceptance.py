@@ -40,6 +40,7 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Final, Optional, TypeAlias, TypedDict
+from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -54,6 +55,7 @@ from lib.python.core.cli_api import response_decoder
 from lib.python.core.endpoints import GITLAB_AUTHORITY, KUBERNETES_AUTHORITY
 from lib.python.core.git.mirroring import MirrorField
 from lib.python.core.git.remote import GIT_EXECUTABLE
+from lib.python.core.gitlab.gitlab_actions import RUNNER_CONTROLS
 from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
 from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
 from lib.python.core.gitlab.mirror.constants import Field as MirrorReceiptField
@@ -78,7 +80,15 @@ from lib.python.core.kubernetes.podman_evidence import (
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.provenance import DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY
 from lib.python.core.schema import SpecificationError, validate_specification
-from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, exit_code
+from lib.python.sys.status import (
+    APPLIED,
+    BLOCKED,
+    DRY_RUN,
+    NO_OP,
+    PARTIAL,
+    PASS,
+    exit_code,
+)
 from skillkit.mirror_qualification import (
     DESTINATION_FIELD,
     DESTINATION_HTTP_STATUS_FIELD,
@@ -275,8 +285,17 @@ REQUIRED_CAPABILITY_OPERATIONS: Final = frozenset(
         ("gitlab_merge_request", "update", "APPLIED"),
     }
 )
+# Optional for historical aggregate policy, selectable as explicit coverage.
+RUNNER_CONTROL_OPERATIONS: Final[frozenset[OperationKey]] = frozenset(
+    ("gitlab_runner", operation, action)
+    for operation in RUNNER_CONTROLS
+    for action in (APPLIED, NO_OP)
+)
+SUPPORTED_GITLAB_OPERATIONS: Final = (
+    REQUIRED_GITLAB_OPERATIONS | RUNNER_CONTROL_OPERATIONS
+)
 SUPPORTED_REQUIRED_OPERATIONS: Final[frozenset[OperationKey]] = (
-    REQUIRED_GITLAB_OPERATIONS
+    SUPPORTED_GITLAB_OPERATIONS
     | REQUIRED_CAPABILITY_OPERATIONS
     | {(RECEIPT_KIND, None, None)}
 )
@@ -1094,7 +1113,76 @@ def _check_gitlab_receipt(
         and not _runner_delete_readback_verified(receipt, required)
     ):
         problems.append(f"{name}:runner_delete_readback_unproven")
+    if (
+        kind == "gitlab_runner"
+        and isinstance(operation, str)
+        and operation in RUNNER_CONTROLS
+        and not _runner_control_readback_verified(receipt, operation, required)
+    ):
+        problems.append(f"{name}:runner_control_readback_unproven")
     return problems
+
+
+def _runner_control_readback_verified(
+    receipt: JSONObject, operation: str, required: JSONObject
+) -> bool:
+    """Verify the exact runner, target, and requested field transition.
+
+    :param receipt: Runner control apply or no-op receipt.
+    :param operation: Selected control verb.
+    :param required: Authenticated project and expected action.
+    :returns: Whether before, desired, and observed fields prove the action.
+    :raises TypeError: Tag evidence does not contain a valid string sequence.
+    """  # noqa: DOC502 - The shared JSON tag reader rejects malformed values.
+    plan = _mapping(receipt.get("plan"))
+    control = _mapping(plan.get("runner_control"))
+    observed = _mapping(receipt.get("readback"))
+    runner_id = control.get("runner_id")
+    project_id = control.get("project_id")
+    before = _mapping(control.get("before"))
+    desired = _mapping(control.get("desired"))
+    field = RUNNER_CONTROLS[operation]
+    changed = {
+        key
+        for key in before.keys() | desired.keys()
+        if before.get(key) != desired.get(key)
+    }
+    action = required.get("result_action")
+    projects = before.get("project_ids")
+    if (
+        type(runner_id) is not int
+        or runner_id <= 0
+        or runner_id != plan.get("resource_id")
+        or runner_id != observed.get("id")
+        or type(project_id) is not int
+        or project_id <= 0
+        or project_id != required.get("target_id")
+        or required.get("target_kind") != "project"
+        or plan.get("target_kind") != "project"
+        or plan.get("operation") != operation
+        or not receipt.get("plan_digest")
+        or plan.get("plan_digest") != receipt["plan_digest"]
+        or plan.get("confirmation_ready") is not True
+        or receipt.get("records") != [observed]
+        or observed.get("runner_control") != control
+        or observed.get("observed") != desired
+        or action not in (APPLIED, NO_OP)
+        or observed.get("mutated") is not (action == APPLIED)
+        or not isinstance(projects, list)
+        or project_id not in projects
+        or changed != ({field} if action == APPLIED else set())
+    ):
+        return False
+    if operation == "bind-project":
+        return projects == [project_id] and desired.get(field) is True
+    if operation == "set-name":
+        value = desired.get(field)
+        return isinstance(value, str) and bool(value.strip())
+    if operation == "rename-tag" and action == APPLIED:
+        old = set(json_strings(before.get(field)))
+        new = set(json_strings(desired.get(field)))
+        return len(old - new) == 1 and len(new - old) <= 1
+    return True
 
 
 def _check_gitlab_read_receipt(
@@ -1491,7 +1579,7 @@ class AcceptanceReview:
                     self.accepted.append(name)
                     self.observed_operations.add(operation_key)
                 continue
-            if operation_key not in REQUIRED_GITLAB_OPERATIONS and kind not in {
+            if operation_key not in SUPPORTED_GITLAB_OPERATIONS and kind not in {
                 "gitlab_repository",
                 "gitlab_merge_request",
             }:
@@ -1565,6 +1653,44 @@ class AcceptanceReview:
                 self.problems.append(
                     f"{applied_name}:{noop_name}:repeat_readback_mismatch"
                 )
+
+    def runner_control_receipts(self) -> None:
+        """Require an ordered applied and repeat no-op pair for selected controls."""
+        pairs: dict[tuple[JSONValue, ...], list[JSONObject]] = {}
+        for name in self.accepted:
+            receipt = self.receipts.get(name, {})
+            if _operation_key(receipt) not in RUNNER_CONTROL_OPERATIONS:
+                continue
+            record = _mapping(receipt.get("readback"))
+            key = (
+                receipt["operation"],
+                receipt[EXECUTION_HOST_FIELD],
+                receipt["origin"],
+                receipt["credential_source"],
+                receipt["credential_digest"],
+                _mapping(receipt.get("verified_target")).get("id"),
+                record["id"],
+            )
+            pairs.setdefault(key, []).append(receipt)
+        for key, receipts in pairs.items():
+            actions = {item["result_action"]: item for item in receipts}
+            if len(receipts) != 2 or set(actions) != {APPLIED, NO_OP}:
+                self.problems.append(f"gitlab_runner:{key[0]}:repeat_readback_missing")
+                continue
+            applied, noop = actions[APPLIED], actions[NO_OP]
+            applied_time = _parse_time(applied.get(CAPTURED_AT_FIELD))
+            noop_time = _parse_time(noop.get(CAPTURED_AT_FIELD))
+            if (
+                applied_time is None
+                or noop_time is None
+                or applied_time >= noop_time
+                or applied.get("plan_digest") == noop.get("plan_digest")
+                or _mapping(applied.get("plan")).get("body_sha256")
+                != _mapping(noop.get("plan")).get("body_sha256")
+                or _mapping(applied.get("readback")).get("observed")
+                != _mapping(noop.get("readback")).get("observed")
+            ):
+                self.problems.append(f"gitlab_runner:{key[0]}:repeat_readback_mismatch")
 
     def mirror_receipts(self) -> None:
         """Require an ordered, compatible applied/no-op pair in either mode.
@@ -1810,6 +1936,128 @@ def _check_ocp_verify_readback(name: str, receipt: JSONObject) -> Sequence[str]:
     return problems
 
 
+def _check_chain_delivery(name: str, receipt: JSONObject) -> Sequence[str]:
+    """Verify the confirmed toolbox delivery and native runner deployment.
+
+    :param name: Chain receipt file name used in diagnostics.
+    :param receipt: Schema-validated delivery result.
+    :returns: Missing or mismatched delivery evidence.
+    """
+    records = receipt.get("records")
+    records = records if isinstance(records, list) else []
+    toolbox = _mapping(_mapping(receipt.get("plan")).get("toolbox"))
+    copy_mode = toolbox.get("mode") == "copy"
+    source_callback = "ResolveChainPlan" if copy_mode else "HarborBuild"
+    source, publish, created, deployed = (
+        _mapping(_callback_record(records, callback))
+        for callback in (
+            source_callback,
+            "HarborPush",
+            "CreateRunner",
+            "DeployManagerRunner",
+        )
+    )
+    problems = []
+    if any(
+        item.get("verified") is not True
+        for item in (source, publish, created, deployed)
+    ):
+        problems.append(f"{name}:delivery_readback_missing")
+    image = publish.get("image")
+    source_read = _mapping(_callback_record(records, "ConfirmWorkflow"))
+    if (
+        not isinstance(image, str)
+        or deployed.get("image") != image
+        or (
+            (
+                not _chain_copy_image_verified(
+                    receipt, toolbox, source, publish, deployed
+                )
+                or source_read.get("image") != toolbox.get("source_image")
+            )
+            if copy_mode
+            else source.get("digest") != publish.get("digest")
+        )
+    ):
+        problems.append(f"{name}:delivery_image_mismatch")
+    return problems
+
+
+def _chain_copy_image_verified(
+    receipt: JSONObject,
+    toolbox: JSONObject,
+    confirmation: JSONObject,
+    publish: JSONObject,
+    deployed: JSONObject,
+) -> bool:
+    """Link the plan's immutable source digest to the Harbor artifact and running Pods.
+
+    :param receipt: Schema-validated chain result with the confirmed plan digest.
+    :param toolbox: Harbor source and destination from the confirmed plan.
+    :param confirmation: ResolveChainPlan execution record.
+    :param publish: Independently verified Harbor publication result.
+    :param deployed: Deployment result containing native running Pod image IDs.
+    :returns: Whether the same SHA-256 identity is proven throughout delivery.
+    """
+    if (
+        receipt.get("confirmable") is not True
+        or not receipt.get("plan_digest")
+        or receipt["plan_digest"] != confirmation.get("plan_digest")
+    ):
+        return False
+    source = toolbox.get("source_image")
+    origin = toolbox.get("origin")
+    project = toolbox.get("project")
+    repository = toolbox.get("repository")
+    if (
+        not isinstance(source, str)
+        or not isinstance(origin, str)
+        or not isinstance(project, str)
+        or not project
+        or not isinstance(repository, str)
+        or not repository
+    ):
+        return False
+    source_repository, separator, digest = source.rpartition("@")
+    try:
+        authority = urlsplit(origin)
+        valid_digest = digest == f"sha256:{normalized_digest(digest)}"
+    except (KubernetesError, ValueError):
+        return False
+    prefix = f"{authority.netloc}/{project}/"
+    expected_image = f"{prefix}{repository}@{digest}"
+    pods = deployed.get("pods")
+    return (
+        bool(separator)
+        and authority.scheme == "https"
+        and bool(authority.netloc)
+        and source_repository.startswith(prefix)
+        and len(source_repository) > len(prefix)
+        and valid_digest
+        and publish.get("digest") == digest
+        and publish.get("image") == expected_image
+        and isinstance(pods, list)
+        and bool(pods)
+        and all(_running_pod_has_digest(item, digest) for item in pods)
+    )
+
+
+def _running_pod_has_digest(value: JSONValue, digest: str) -> bool:
+    """Read a running Pod's native image ID independently of deployment spec.
+
+    :param value: Pod image observation reported by the native deployment read-back.
+    :param digest: Exact SHA-256 digest confirmed for publication.
+    :returns: Whether the named Pod reports the confirmed digest as its image ID.
+    """
+    pod = _mapping(value)
+    image_id = pod.get("image_id")
+    name = pod.get("name")
+    if not isinstance(name, str) or not name or not isinstance(image_id, str):
+        return False
+    _, scheme, reference = image_id.partition("://")
+    return (reference if scheme else image_id).rpartition("@")[2] == digest
+
+
 def _check_targeted_receipt(
     name: str,
     receipt: JSONObject,
@@ -1843,29 +2091,7 @@ def _check_targeted_receipt(
     try:
         if kind == "image_build_readiness" and operation == "chain":
             validate_specification(receipt, IMAGE_BUILD_READINESS_SCHEMA)
-            records = receipt.get("records")
-            records = records if isinstance(records, list) else []
-            callbacks = [
-                _callback_record(records, callback)
-                for callback in (
-                    "HarborBuild",
-                    "HarborPush",
-                    "CreateRunner",
-                    "DeployManagerRunner",
-                )
-            ]
-            if any(
-                item is None or item.get("verified") is not True for item in callbacks
-            ):
-                problems.append(f"{name}:delivery_readback_missing")
-            build, publish, _, deployed = (item or {} for item in callbacks)
-            image = publish.get("image")
-            if (
-                not isinstance(image, str)
-                or build.get("digest") != publish.get("digest")
-                or deployed.get("image") != image
-            ):
-                problems.append(f"{name}:delivery_image_mismatch")
+            problems.extend(_check_chain_delivery(name, receipt))
             cleanup = _mapping(receipt.get("cleanup"))
             if cleanup.get("status") != PASS or cleanup.get("failures") != []:
                 problems.append(f"{name}:cleanup_unproven")
@@ -1902,18 +2128,19 @@ def _check_targeted_receipt(
             problems.extend(
                 f"{name}:{item}" for item in _check_source_revision(receipt)
             )
-            if kind in {"gitlab_repository", "gitlab_merge_request"}:
+            operation_key = _operation_key(receipt)
+            if (
+                kind in {"gitlab_repository", "gitlab_merge_request"}
+                or operation_key in RUNNER_CONTROL_OPERATIONS
+            ):
                 validate_specification(receipt, "results/gitlab-action.schema.json")
+            if kind in {"gitlab_repository", "gitlab_merge_request"}:
                 supported = (
                     {"commit"} if kind == "gitlab_repository" else {"create", "update"}
                 )
                 if operation not in supported:
                     problems.append(f"{name}:operation_unexpected")
-            elif (
-                kind,
-                operation,
-                receipt.get("result_action"),
-            ) not in REQUIRED_GITLAB_OPERATIONS:
+            elif operation_key not in SUPPORTED_GITLAB_OPERATIONS:
                 problems.append(f"{name}:receipt_not_declared")
             if any(not value for value in context.values()):
                 problems.append(f"{name}:setup_context_incomplete")
@@ -1969,6 +2196,7 @@ def evaluate(
             review.problems.extend(problems)
             if not problems:
                 review.accepted.append(name)
+    review.runner_control_receipts()
     review.mirror_receipts()
     if required_operations is not None:
         review.required_coverage(required_operations)
