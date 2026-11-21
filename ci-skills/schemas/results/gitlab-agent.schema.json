@@ -1212,7 +1212,7 @@
                 "ABSENT",
                 "RECORDED"
               ],
-              "description": "PLANNED: fresh connect plan. ABSENT: no ownership record. PRESENT: this invocation read an active connection. RECORDED: only the ownership record names the token."
+              "description": "PLANNED: fresh connect plan. ABSENT: no ownership record, or a confirmed delete read the token absent. PRESENT: this invocation read an active connection. RECORDED: only the ownership record names the token."
             },
             "id": {
               "type": [

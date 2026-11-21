@@ -170,8 +170,8 @@ Each result record carries `credentials`, built from this invocation's observati
 | `kubernetes.created_objects` | Objects this invocation created with T2: kind, name, namespace, UID |
 | `agent_credential` | T3 `state`, ID, Secret `storage`, `consumers` |
 
-`state` is `PLANNED` for a fresh connect plan, `ABSENT` without an ownership record, `PRESENT` when the command
-read an active connection, and `RECORDED` when only the ownership record names the token.
+`state` is `PLANNED` for a fresh connect plan, `ABSENT` without an ownership record or after a confirmed delete,
+`PRESENT` when the command read an active connection, and `RECORDED` when only the ownership record names the token.
 
 Repeat connect (`NO_OP`) on `hott/test`, run `efc9e7db47ff427bbc53df1978834563`:
 

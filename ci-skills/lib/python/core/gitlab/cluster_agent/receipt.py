@@ -10,6 +10,7 @@ from lib.python.core.gitlab.cluster_agent.absence import LogicalAgentAbsence
 from lib.python.core.gitlab.cluster_agent.authority import AgentAuthorities
 from lib.python.core.gitlab.cluster_agent.ci_access import CI_ACCESS_ARTIFACT
 from lib.python.core.gitlab.cluster_agent.connection import AgentConnectivity
+from lib.python.core.gitlab.cluster_agent.delete import AgentCleanup
 from lib.python.core.gitlab.cluster_agent.evidence import (
     AGENT_KIND,
     CREDENTIAL_HTTP_STATUS,
@@ -64,6 +65,7 @@ _INSTALLATION_FIELDS: Final = (
 _NOT_VERIFIED: Final = "NOT_VERIFIED"
 _LOGICAL_SCOPE: Final = "LOGICAL_SCOPE"
 _NOT_CHECKED: Final = "NOT_CHECKED"
+_TRACKED_IDENTITIES: Final = "TRACKED_IDENTITIES"
 _CONNECTED: Final = "CONNECTED"
 _RESULT_MISMATCH: Final = "agent_receipt_native_observation_mismatch"
 _REPORT_KIND: Final = "GitLabAgent"
@@ -95,7 +97,7 @@ def _absence(mode: str) -> JSONObject:
         "agent_absent": True if verified else None,
         "release_absent": True if verified else None,
         "run_resources_absent": True if verified else None,
-        "exact_ids_checked": mode == "TRACKED_IDENTITIES",
+        "exact_ids_checked": mode == _TRACKED_IDENTITIES,
     }
 
 
@@ -202,6 +204,74 @@ def _connected_record(
     )
 
 
+def _deleted_record(
+    authorities: AgentAuthorities,
+    selection: ConnectSelection,
+    owner: JSONObject,
+    cleanup: AgentCleanup,
+    row: dict[str, JSONValue],
+) -> None:
+    """Record a confirmed tracked delete from its before read, after read and absence proof.
+
+    :param authorities: Selected providers and the cluster UID read for this invocation.
+    :param selection: Run, Agent and release identity the delete used.
+    :param owner: Ownership record that authorized the delete.
+    :param cleanup: Native state read before the writes, final resource rows and
+        independent logical absence.
+    :param row: Record to complete in place.
+    :raises ValueError: The cleanup does not belong to this owner, project, release or
+        cluster.
+    """
+    _owner_selection(authorities, selection, owner)
+    absence = cleanup.absence
+    if (
+        cleanup.ownership.document != owner
+        or absence.project != selection.project
+        or absence.release != selection.release
+        or absence.cluster_uid != authorities.cluster_uid
+    ):
+        raise ValueError(_RESULT_MISMATCH)
+    credential_id = json_integer(owner[CREDENTIAL_ID])
+    owned = list(json_objects(owner["resources"]))
+    observed = [
+        {**item, "state": PRESENT if item["uid"] in cleanup.present else ABSENT}
+        for item in owned
+    ]
+    before: dict[str, JSONValue] = {
+        **_recorded_snapshot(selection, owner),
+        "agent_http_status": (
+            HTTPStatus.OK if cleanup.agent_present else HTTPStatus.NOT_FOUND
+        ).value,
+        CREDENTIAL_IDS: [credential_id] if cleanup.token_present else [],
+        CREDENTIAL_HTTP_STATUS: (
+            HTTPStatus.OK if cleanup.token_present else HTTPStatus.NOT_FOUND
+        ).value,
+        # Rows equal to ownership.resources are written once, as null.
+        "resources": None if observed == owned else observed,
+        "connection_ids": [],
+    }
+    after: dict[str, JSONValue] = {
+        **_snapshot(selection),
+        "agent_id": owner["agent_id"],
+        "agent_http_status": HTTPStatus.NOT_FOUND.value,
+        CREDENTIAL_IDS: [],
+        CREDENTIAL_HTTP_STATUS: HTTPStatus.NOT_FOUND.value,
+        "resources": list(cleanup.resources),
+        "connection_ids": [],
+    }
+    row.update(
+        before=before,
+        after=after,
+        ownership=owner,
+        installation={
+            **{field: owner[field] for field in _INSTALLATION_FIELDS},
+            "image_reference": f"{IMAGE_TAG}@{json_string(owner['image_digest'])}",
+            "observed_image_ids": [],
+        },
+        absence=_absence(_TRACKED_IDENTITIES),
+    )
+
+
 def _logical_record(
     authorities: AgentAuthorities,
     selection: ConnectSelection,
@@ -228,7 +298,8 @@ def _credentials(
     :returns: GitLab requests sent with the selected GitLab token, Kubernetes objects
         created with the selected kubeconfig, and the Agent token's state, ID, Secret
         and consumers. The token state is ``PLANNED`` for a fresh connect plan,
-        ``ABSENT`` when no ownership record exists, ``PRESENT`` when this invocation
+        ``ABSENT`` when no ownership record exists or a confirmed delete read the
+        token absent, ``PRESENT`` when this invocation
         read an active connection, and ``RECORDED`` when only the ownership record
         names the token.
     """
@@ -256,8 +327,14 @@ def _credentials(
     if owner is not None:
         record = json_object(owner)
         connection = json_object(row["connection"])
+        if operation == DELETE and action == APPLIED:
+            state = ABSENT
+        elif connection["state"] == _CONNECTED:
+            state = PRESENT
+        else:
+            state = RECORDED
         agent = {
-            "state": PRESENT if connection["state"] == _CONNECTED else RECORDED,
+            "state": state,
             "id": json_integer(record[CREDENTIAL_ID]),
             "name": json_string(record[CREDENTIAL_NAME]),
             "created": operation == CONNECT
@@ -375,6 +452,15 @@ def _record_fields(
         and outcome.before is None
     ):
         _logical_record(authorities, selection, observation, row)
+    elif (
+        operation == DELETE
+        and outcome.action == APPLIED
+        and isinstance(observation, AgentCleanup)
+        and outcome.before is not None
+    ):
+        _deleted_record(
+            authorities, selection, outcome.before.document, observation, row
+        )
     elif (
         operation == DELETE
         and outcome.action == PLANNED

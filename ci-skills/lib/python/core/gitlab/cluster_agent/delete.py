@@ -100,11 +100,29 @@ class AgentCleanup:
         :type: LogicalAgentAbsence
 
         Independent current empty Agent and release selector.
+
+    .. attribute :: agent_present
+        :type: bool
+
+        The native Agent registration existed when the delete read state before writing.
+
+    .. attribute :: token_present
+        :type: bool
+
+        The native Agent token existed at that same read.
+
+    .. attribute :: present
+        :type: frozenset[str]
+
+        UIDs of the owned resources that existed at that same read.
     """
 
     ownership: RecoveryRecord
     resources: tuple[JSONObject, ...]
     absence: LogicalAgentAbsence
+    agent_present: bool
+    token_present: bool
+    present: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,4 +584,11 @@ def _delete_tracked(
     )
     if absence.cluster_uid != cluster_uid:
         raise KubernetesError("agent_delete_scope_mismatch")
-    return AgentCleanup(record, tuple(final), absence)
+    return AgentCleanup(
+        record,
+        tuple(final),
+        absence,
+        before.agent_present,
+        before.token_present,
+        present,
+    )

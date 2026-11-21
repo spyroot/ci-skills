@@ -323,13 +323,14 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             id="tracked-delete-plan",
         ),
         # A confirmed delete removes the objects the ownership rows mark created;
-        # it creates none, so those markers must not reach the trace.
+        # it creates none, so those markers must not reach the trace. GitLab read
+        # the token absent after the delete, so its state is ABSENT.
         pytest.param(
             DELETE,
             STATUS.APPLIED,
             True,
             False,
-            TERMS.RECORDED,
+            TERMS.ABSENT,
             False,
             (),
             id="tracked-delete-apply",
