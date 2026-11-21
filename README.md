@@ -747,3 +747,19 @@ Kubernetes; GitHub is additionally required only when publication checking is se
    `tests/acceptance/runner-lifecycle/` and the tag pair under `tests/acceptance/runner-tag/`.
 4. Run the checker locally and commit only a `PASS` set. Move a superseded receipt to
    `tests/acceptance/historical/` instead of deleting it.
+
+The GitLab Agent series is five receipts from one run of one installed copy, plus one cleanup record:
+
+1. `gitlab_agent.py connect --live-plan`, then `--run-id RUN_ID --apply --confirm-plan DIGEST --receipt-out
+   agent-connect-applied.json`; repeat the confirmed connect for `agent-connect-no-op.json`.
+2. Stage the proof job and run it as in the [Agent reference](ci-skills/references/gitlab-agent.md#ci-access-proof-job),
+   then `gitlab_agent.py verify --run-id RUN_ID --job-url JOB_URL --receipt-out agent-verify.json`.
+3. `gitlab_agent.py delete --run-id RUN_ID --agent-name AGENT_NAME` with live plan and confirmation, receipt
+   `agent-delete-applied.json`, then
+   `python tools/qualify_agent_cleanup.py observe --skill SKILL --connect-receipt agent-connect-applied.json
+   --out after.json`.
+4. Repeat the confirmed delete for `agent-delete-no-op.json`, observe again into `repeat.json`, then
+   `python tools/qualify_agent_cleanup.py attach --connect-receipt agent-connect-applied.json --after after.json
+   --repeat repeat.json --receipt agent-delete-no-op.json --out agent-delete-no-op-with-cleanup.json`.
+5. Commit the four receipts and the attached NO_OP receipt; `observe` refuses while the Agent, its token or any
+   run-created object still exists, and `check_agent_series` rejects the series without the record.
