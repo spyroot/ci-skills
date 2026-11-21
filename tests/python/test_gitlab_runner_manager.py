@@ -38,7 +38,7 @@ CALLBACKS = import_script_module("lib.python.core.gitlab.runner_manager.callback
 K8S_RUNNER = import_script_module("lib.python.core.kubernetes.runner")
 RESOURCES = import_script_module("lib.python.core.kubernetes.resources")
 RUNNER_RUNTIME = import_script_module("lib.python.core.runner")
-RUNNER_SCOPE = import_script_module("lib.python.core.kubernetes.runner_scope")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
 SCC_ACCESS = import_script_module("lib.python.core.kubernetes.scc_access")
 TARGET = import_script_module("lib.python.core.target")
@@ -2024,13 +2024,9 @@ def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
 @pytest.mark.parametrize(
     ("kind", "labels"),
     (
-        pytest.param(
-            RUNNER_SCOPE.DEPLOYMENT_KIND, RUN_OWNERSHIP_LABELS, id="deployment"
-        ),
-        pytest.param(
-            RUNNER_SCOPE.ROLE_BINDING_KIND, RUN_OWNERSHIP_LABELS, id="role-binding"
-        ),
-        pytest.param(RUNNER_SCOPE.SECRET_KIND, RUN_SCOPE_LABELS, id="secret"),
+        pytest.param(KINDS.DEPLOYMENT_KIND, RUN_OWNERSHIP_LABELS, id="deployment"),
+        pytest.param(KINDS.ROLE_BINDING_KIND, RUN_OWNERSHIP_LABELS, id="role-binding"),
+        pytest.param(KINDS.SECRET_KIND, RUN_SCOPE_LABELS, id="secret"),
     ),
 )
 def test_manager_borrowed_absence_refuses_stray_run_owned_object_without_mutation(

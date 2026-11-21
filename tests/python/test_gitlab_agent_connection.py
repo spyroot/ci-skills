@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, tzinfo
@@ -22,8 +23,9 @@ from test_gitlab_agent_recovery import (
 
 CONNECTION = import_script_module("lib.python.core.gitlab.cluster_agent.connection")
 POD = import_script_module("lib.python.core.kubernetes.gitlab_agent")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
+TERMS = import_script_module("lib.python.core.gitlab.cluster_agent.terms")
 OCI = import_script_module("lib.python.core.oci")
-CLI_API = import_script_module("lib.python.core.cli_api")
 PROVIDER = INSTALL_TEST.PROVIDER
 RECOVERY = RECOVERY_TEST.RECOVERY
 KUBERNETES = RECOVERY_TEST.KUBERNETES
@@ -53,7 +55,6 @@ REGISTER_MISMATCH: Final = "agent_connection_registration_mismatch"
 METADATA_MISMATCH: Final = "agent_connection_metadata_mismatch"
 POD_MISMATCH: Final = "agent_connection_pod_identity_mismatch"
 ABSENT: Final = "agent_connection_absent"
-OBSERVATION: Final = POD.AgentPodObservation(POD_UID, PLATFORM_DIGEST)
 NOW: Final = datetime(2026, 1, 1, 12, tzinfo=UTC)
 NATIVE: Final = PROVIDER.AgentConnection(
     "42",
@@ -65,6 +66,9 @@ NATIVE: Final = PROVIDER.AgentConnection(
 )
 REPLICA_SET_NAME: Final = "agent-workload-replica"
 REPLICA_SET_UID: Final = "agent-replica-set-uid"
+OBSERVATION: Final = POD.AgentPodObservation(
+    POD_UID, PLATFORM_DIGEST, REPLICA_SET_NAME, REPLICA_SET_UID
+)
 OTHER_REPLICA_SET_NAME: Final = "agent-workload-previous"
 OTHER_REPLICA_SET_UID: Final = "agent-previous-replica-set-uid"
 LEASE_NAME: Final = POD.agent_lease_name(AGENT.id)
@@ -73,12 +77,14 @@ SECOND_POD_NAME: Final = "agent-pod-second"
 SECOND_POD_UID: Final = "second-agent-pod"
 THIRD_POD_NAME: Final = "agent-pod-third"
 THIRD_POD_UID: Final = "third-agent-pod"
+SECOND_CONNECTION_ID: Final = "43"
+THIRD_CONNECTION_ID: Final = "44"
 OTHER_POD_NAME: Final = "agent-pod-foreign"
 # connection._held_by accepts the Pod name alone or followed by "_<suffix>".
 HOLDER_SEPARATOR: Final = "_"
 HOLDER_SUFFIX: Final = "holder-suffix"
-HELD: Final = (f"{POD_NAME}{HOLDER_SEPARATOR}{HOLDER_SUFFIX}", LEASE_UID)
-POLL_READS: Final = int(TIMEOUT / POLL_INTERVAL)
+HELD: Final = POD.AgentLease(f"{POD_NAME}{HOLDER_SEPARATOR}{HOLDER_SUFFIX}", LEASE_UID)
+AGENT_POD_LIMIT: Final = TERMS.AGENT_POD_LIMIT
 
 
 class FixedDatetime(datetime):
@@ -163,7 +169,6 @@ def connectivity(
     provider.connections.return_value = (NATIVE,)
     scope = Mock(return_value=INSTALL_TEST.SCOPE_UIDS)
     correlate = Mock(return_value=OBSERVATION)
-    replica_set = Mock(return_value=(REPLICA_SET_NAME, REPLICA_SET_UID))
     lease = Mock(return_value=HELD)
     store = create_autospec(RECOVERY.AgentRecoveryStore, instance=True)
     store.replace.side_effect = lambda _old, new: RECOVERY.RecoveryRecord(
@@ -174,7 +179,6 @@ def connectivity(
         ("scope", scope),
         ("provider", provider),
         ("correlate", correlate),
-        ("replica_set", replica_set),
         ("lease", lease),
         ("store", store),
     ):
@@ -196,7 +200,6 @@ def connectivity(
     monkeypatch.setattr(CONNECTION, "AgentRecoveryStore", Mock(return_value=store))
     monkeypatch.setattr(CONNECTION, "read_agent_cluster_scope", scope)
     monkeypatch.setattr(CONNECTION, "correlate_agent_pod", correlate)
-    monkeypatch.setattr(CONNECTION, "read_agent_replica_set", replica_set)
     monkeypatch.setattr(CONNECTION, "read_agent_lease", lease)
     return SimpleNamespace(
         gitlab=gitlab,
@@ -204,7 +207,6 @@ def connectivity(
         provider=provider,
         scope=scope,
         correlate=correlate,
-        replica_set=replica_set,
         lease=lease,
         store=store,
         journal=journal,
@@ -238,7 +240,7 @@ def _runtime_resource(
     :param kind: ``ReplicaSet`` or ``Lease``.
     :param name: Native object name.
     :param uid: Native object UID.
-    :param api_version: API version owned by ``kubernetes/gitlab_agent.py``.
+    :param api_version: API version owned by ``kubernetes/kinds.py``.
     :returns: Ownership row in the Agent namespace, created and present.
     """
     return {**_owned_resource(kind, name, uid), "api_version": api_version}
@@ -251,13 +253,13 @@ def _replica_set_row(name: str, uid: str) -> dict[str, object]:
     :param uid: ReplicaSet UID.
     :returns: Row with the ReplicaSet kind and API version.
     """
-    return _runtime_resource(
-        POD.REPLICA_SET_KIND, name, uid, POD.REPLICA_SET_API_VERSION
-    )
+    return _runtime_resource(KINDS.REPLICA_SET_KIND, name, uid, KINDS.APPS_API_VERSION)
 
 
 LEASE_RESOURCE: Final = json.dumps(
-    _runtime_resource(POD.LEASE_KIND, LEASE_NAME, LEASE_UID, POD.LEASE_API_VERSION)
+    _runtime_resource(
+        KINDS.LEASE_KIND, LEASE_NAME, LEASE_UID, KINDS.COORDINATION_API_VERSION
+    )
 )
 
 
@@ -266,8 +268,11 @@ def test_confirm_agent_connection_paces_reads_and_persists_exact_pod_uid(
 ) -> None:
     """Poll only after an authenticated empty result, then persist the native UIDs.
 
-    The Pod row is followed by the ReplicaSet that controls the Pod and the agentk
-    Lease held by that Pod, both read after the connection is proved.
+    The Pod row is followed by the ReplicaSet that ``correlate_agent_pod`` returned
+    for the Pod and by the agentk Lease held by that Pod. Only the Lease is read
+    after the connection is proved; the ReplicaSet is not read a second time.
+
+    :param connectivity: Connection harness with a shared fake clock.
     """
     case = connectivity
     case.provider.connections.side_effect = ((), (NATIVE,))
@@ -300,7 +305,6 @@ def test_confirm_agent_connection_paces_reads_and_persists_exact_pod_uid(
         "provider.connections",
         "provider.connections",
         "correlate",
-        "replica_set",
         "lease",
         "store.replace",
     ]
@@ -309,7 +313,6 @@ def test_confirm_agent_connection_paces_reads_and_persists_exact_pod_uid(
     assert expected.namespace == NAMESPACE
     assert expected.image.endswith(f"@{INSTALL_TEST.IMAGE_DIGEST}")
     assert expected.runtime_digests == case.image.runtime_digests
-    case.replica_set.assert_called_once_with(case.kube, POD_NAME, expected)
     case.lease.assert_called_once_with(case.kube, NAMESPACE, AGENT.id)
     assert case.kube.mock_calls == []
 
@@ -318,7 +321,7 @@ def test_confirm_agent_connection_paces_reads_and_persists_exact_pod_uid(
     ("holder", "held"),
     (
         pytest.param(POD_NAME, True, id="pod-name"),
-        pytest.param(HELD[0], True, id="pod-name-with-suffix"),
+        pytest.param(HELD.holder, True, id="pod-name-with-suffix"),
         pytest.param(
             f"{SECOND_POD_NAME}{HOLDER_SEPARATOR}{HOLDER_SUFFIX}",
             True,
@@ -332,6 +335,9 @@ def test_confirm_agent_connection_paces_reads_and_persists_exact_pod_uid(
         ),
         pytest.param(f"{POD_NAME}-{HOLDER_SUFFIX}", False, id="longer-pod-name"),
         pytest.param(POD_NAME[:-1], False, id="prefix-of-pod-name"),
+        pytest.param(
+            f"{POD_NAME}{HOLDER_SEPARATOR}", False, id="separator-without-suffix"
+        ),
         pytest.param("", False, id="unheld"),
     ),
 )
@@ -339,8 +345,10 @@ def test_lease_holder_matches_only_a_connected_pod(holder: str, held: bool) -> N
     """Accept a holder that is a connected Pod name, alone or followed by ``_<suffix>``.
 
     ``longer-pod-name`` and ``prefix-of-pod-name`` are other Pods in the same
-    namespace whose names share characters with a connected Pod; ``unheld`` is the
-    empty holder ``read_agent_lease`` returns for a Lease without a holder.
+    namespace whose names share characters with a connected Pod;
+    ``separator-without-suffix`` is a holder that names no leader-election suffix;
+    ``unheld`` is the empty holder ``read_agent_lease`` returns for a Lease without
+    a holder.
 
     :param holder: Holder identity read from the Lease.
     :param held: Whether a connected Pod holds the Lease.
@@ -355,9 +363,12 @@ def test_lease_holder_matches_only_a_connected_pod(holder: str, held: bool) -> N
     (
         pytest.param((HELD,), 1, id="held-at-first-read"),
         pytest.param((None, HELD), 2, id="absent-then-held"),
-        pytest.param((("", LEASE_UID), HELD), 2, id="unheld-then-held"),
+        pytest.param((POD.AgentLease("", LEASE_UID), HELD), 2, id="unheld-then-held"),
         pytest.param(
-            ((OTHER_POD_NAME, LEASE_UID), (POD_NAME, LEASE_UID)),
+            (
+                POD.AgentLease(OTHER_POD_NAME, LEASE_UID),
+                POD.AgentLease(POD_NAME, LEASE_UID),
+            ),
             2,
             id="other-pod-then-connected-pod",
         ),
@@ -388,72 +399,183 @@ def test_confirm_agent_connection_waits_for_lease_held_by_connected_pod(
     case.store.replace.assert_called_once()
 
 
-def test_confirm_agent_connection_never_records_lease_held_by_another_pod(
-    connectivity: SimpleNamespace,
+@pytest.mark.parametrize(
+    ("reply", "first_read_empty"),
+    (
+        pytest.param(POD.AgentLease(OTHER_POD_NAME, LEASE_UID), False, id="other-pod"),
+        pytest.param(
+            POD.AgentLease(f"{POD_NAME}{HOLDER_SEPARATOR}", LEASE_UID),
+            False,
+            id="separator-without-suffix",
+        ),
+        pytest.param(POD.AgentLease("", LEASE_UID), False, id="unheld"),
+        pytest.param(None, False, id="absent"),
+        pytest.param(
+            POD.AgentLease(OTHER_POD_NAME, LEASE_UID),
+            True,
+            id="other-pod-after-empty-connection-read",
+        ),
+    ),
+)
+def test_confirm_agent_connection_persists_without_lease_row_after_half_the_budget(
+    connectivity: SimpleNamespace, reply: object, first_read_empty: bool
 ) -> None:
-    """Keep re-reading a Lease held by a Pod that is not connected until the deadline.
+    """Persist the connection with no Lease row when no connected Pod holds the Lease.
 
-    The connect fails with the shared deadline error and writes no ownership.
+    ``read_agent_lease`` returns, at every read after the connections are proved, a
+    Lease held by a Pod that is not connected, a holder with an empty suffix, an
+    unheld Lease, or no Lease. The Lease wait ends at half of the budget that
+    remained when it started, so persistence and compensation keep the other half,
+    and the connect succeeds with the Pod and ReplicaSet rows only.
+    Each pause is at most ``POLL_INTERVAL``; in
+    ``other-pod-after-empty-connection-read`` the first connection read is empty,
+    the wait starts after one pause and its last pause is shortened so the wait ends
+    exactly at half of the remaining budget.
 
     :param connectivity: Connection harness with a shared fake clock.
+    :param reply: The one ``read_agent_lease`` result for every read.
+    :param first_read_empty: GitLab returns no connection at the first read.
     """
     case = connectivity
-    case.lease.return_value = (OTHER_POD_NAME, LEASE_UID)
+    case.lease.return_value = reply
+    start = 0.0
+    if first_read_empty:
+        case.provider.connections.side_effect = ((), (NATIVE,))
+        start = POLL_INTERVAL
+    before = deepcopy(case.record.document)
 
-    with pytest.raises(
-        CLI_API.APIError, match=f"^{CLI_API.REQUEST_DEADLINE_EXCEEDED}$"
-    ):
-        CONNECTION.confirm_fresh_agent_connection(*_args(case), timeout=TIMEOUT)
+    confirmed = CONNECTION.confirm_fresh_agent_connection(*_args(case), timeout=TIMEOUT)
 
-    assert case.lease.call_count == POLL_READS
-    assert case.delay.call_args_list == [call(POLL_INTERVAL)] * POLL_READS
-    case.store.replace.assert_not_called()
+    stop = start + (TIMEOUT - start) / 2
+    pauses = [item.args[0] for item in case.delay.call_args_list]
+    lease_pauses = pauses[int(first_read_empty) :]
+    assert sum(lease_pauses) == stop - start
+    assert max(lease_pauses) <= POLL_INTERVAL
+    assert case.lease.call_count == len(lease_pauses) + 1
+    assert CONNECTION.time.monotonic() == stop
+    assert confirmed.record.document["state"] == CONNECTED
+    assert confirmed.record.document["resources"] == [
+        *before["resources"],
+        _owned_resource(KINDS.POD_KIND, POD_NAME, POD_UID),
+        _replica_set_row(REPLICA_SET_NAME, REPLICA_SET_UID),
+    ]
+    case.store.replace.assert_called_once_with(case.record, confirmed.record.document)
 
 
-def test_runtime_rows_record_each_replica_set_once_in_name_order(
+SECOND_NATIVE: Final = replace(
+    NATIVE, connection_id=SECOND_CONNECTION_ID, pod_name=SECOND_POD_NAME
+)
+THIRD_NATIVE: Final = replace(
+    NATIVE, connection_id=THIRD_CONNECTION_ID, pod_name=THIRD_POD_NAME
+)
+
+
+def test_confirm_agent_connection_records_each_replica_set_once_in_name_order(
     connectivity: SimpleNamespace,
 ) -> None:
     """Record one created row per distinct ReplicaSet, sorted by name, then the Lease.
 
     Two of the three connected Pods share a ReplicaSet, as the two Pods in
     tests/fixtures/gitlab-agent/connect-applied.json do; the third has another.
+    Each ReplicaSet comes from the ``correlate_agent_pod`` result of its Pod, so
+    after the correlation connect reads only the Lease.
 
     :param connectivity: Connection harness with mocked Kubernetes readers.
     """
     case = connectivity
-    controllers = {
-        POD_NAME: (REPLICA_SET_NAME, REPLICA_SET_UID),
-        SECOND_POD_NAME: (OTHER_REPLICA_SET_NAME, OTHER_REPLICA_SET_UID),
-        THIRD_POD_NAME: (REPLICA_SET_NAME, REPLICA_SET_UID),
+    observations = {
+        THIRD_POD_NAME: POD.AgentPodObservation(
+            THIRD_POD_UID, PLATFORM_DIGEST, REPLICA_SET_NAME, REPLICA_SET_UID
+        ),
+        POD_NAME: OBSERVATION,
+        SECOND_POD_NAME: POD.AgentPodObservation(
+            SECOND_POD_UID,
+            PLATFORM_DIGEST,
+            OTHER_REPLICA_SET_NAME,
+            OTHER_REPLICA_SET_UID,
+        ),
     }
-    case.replica_set.side_effect = lambda _kube, name, _expected: controllers[name]
-    case.lease.return_value = (
-        f"{SECOND_POD_NAME}{HOLDER_SEPARATOR}{HOLDER_SUFFIX}",
-        LEASE_UID,
+    case.provider.connections.return_value = (THIRD_NATIVE, NATIVE, SECOND_NATIVE)
+    case.correlate.side_effect = lambda _kube, connection, _expected: observations[
+        connection.pod_name
+    ]
+    case.lease.return_value = POD.AgentLease(
+        f"{SECOND_POD_NAME}{HOLDER_SEPARATOR}{HOLDER_SUFFIX}", LEASE_UID
     )
-    pods = {
-        THIRD_POD_NAME: THIRD_POD_UID,
-        POD_NAME: POD_UID,
-        SECOND_POD_NAME: SECOND_POD_UID,
-    }
-    _, correlation, _ = CONNECTION._installation(
-        case.gitlab, SELECTION, case.record, case.image
-    )
-    deadline = CLI_API.RequestDeadline(TIMEOUT, CONNECTION.time.monotonic)
+    before = deepcopy(case.record.document)
 
-    rows = CONNECTION._runtime_rows(case.kube, correlation, AGENT.id, pods, deadline)
+    confirmed = CONNECTION.confirm_fresh_agent_connection(*_args(case), timeout=TIMEOUT)
 
-    assert rows == (
+    assert confirmed.record.document["resources"] == [
+        *before["resources"],
+        _owned_resource(KINDS.POD_KIND, POD_NAME, POD_UID),
+        _owned_resource(KINDS.POD_KIND, SECOND_POD_NAME, SECOND_POD_UID),
+        _owned_resource(KINDS.POD_KIND, THIRD_POD_NAME, THIRD_POD_UID),
         _replica_set_row(OTHER_REPLICA_SET_NAME, OTHER_REPLICA_SET_UID),
         _replica_set_row(REPLICA_SET_NAME, REPLICA_SET_UID),
         json.loads(LEASE_RESOURCE),
-    )
-    assert case.replica_set.call_args_list == [
-        call(case.kube, name, correlation) for name in sorted(pods)
     ]
+    assert case.correlate.call_count == len(observations)
     case.lease.assert_called_once_with(case.kube, NAMESPACE, AGENT.id)
     case.delay.assert_not_called()
     assert case.kube.mock_calls == []
+
+
+@pytest.mark.parametrize(
+    ("count", "accepted"),
+    (
+        pytest.param(AGENT_POD_LIMIT, True, id="at-limit"),
+        pytest.param(AGENT_POD_LIMIT + 1, False, id="over-limit"),
+    ),
+)
+def test_confirm_agent_connection_bounds_connected_pods_by_agent_pod_limit(
+    connectivity: SimpleNamespace, count: int, accepted: bool
+) -> None:
+    """Record at most ``terms.AGENT_POD_LIMIT`` connected Pods in one connect.
+
+    Delete accepts at most that many Pod and ReplicaSet rows, so connect refuses a
+    larger active set from GitLab before it correlates any Pod.
+
+    :param connectivity: Connection harness with mocked Kubernetes readers.
+    :param count: Active connections GitLab returns, each from its own Pod.
+    :param accepted: Whether connect persists the set.
+    """
+    case = connectivity
+    natives = tuple(
+        replace(NATIVE, connection_id=str(index), pod_name=f"{POD_NAME}-{index}")
+        for index in range(count)
+    )
+    observations = {
+        item.pod_name: replace(OBSERVATION, uid=f"{POD_UID}-{item.connection_id}")
+        for item in natives
+    }
+    case.provider.connections.return_value = natives
+    case.correlate.side_effect = lambda _kube, connection, _expected: observations[
+        connection.pod_name
+    ]
+    case.lease.return_value = POD.AgentLease(natives[0].pod_name, LEASE_UID)
+    before = deepcopy(case.record.document)
+
+    if not accepted:
+        with pytest.raises(KUBERNETES.KubernetesError, match=f"^{METADATA_MISMATCH}$"):
+            CONNECTION.confirm_fresh_agent_connection(*_args(case), timeout=TIMEOUT)
+        case.correlate.assert_not_called()
+        case.lease.assert_not_called()
+        case.store.replace.assert_not_called()
+        return
+
+    confirmed = CONNECTION.confirm_fresh_agent_connection(*_args(case), timeout=TIMEOUT)
+
+    added = confirmed.record.document["resources"][len(before["resources"]) :]
+    assert Counter(row["kind"] for row in added) == {
+        KINDS.POD_KIND: count,
+        KINDS.REPLICA_SET_KIND: 1,
+        KINDS.LEASE_KIND: 1,
+    }
+    assert {row["uid"] for row in added if row["kind"] == KINDS.POD_KIND} == {
+        item.uid for item in observations.values()
+    }
+    case.store.replace.assert_called_once()
 
 
 def test_agent_connection_repeat_proves_original_pod_without_writes(
@@ -514,7 +636,7 @@ def test_agent_connection_repeat_proves_original_pod_without_writes(
         (
             "pod",
             "return_value",
-            POD.AgentPodObservation(OTHER_UID, PLATFORM_DIGEST),
+            replace(OBSERVATION, uid=OTHER_UID),
             POD_MISMATCH,
             1,
             1,

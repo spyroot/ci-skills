@@ -21,13 +21,14 @@ ABSENCE = import_script_module("lib.python.core.gitlab.cluster_agent.absence")
 CLI_API = import_script_module("lib.python.core.cli_api")
 ENDPOINTS = import_script_module("lib.python.core.endpoints")
 EVIDENCE = import_script_module("lib.python.core.gitlab.cluster_agent.evidence")
+GITLAB_AGENT = import_script_module("lib.python.core.kubernetes.gitlab_agent")
 PLAN = import_script_module("lib.python.core.gitlab.cluster_agent.plan")
 PORTABLE = import_script_module("lib.python.core.portable")
 RECEIPT = import_script_module("lib.python.core.gitlab.cluster_agent.receipt")
 RECOVERY = import_script_module("lib.python.core.gitlab.cluster_agent.recovery")
 TERMS = import_script_module("lib.python.core.gitlab.cluster_agent.terms")
 REPORT = import_script_module("lib.python.core.report")
-RUNNER_SCOPE = import_script_module("lib.python.core.kubernetes.runner_scope")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
 RUNTIME = import_script_module("lib.python.core.runtime")
 SCHEMA = import_script_module("lib.python.core.schema")
 SECRET = import_script_module("lib.python.core.gitlab.cluster_agent.secret")
@@ -64,15 +65,23 @@ POD_NAME: Final = "consumer-agent-v2-abc-xyz"
 POD_UID: Final = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 DEPLOYMENT_NAME: Final = "consumer-agent-v2"
 DEPLOYMENT_UID: Final = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+REPLICA_SET_NAME: Final = "consumer-agent-v2-abc"
+REPLICA_SET_UID: Final = "cccccccc-dddd-eeee-ffff-000000000000"
+AGENT_ID: Final = 17
+LEASE_NAME: Final = GITLAB_AGENT.agent_lease_name(AGENT_ID)
+LEASE_UID: Final = "dddddddd-eeee-ffff-0000-111111111111"
 GITLAB_VERSION: Final = "17.5.0"
 KAS_ADDRESS: Final = "wss://kas.gitlab.example.test"
 TOKEN_PLAINTEXT: Final = "unit-agent-token-plaintext"
 # Input field that holds TOKEN_PLAINTEXT; the trace must never copy it.
 PLANTED_FIELD: Final = "agent_token"
 CONNECTED: Final = CONNECTION_TEST.CONNECTED
-NAMESPACE_KIND: Final = RUNNER_SCOPE.NAMESPACE_KIND
-SECRET_KIND: Final = RUNNER_SCOPE.SECRET_KIND
-DEPLOYMENT_KIND: Final = RUNNER_SCOPE.DEPLOYMENT_KIND
+NAMESPACE_KIND: Final = KINDS.NAMESPACE_KIND
+SECRET_KIND: Final = KINDS.SECRET_KIND
+DEPLOYMENT_KIND: Final = KINDS.DEPLOYMENT_KIND
+POD_KIND: Final = KINDS.POD_KIND
+REPLICA_SET_KIND: Final = KINDS.REPLICA_SET_KIND
+LEASE_KIND: Final = KINDS.LEASE_KIND
 OTHER_SECRET_KEY: Final = "ca.crt"
 UNKNOWN_FIELD: Final = "value"
 TABLE_FIELD: Final = "table"
@@ -421,6 +430,32 @@ def test_credentials_trace_names_each_token_use_without_values(
     assert TOKEN_PLAINTEXT not in json.dumps(trace)
 
 
+def _workload_rows_added(row: JSONRow) -> None:
+    """Add the Deployment row and the rows connect records for its workload.
+
+    Helm creates the Deployment with the selected kubeconfig; the Deployment
+    controller creates the ReplicaSet and the Pod, and agentk creates its Lease.
+    Connect records all four as created by the run, so delete removes them.
+
+    :param row: Record copy to change.
+    """
+    row["ownership"][RESOURCES_FIELD].extend(
+        {
+            "kind": kind,
+            "name": name,
+            "namespace": NAMESPACE,
+            "uid": uid,
+            "created": True,
+        }
+        for kind, name, uid in (
+            (DEPLOYMENT_KIND, DEPLOYMENT_NAME, DEPLOYMENT_UID),
+            (REPLICA_SET_KIND, REPLICA_SET_NAME, REPLICA_SET_UID),
+            (POD_KIND, POD_NAME, POD_UID),
+            (LEASE_KIND, LEASE_NAME, LEASE_UID),
+        )
+    )
+
+
 @pytest.mark.parametrize(
     ("change", "storage_uid", "created_kinds", "token_created"),
     (
@@ -477,6 +512,13 @@ def test_credentials_trace_names_each_token_use_without_values(
             True,
             id="installation-rows-ignored",
         ),
+        pytest.param(
+            _workload_rows_added,
+            SECRET_UID,
+            (NAMESPACE_KIND, SECRET_KIND, DEPLOYMENT_KIND),
+            True,
+            id="workload-rows-not-created-with-kubeconfig",
+        ),
     ),
 )
 def test_credentials_trace_reads_only_owned_rows_and_creation_markers(
@@ -486,6 +528,11 @@ def test_credentials_trace_reads_only_owned_rows_and_creation_markers(
     token_created: bool,
 ) -> None:
     """Trace a connected apply when one ownership or installation field changes.
+
+    ``workload-rows-not-created-with-kubeconfig`` records the Deployment with its
+    ReplicaSet, Pod and Lease, as a fresh connect does; ``created_objects`` names
+    only the Deployment of those rows, because the selected kubeconfig created none
+    of the others.
 
     :param change: Edits one field of the record copy.
     :param storage_uid: Expected UID of the Secret that stores the Agent token.

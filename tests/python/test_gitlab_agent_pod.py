@@ -10,11 +10,12 @@ import pytest
 from conftest import import_script_module
 
 AGENT = import_script_module("lib.python.core.kubernetes.gitlab_agent")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
 
-POD: Final = "Pod"
-REPLICA_SET: Final = AGENT.REPLICA_SET_KIND
-DEPLOYMENT: Final = "Deployment"
-LEASE: Final = AGENT.LEASE_KIND
+POD: Final = KINDS.POD_KIND
+REPLICA_SET: Final = KINDS.REPLICA_SET_KIND
+DEPLOYMENT: Final = KINDS.DEPLOYMENT_KIND
+LEASE: Final = KINDS.LEASE_KIND
 CONNECTION: Final = "connection"
 METADATA: Final = "metadata"
 NAMESPACE: Final = "agent-system"
@@ -30,7 +31,7 @@ KIND: Final = "kind"
 NAME: Final = "name"
 UID: Final = "uid"
 NAMESPACE_FIELD: Final = "namespace"
-NAMESPACE_KIND: Final = "Namespace"
+NAMESPACE_KIND: Final = KINDS.NAMESPACE_KIND
 CLUSTER_ID_NAMESPACE: Final = "kube-system"
 CLUSTER_UID: Final = "cluster-uid"
 NAMESPACE_UID: Final = "agent-namespace-uid"
@@ -148,7 +149,7 @@ BASELINE: Final = json.dumps(
             },
         },
         LEASE: {
-            API_VERSION: AGENT.LEASE_API_VERSION,
+            API_VERSION: KINDS.COORDINATION_API_VERSION,
             KIND: LEASE,
             METADATA: {NAME: LEASE_NAME, NAMESPACE_FIELD: NAMESPACE, UID: LEASE_UID},
             SPEC: {HOLDER_FIELD: HOLDER},
@@ -191,12 +192,21 @@ def test_agent_cluster_scope_reads_both_native_namespace_uids(service: Mock) -> 
 def test_agent_connection_correlates_exact_pod_uid_and_platform_digest(
     wire: dict[str, object], service: Mock
 ) -> None:
-    """Match the controller chain and accept a verified platform image digest."""
+    """Match the controller chain and return the Pod, its digest and its ReplicaSet.
+
+    Connect builds the ReplicaSet ownership row from this result, so the Pod and the
+    ReplicaSet are each read once, here, and never again.
+
+    :param wire: Decoded native responses for this case.
+    :param service: Fake Kubernetes service serving ``wire``.
+    """
     connection = AGENT.AgentConnection(**wire[CONNECTION])
 
     result = AGENT.correlate_agent_pod(service, connection, EXPECTED)
 
-    assert result == AGENT.AgentPodObservation(POD_UID, PLATFORM_DIGEST)
+    assert result == AGENT.AgentPodObservation(
+        POD_UID, PLATFORM_DIGEST, REPLICA_SET_NAME, REPLICA_SET_UID
+    )
     assert tuple(service.mock_calls) == READS
 
 
@@ -332,7 +342,9 @@ def test_agent_lease_reads_holder_from_spec_and_native_uid(
     """
     _edit(wire, path, value)
 
-    assert AGENT.read_agent_lease(service, NAMESPACE, AGENT_ID) == (holder, LEASE_UID)
+    assert AGENT.read_agent_lease(service, NAMESPACE, AGENT_ID) == AGENT.AgentLease(
+        holder, LEASE_UID
+    )
     assert service.mock_calls == [call.read(LEASE, LEASE_NAME, NAMESPACE)]
 
 
@@ -399,19 +411,6 @@ def test_agent_lease_rejects_one_changed_identity(
     assert service.mock_calls == [call.read(LEASE, LEASE_NAME, NAMESPACE)]
 
 
-def test_agent_replica_set_reads_pod_controller_owned_by_recorded_deployment(
-    service: Mock,
-) -> None:
-    """Return the ReplicaSet that controls the Pod, without reading the Deployment.
-
-    :param service: Fake Kubernetes service serving the baseline responses.
-    """
-    result = AGENT.read_agent_replica_set(service, POD_NAME, EXPECTED)
-
-    assert result == (REPLICA_SET_NAME, REPLICA_SET_UID)
-    assert tuple(service.mock_calls) == READS[:2]
-
-
 @pytest.mark.parametrize(
     ("path", "value", "reason", "reads"),
     (
@@ -419,29 +418,29 @@ def test_agent_replica_set_reads_pod_controller_owned_by_recorded_deployment(
             (REPLICA_SET, METADATA, OWNERS, 0, UID),
             REPLACEMENT_UID,
             CONTROLLER_DRIFT,
-            2,
+            3,
             id="other-deployment-uid",
         ),
         pytest.param(
             (REPLICA_SET, METADATA, OWNERS, 0, NAME),
             OTHER_DEPLOYMENT_NAME,
             CONTROLLER_DRIFT,
-            2,
+            3,
             id="other-deployment-name",
-        ),
-        pytest.param(
-            (REPLICA_SET, METADATA, UID),
-            REPLACEMENT_UID,
-            CONTROLLER_DRIFT,
-            2,
-            id="replaced-replica-set",
         ),
         pytest.param(
             (REPLICA_SET, METADATA, UID),
             REMOVED,
             POD_READBACK_INVALID,
-            2,
+            3,
             id="replica-set-uid-missing",
+        ),
+        pytest.param(
+            (REPLICA_SET, METADATA, OWNERS, 0, KIND),
+            OTHER_CONTROLLER_KIND,
+            CONTROLLER_KIND_MISMATCH,
+            2,
+            id="replica-set-not-controlled-by-deployment",
         ),
         pytest.param(
             (POD, METADATA, OWNERS, 0, KIND),
@@ -452,7 +451,7 @@ def test_agent_replica_set_reads_pod_controller_owned_by_recorded_deployment(
         ),
     ),
 )
-def test_agent_replica_set_rejects_one_changed_controller(
+def test_agent_pod_rejects_one_changed_controller_chain(
     wire: dict[str, object],
     service: Mock,
     path: tuple[str | int, ...],
@@ -460,22 +459,25 @@ def test_agent_replica_set_rejects_one_changed_controller(
     reason: str,
     reads: int,
 ) -> None:
-    """Refuse a ReplicaSet that another Deployment controls or that replaced the original.
+    """Return no ReplicaSet identity when the Pod's controller chain changed.
 
-    The Deployment is matched by the name and UID recorded in ``EXPECTED``, never by
-    reading the Deployment object.
+    A ReplicaSet that another Deployment controls, that lost its UID in the response,
+    or a Pod or ReplicaSet owned by another controller kind would give connect a
+    ReplicaSet row that delete must not remove. The Deployment owner reference is
+    compared with the name and UID recorded in ``EXPECTED`` after all three reads.
 
     :param wire: Decoded native responses for this case.
     :param service: Fake Kubernetes service serving ``wire``.
     :param path: Field of the Pod or ReplicaSet the case sets or removes.
     :param value: New value, or ``REMOVED``.
-    :param reason: Stable error the reader must raise.
-    :param reads: Native reads made before the reader stops.
+    :param reason: Stable error ``correlate_agent_pod`` must raise.
+    :param reads: Native reads made before the correlation stops.
     """
     _edit(wire, path, value)
+    connection = AGENT.AgentConnection(**wire[CONNECTION])
 
     with pytest.raises(AGENT.KubernetesError) as rejected:
-        AGENT.read_agent_replica_set(service, POD_NAME, EXPECTED)
+        AGENT.correlate_agent_pod(service, connection, EXPECTED)
 
     assert str(rejected.value) == reason
     assert tuple(service.mock_calls) == READS[:reads]

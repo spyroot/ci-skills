@@ -25,6 +25,8 @@ from test_gitlab_agent_recovery import (
 
 DELETE = import_script_module("lib.python.core.gitlab.cluster_agent.delete")
 ABSENCE = import_script_module("lib.python.core.gitlab.cluster_agent.absence")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
+TERMS = import_script_module("lib.python.core.gitlab.cluster_agent.terms")
 RECOVERY = ORIGINAL.RECOVERY
 RECOVERY_TEST = ORIGINAL.RECOVERY_TEST
 PROVIDER = ORIGINAL.PROVIDER
@@ -67,13 +69,15 @@ STORAGE_ROW: Final = ("Secret", STORAGE.name, NAMESPACE)
 ABSENT_SCOPE: Final = ABSENCE.LogicalAgentAbsence(
     SELECTED.project, SELECTED.release, CLUSTER_UID
 )
-REPLICA_SET_KIND: Final = KUBE_AGENT.REPLICA_SET_KIND
-LEASE_KIND: Final = KUBE_AGENT.LEASE_KIND
+REPLICA_SET_KIND: Final = KINDS.REPLICA_SET_KIND
+LEASE_KIND: Final = KINDS.LEASE_KIND
 LEASE_ROW: Final = (LEASE_KIND, KUBE_AGENT.agent_lease_name(AGENT_ID), NAMESPACE)
 REPLICA_SET_NAME: Final = "agent-workload-replica-{index}"
 REPLICA_SET_UID: Final = "replica-set-uid-{index}"
 LEASE_UID: Final = "lease-uid-{index}"
-MAX_REPLICA_SETS: Final = DELETE._MAX_REPLICA_SETS
+AGENT_POD_LIMIT: Final = TERMS.AGENT_POD_LIMIT
+EXTRA_POD_NAME: Final = "agent-workload-pod-{index}"
+EXTRA_POD_UID: Final = "extra-pod-uid-{index}"
 PENDING: Final = "PENDING"
 
 Identity = tuple[str, str, str]
@@ -511,7 +515,7 @@ def _replica_set(index: int) -> dict[str, object]:
         NAMESPACE,
         REPLICA_SET_UID.format(index=index),
         created=True,
-        api_version=KUBE_AGENT.REPLICA_SET_API_VERSION,
+        api_version=KINDS.APPS_API_VERSION,
     )
 
 
@@ -528,8 +532,38 @@ def _lease(index: int) -> dict[str, object]:
         NAMESPACE,
         LEASE_UID.format(index=index),
         created=True,
-        api_version=KUBE_AGENT.LEASE_API_VERSION,
+        api_version=KINDS.COORDINATION_API_VERSION,
     )
+
+
+def _extra_pods(count: int) -> list[dict[str, object]]:
+    """Build Pod rows that connect writes for more connected Pods.
+
+    :param count: Number of Pod rows besides the baseline ``POD_ROW``.
+    :returns: Created, present Pod rows in the Agent namespace, each with its own
+        name and UID.
+    """
+    return [
+        REGISTRATION.observed_resource(
+            KINDS.POD_KIND,
+            EXTRA_POD_NAME.format(index=index),
+            NAMESPACE,
+            EXTRA_POD_UID.format(index=index),
+            created=True,
+        )
+        for index in range(count)
+    ]
+
+
+def _pending(case: SimpleNamespace) -> None:
+    """Turn the harness into a PENDING install journal without a Pod row.
+
+    :param case: Tracked delete harness to change.
+    """
+    case.record.document[STATE] = PENDING
+    case.record.document[RESOURCES].remove(case.rows.pop(POD_ROW))
+    del case.objects[POD_ROW]
+    case.journal = deepcopy(case.record)
 
 
 def _runtime_rows(replica_sets: int, leases: int) -> list[dict[str, object]]:
@@ -576,39 +610,42 @@ def _assert_nothing_read_or_written(case: SimpleNamespace) -> None:
 
 
 @pytest.mark.parametrize(
-    ("pending", "replica_sets", "leases"),
+    ("pending", "pods", "replica_sets", "leases"),
     (
-        pytest.param(False, MAX_REPLICA_SETS + 1, 0, id="replica-sets-over-bound"),
-        pytest.param(False, 0, 2, id="two-leases"),
-        pytest.param(True, 1, 0, id="installation-only-replica-set"),
-        pytest.param(True, 0, 1, id="installation-only-lease"),
+        pytest.param(False, AGENT_POD_LIMIT, 0, 0, id="pods-over-bound"),
+        pytest.param(False, 0, AGENT_POD_LIMIT + 1, 0, id="replica-sets-over-bound"),
+        pytest.param(False, 0, 0, 2, id="two-leases"),
+        pytest.param(True, 0, 1, 0, id="installation-only-replica-set"),
+        pytest.param(True, 0, 0, 1, id="installation-only-lease"),
     ),
 )
 def test_delete_refuses_record_with_runtime_rows_out_of_bounds(
-    tracked: SimpleNamespace, pending: bool, replica_sets: int, leases: int
+    tracked: SimpleNamespace, pending: bool, pods: int, replica_sets: int, leases: int
 ) -> None:
-    """Refuse an ownership record whose ReplicaSet or Lease rows connect cannot write.
+    """Refuse an ownership record whose Pod, ReplicaSet or Lease rows connect cannot write.
 
-    ``confirm_fresh_agent_connection`` writes one row per distinct ReplicaSet of at
-    most 10 connected Pods and one Lease row, in the same update that sets the state
-    CONNECTED, so a PENDING install journal has neither. The passing neighbours are
+    ``confirm_fresh_agent_connection`` writes at most ``terms.AGENT_POD_LIMIT``
+    connected Pods, one row per distinct ReplicaSet of those Pods and one Lease row,
+    in the same update that sets the state CONNECTED, so a PENDING install journal
+    has neither runtime kind. ``pods-over-bound`` adds ``AGENT_POD_LIMIT`` Pods to
+    the baseline Pod. The passing neighbours are
     ``test_tracked_delete_removes_runtime_rows_at_bound`` and the PENDING
     compensation without runtime rows in
     ``test_pending_installation_compensation_preserves_strict_public_delete``.
 
     :param tracked: Tracked delete harness.
     :param pending: Use the PENDING journal and ``compensate_installed_agent``.
+    :param pods: Pod rows added to the record besides the baseline Pod.
     :param replica_sets: ReplicaSet rows added to the record.
     :param leases: Lease rows added to the record.
     """
     case = tracked
     operation = DELETE.delete_tracked_agent
     if pending:
-        case.record.document[STATE] = PENDING
-        case.record.document[RESOURCES].remove(case.rows.pop(POD_ROW))
-        del case.objects[POD_ROW]
+        _pending(case)
         operation = DELETE.compensate_installed_agent
-    _record_rows(case, _runtime_rows(replica_sets, leases), native=True)
+    rows = [*_extra_pods(pods), *_runtime_rows(replica_sets, leases)]
+    _record_rows(case, rows, native=True)
 
     with pytest.raises(KUBERNETES.KubernetesError, match=f"^{RECORD_MISMATCH}$"):
         operation(case.gitlab, case.kube, case.selection, case.record, timeout=TIMEOUT)
@@ -619,15 +656,17 @@ def test_delete_refuses_record_with_runtime_rows_out_of_bounds(
 def test_tracked_delete_removes_runtime_rows_at_bound(
     tracked: SimpleNamespace,
 ) -> None:
-    """Delete the maximum recorded ReplicaSets and the Lease by UID, in kind order.
+    """Delete the maximum recorded Pods and ReplicaSets and the Lease by UID, in kind order.
 
-    The order is ``_DELETE_ORDER`` in delete.py: Deployment, then ReplicaSet, then
-    Pod, then Lease.
+    ``terms.AGENT_POD_LIMIT`` bounds both the Pods and the ReplicaSets. The order is
+    ``_DELETE_ORDER`` in delete.py: Deployment, then ReplicaSet, then Pod, then
+    Lease.
 
     :param tracked: Tracked delete harness.
     """
     case = tracked
-    _record_rows(case, _runtime_rows(MAX_REPLICA_SETS, 1), native=True)
+    rows = [*_extra_pods(AGENT_POD_LIMIT - 1), *_runtime_rows(AGENT_POD_LIMIT, 1)]
+    _record_rows(case, rows, native=True)
     expected = {key: row[UID] for key, row in case.rows.items() if row["created"]}
 
     result = _delete(case)
@@ -713,29 +752,80 @@ def test_tracked_delete_refuses_recorded_pod_already_gone(
 
 
 @pytest.mark.parametrize(
-    ("recorded", "native", "lease_reads"),
+    "kind",
     (
-        pytest.param(False, True, 1, id="unrecorded-lease-present"),
-        pytest.param(False, False, 1, id="unrecorded-lease-absent"),
-        pytest.param(True, True, 2, id="recorded-lease"),
+        pytest.param(REPLICA_SET_KIND, id="replica-set-replaced"),
+        pytest.param(LEASE_KIND, id="lease-replaced"),
+    ),
+)
+def test_tracked_delete_refuses_recorded_runtime_row_replaced_under_same_name(
+    tracked: SimpleNamespace, kind: str
+) -> None:
+    """Refuse every write when a recorded ReplicaSet or Lease now has another UID.
+
+    A recorded runtime row may be absent, but an object under the recorded name with
+    another UID was deleted and created again after connect recorded it, so it is
+    not the recorded object; delete stops before its first write and leaves that
+    object in place.
+
+    :param tracked: Tracked delete harness.
+    :param kind: Kind of the recorded runtime row whose object is replaced.
+    """
+    case = tracked
+    _record_rows(case, _runtime_rows(1, 1), native=True)
+    (key,) = [item for item in case.rows if item[0] == kind]
+    case.objects[key]["metadata"][UID] = CHANGED_UID
+    replaced = deepcopy(case.objects[key])
+
+    with pytest.raises(KUBERNETES.KubernetesError, match=f"^{RESOURCE_MISMATCH}$"):
+        _delete(case)
+
+    case.store.replace.assert_not_called()
+    case.kube.delete.assert_not_called()
+    case.provider.delete_agent.assert_not_called()
+    case.provider.delete_token.assert_not_called()
+    case.logical.assert_not_called()
+    assert case.objects[key] == replaced
+
+
+@pytest.mark.parametrize(
+    ("pending", "recorded", "native", "lease_reads"),
+    (
+        pytest.param(False, False, True, 1, id="unrecorded-lease-present"),
+        pytest.param(False, False, False, 1, id="unrecorded-lease-absent"),
+        pytest.param(False, True, True, 2, id="recorded-lease"),
+        pytest.param(True, False, True, 1, id="compensation-lease-present"),
+        pytest.param(True, False, False, 1, id="compensation-lease-absent"),
     ),
 )
 def test_owned_namespace_delete_removes_agent_lease_by_uid(
-    tracked: SimpleNamespace, recorded: bool, native: bool, lease_reads: int
+    tracked: SimpleNamespace,
+    pending: bool,
+    recorded: bool,
+    native: bool,
+    lease_reads: int,
 ) -> None:
     """Delete ``agent-<agent_id>-lock`` by UID before the run-owned namespace inventory.
 
-    A record written before connect recorded the Lease has no Lease row; delete reads
-    the Lease named after the recorded Agent ID, deletes it by the UID it read and
-    adds that UID to the UIDs the namespace inventory accepts. A record with a Lease
-    row deletes it as a recorded row, with no extra read.
+    A record without a Lease row (written before connect recorded the Lease, or
+    when no connected Pod held it during connect) makes delete re-read the cluster
+    and namespace UIDs, read the Lease named after the recorded Agent ID, delete it
+    by the UID it read and add that UID to the UIDs the namespace inventory accepts.
+    A PENDING journal never has a Lease row, and ``_unrecorded_lease`` in delete.py
+    handles a PENDING record under ``compensate_installed_agent`` the same way.
+    A record with a Lease row deletes it as a recorded row, with no extra read.
 
     :param tracked: Tracked delete harness.
+    :param pending: Use the PENDING journal and ``compensate_installed_agent``.
     :param recorded: Whether the ownership record has the Lease row.
     :param native: Whether the Lease exists in the namespace.
     :param lease_reads: Native reads of the Lease during the delete.
     """
     case = tracked
+    operation = DELETE.delete_tracked_agent
+    if pending:
+        _pending(case)
+        operation = DELETE.compensate_installed_agent
     _own_namespace(case)
     lease = _lease(0)
     if recorded:
@@ -744,7 +834,7 @@ def test_owned_namespace_delete_removes_agent_lease_by_uid(
         case.objects[LEASE_ROW] = _native(lease)
     recorded_uids = frozenset(row[UID] for row in case.rows.values())
 
-    _delete(case)
+    operation(case.gitlab, case.kube, case.selection, case.record, timeout=TIMEOUT)
 
     lease_deletes = [
         item for item in case.kube.delete.call_args_list if item.args[0] == LEASE_KIND
@@ -758,12 +848,53 @@ def test_owned_namespace_delete_removes_agent_lease_by_uid(
     )
     reads = Counter(item.args for item in case.kube.read.call_args_list)
     assert reads[LEASE_ROW] == lease_reads
+    assert case.scope.call_count == (1 if recorded else 2)
     events = case.trace.mock_calls
     names = [item[0] for item in events]
     if native:
         removal = call.kube.delete(*LEASE_ROW, expected_uid=lease[UID])
         assert events.index(removal) < names.index("guard")
     assert case.objects == {}
+
+
+@pytest.mark.parametrize(
+    "changed",
+    (
+        pytest.param((CHANGED_UID, NAMESPACE_UID), id="cluster-replaced"),
+        pytest.param((CLUSTER_UID, CHANGED_UID), id="namespace-replaced"),
+    ),
+)
+def test_owned_namespace_delete_refuses_unrecorded_lease_after_scope_change(
+    tracked: SimpleNamespace, changed: tuple[str, str]
+) -> None:
+    """Never read or delete an unrecorded Lease once the cluster or namespace UID changed.
+
+    The first scope read gates the writes. Before the unrecorded Lease lookup the
+    selected kubeconfig can point at another cluster, or the namespace can be
+    deleted and recreated under the same name. Delete then raises
+    ``agent_delete_scope_mismatch`` before it reads the Lease, runs the namespace
+    inventory or deletes the Namespace, and the journal stays DELETING for a resume.
+
+    :param tracked: Tracked delete harness.
+    :param changed: Cluster and namespace UIDs read back by the second scope read.
+    """
+    case = tracked
+    _own_namespace(case)
+    native = _native(_lease(0))
+    case.objects[LEASE_ROW] = deepcopy(native)
+    case.scope.side_effect = ((CLUSTER_UID, NAMESPACE_UID), changed)
+
+    with pytest.raises(KUBERNETES.KubernetesError, match=f"^{SCOPE_MISMATCH}$"):
+        _delete(case)
+
+    assert case.scope.call_count == 2
+    assert all(item.args != LEASE_ROW for item in case.kube.read.call_args_list)
+    assert all(item.args[0] != LEASE_KIND for item in case.kube.delete.call_args_list)
+    case.namespace_guard.assert_not_called()
+    case.logical.assert_not_called()
+    assert case.objects[LEASE_ROW] == native
+    assert NAMESPACE_ROW in case.objects
+    assert case.journal.document[STATE] == DELETING
 
 
 def test_borrowed_namespace_delete_leaves_unrecorded_lease_untouched(
@@ -781,5 +912,6 @@ def test_borrowed_namespace_delete_leaves_unrecorded_lease_untouched(
 
     assert all(item.args != LEASE_ROW for item in case.kube.read.call_args_list)
     assert all(item.args[0] != LEASE_KIND for item in case.kube.delete.call_args_list)
+    case.scope.assert_called_once()
     case.namespace_guard.assert_not_called()
     assert case.objects[LEASE_ROW] == native

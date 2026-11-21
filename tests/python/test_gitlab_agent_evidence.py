@@ -16,7 +16,7 @@ from conftest import REPO_ROOT, import_script_module
 EVIDENCE = import_script_module("lib.python.core.gitlab.cluster_agent.evidence")
 KUBE_AGENT = import_script_module("lib.python.core.kubernetes.gitlab_agent")
 RECOVERY = import_script_module("lib.python.core.gitlab.cluster_agent.recovery")
-RUNNER_SCOPE = import_script_module("lib.python.core.kubernetes.runner_scope")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
 SCHEMA = import_script_module("lib.python.core.schema")
 STATUS = import_script_module("lib.python.sys.status")
 TERMS = import_script_module("lib.python.core.gitlab.cluster_agent.terms")
@@ -35,8 +35,8 @@ SECRET_UID: Final = CREDENTIALS_TEST.SECRET_UID
 OTHER_UID: Final = "22222222-3333-4444-5555-666666666666"
 CONNECTION_ID: Final = CREDENTIALS_TEST.CONNECTION_ID
 API_VERSION: Final = "v1"
-NAMESPACE_KIND: Final = RUNNER_SCOPE.NAMESPACE_KIND
-SECRET_KIND: Final = RUNNER_SCOPE.SECRET_KIND
+NAMESPACE_KIND: Final = KINDS.NAMESPACE_KIND
+SECRET_KIND: Final = KINDS.SECRET_KIND
 RESOURCES_FIELD: Final = CREDENTIALS_TEST.RESOURCES_FIELD
 INSTALLATION_FIELD: Final = CREDENTIALS_TEST.INSTALLATION_FIELD
 RECORDS_FIELD: Final = "records"
@@ -48,7 +48,7 @@ ACTION_FIELD: Final = "action"
 KIND_FIELD: Final = "kind"
 UID_FIELD: Final = "uid"
 STATE_FIELD: Final = "state"
-POD_KIND: Final = "Pod"
+POD_KIND: Final = KINDS.POD_KIND
 CHANGED_POD_UID: Final = "00000000-0000-0000-0000-000000000000"
 
 # Stable findings and schema diagnostics that check_agent_receipt in evidence.py
@@ -82,8 +82,8 @@ CREATED_FIELD: Final = "created"
 MUTATED_FIELD: Final = "mutated"
 CREDENTIALS_FIELD: Final = CREDENTIALS_TEST.CREDENTIALS_FIELD
 AGENT_CREDENTIAL_FIELD: Final = "agent_credential"
-REPLICA_SET_KIND: Final = KUBE_AGENT.REPLICA_SET_KIND
-LEASE_KIND: Final = KUBE_AGENT.LEASE_KIND
+REPLICA_SET_KIND: Final = KINDS.REPLICA_SET_KIND
+LEASE_KIND: Final = KINDS.LEASE_KIND
 
 FIXTURE_DIR: Final = REPO_ROOT / "tests" / "fixtures" / "gitlab-agent"
 
@@ -438,8 +438,8 @@ def test_live_connect_applied_receipt_records_one_replica_set_and_one_lease() ->
     assert (kinds[REPLICA_SET_KIND], kinds[LEASE_KIND]) == (1, 1)
     (replica_set,) = _rows_of_kind(rows, REPLICA_SET_KIND)
     (lease,) = _rows_of_kind(rows, LEASE_KIND)
-    assert replica_set[API_VERSION_FIELD] == KUBE_AGENT.REPLICA_SET_API_VERSION
-    assert lease[API_VERSION_FIELD] == KUBE_AGENT.LEASE_API_VERSION
+    assert replica_set[API_VERSION_FIELD] == KINDS.APPS_API_VERSION
+    assert lease[API_VERSION_FIELD] == KINDS.COORDINATION_API_VERSION
     assert lease[NAME_FIELD] == KUBE_AGENT.agent_lease_name(ownership[AGENT_ID_FIELD])
     for item in (replica_set, lease):
         assert item[CREATED_FIELD] is True
