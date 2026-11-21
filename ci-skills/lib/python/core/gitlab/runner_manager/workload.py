@@ -48,7 +48,12 @@ from lib.python.core.kubernetes.runner_scope import (
     scope_key,
 )
 from lib.python.core.kubernetes.scc_access import role_binding_names
-from lib.python.core.runner import RunnerAction, runner_runtime_identities
+from lib.python.core.runner import (
+    REGISTRATION_SECRET_SUFFIX,
+    REGISTRY_SECRET_SUFFIX,
+    RunnerAction,
+    runner_runtime_identities,
+)
 from lib.python.core.runner_identity import NameSource, ResolvedName
 from lib.python.core.runner_scope import (
     ScopeObservation,
@@ -72,9 +77,7 @@ _SECRET_COLUMNS: Final = (
 )
 
 
-def _run_secret_remnants(
-    service: KubernetesService, run_id: str, names: set[str]
-) -> bool:
+def _run_secret_remnants(service: KubernetesService, run_id: str) -> bool:
     selector = ",".join(
         (
             f"{MANAGER_LABEL}={MANAGER_VALUE}",
@@ -114,7 +117,7 @@ def _run_secret_remnants(
         ):
             raise KubernetesError("runner_manager_secret_metadata_invalid")
         seen.add(key)
-        remnant |= name in names
+        remnant |= name.endswith((REGISTRATION_SECRET_SUFFIX, REGISTRY_SECRET_SUFFIX))
     return remnant
 
 
@@ -133,9 +136,8 @@ def _require_manager_resources_absent(
     for kind, name in sorted(resources):
         if service.read(kind, name, scope.namespace) is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
-    secret_names = {name for kind, name in resources if kind == "Secret"}
     if not getattr(workflow.args, "namespace", None) and _run_secret_remnants(
-        service, scope.run_id, secret_names
+        service, scope.run_id
     ):
         raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
 
