@@ -45,6 +45,8 @@ GEMINI_HOME_DIRECTORY_NAME: Final = ".gemini"
 ANTIGRAVITY_CONFIG_DIRECTORY_NAME: Final = "config"
 AGENTS_DIRECTORY_NAME: Final = ".agents"
 JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
+JOURNAL_PREVIOUS_LAYOUT_KEY: Final = "previous_layout"
+INSTALL_RECOVERY_UNSAFE_REASON: Final = "install_recovery_unsafe"
 LOCK_NAME = f".{SKILL_NAME}.install.lock"
 BACKUP_DIRECTORY_NAME: Final = f".{SKILL_NAME}.backups"
 PREVIOUS_ENTRY_PREFIX: Final = "previous-"
@@ -88,7 +90,7 @@ RECOVERY = {
     "destination_symlink": "Choose a real skills directory; the installed skill cannot be a symlink.",
     "destination_not_directory": "Inspect the existing path; an installed skill must be a directory.",
     "incomplete_install_recover": "Run --recover --apply --confirm-recover, then retry installation.",
-    "install_recovery_unsafe": "Inspect the installed skill and transaction journal before changing either.",
+    INSTALL_RECOVERY_UNSAFE_REASON: "Inspect the installed skill and transaction journal before changing either.",
     "install_io_failure": "Run --recover --apply --confirm-recover, then retry installation.",
     "install_lock_timeout": "Wait for the other installer process to finish, then retry.",
     AgentProfileReason.DEADLINE_EXPIRED: "Make a new plan and choose a longer --timeout.",
@@ -409,7 +411,7 @@ def _validate_backup_directory(backup_dir: Path) -> None:
     :raises ValueError: ``install_recovery_unsafe`` if the path is unsafe.
     """
     if backup_dir.is_symlink() or (backup_dir.exists() and not backup_dir.is_dir()):
-        raise ValueError("install_recovery_unsafe")
+        raise ValueError(INSTALL_RECOVERY_UNSAFE_REASON)
 
 
 def _previous_entry_path(skills_dir: Path, nonce: str, layout: PreviousLayout) -> Path:
@@ -420,13 +422,15 @@ def _previous_entry_path(skills_dir: Path, nonce: str, layout: PreviousLayout) -
     :param layout: Journaled backup layout.
     :returns: Backup path inside ``.ci-skills.backups`` or legacy sibling path.
     :raises ValueError: ``install_recovery_unsafe`` when ``.ci-skills.backups`` is
-        a symlink or non-directory.
+        a symlink or non-directory, or the layout is unsupported.
     """  # noqa: DOC502 - _validate_backup_directory raises ValueError.
     if layout is PreviousLayout.BACKUPS_DIR:
         backup_dir = _backup_directory(skills_dir)
         _validate_backup_directory(backup_dir)
         return backup_dir / f"{PREVIOUS_ENTRY_PREFIX}{nonce}"
-    return skills_dir / f"{LEGACY_PREVIOUS_ENTRY_PREFIX}{nonce}"
+    if layout is PreviousLayout.LEGACY_SIBLING:
+        return skills_dir / f"{LEGACY_PREVIOUS_ENTRY_PREFIX}{nonce}"
+    raise ValueError(INSTALL_RECOVERY_UNSAFE_REASON)
 
 
 def _journal_path(skills_dir: Path) -> Path:
@@ -531,9 +535,11 @@ def _read_journal(skills_dir: Path) -> tuple[JSONObject, Path, Path]:
         digest = data.get(key)
         if not isinstance(digest, str) or len(digest) != 64:
             raise ValueError("install_recovery_unsafe")
-    raw_layout = data.get("previous_layout", PreviousLayout.LEGACY_SIBLING.value)
+    raw_layout = data.get(
+        JOURNAL_PREVIOUS_LAYOUT_KEY, PreviousLayout.LEGACY_SIBLING.value
+    )
     if not isinstance(raw_layout, str) or raw_layout not in PREVIOUS_LAYOUT_VALUES:
-        raise ValueError("install_recovery_unsafe")
+        raise ValueError(INSTALL_RECOVERY_UNSAFE_REASON)
     layout = PreviousLayout(raw_layout)
     staging = skills_dir / f".{SKILL_NAME}.stage-{nonce}"
     previous = _previous_entry_path(skills_dir, nonce, layout)
@@ -721,6 +727,8 @@ def _install_unlocked(
                 status="DRY_RUN" if dry_run else "PASS", already_installed=True
             )
             return result
+        if _present(destination):
+            _validate_backup_directory(_backup_directory(skills_dir))
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
@@ -746,7 +754,7 @@ def _install_unlocked(
                         "old_digest": old_digest,
                         "old_kind": old_kind,
                         "new_digest": expected_digest["digest"],
-                        "previous_layout": PreviousLayout.BACKUPS_DIR.value,
+                        JOURNAL_PREVIOUS_LAYOUT_KEY: PreviousLayout.BACKUPS_DIR.value,
                     },
                 )
                 staging.mkdir(mode=0o700)

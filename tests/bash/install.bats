@@ -3,6 +3,7 @@
 setup() {
   repo_root="$(cd -- "${BATS_TEST_DIRNAME}/../.." && pwd -P)"
   destination="${BATS_TEST_TMPDIR}/skills/ci-skills"
+  backup_dir_name=".ci-skills.backups"
   fake_bin="${BATS_TEST_TMPDIR}/bin"
   mkdir -p "$fake_bin"
   cat >"$fake_bin/glab" <<'GLAB'
@@ -236,7 +237,7 @@ assert_project_scope_outside_repo_blocked() {
   [ ! -L "$destination" ]
   backup=$(jq -r .previous_version <<<"$output")
   [ -L "$backup" ]
-  [ "$(dirname "$backup")" = "$(dirname "$destination")/.ci-skills.backups" ]
+  [ "$(dirname "$backup")" = "$(dirname "$destination")/${backup_dir_name}" ]
   [ "$(readlink "$backup")" = "$source_root" ]
   cmp "$source_root/ci-skills/SKILL.md" "$destination/SKILL.md"
 }
@@ -262,7 +263,7 @@ assert_project_scope_outside_repo_blocked() {
   [ "$status" -eq 0 ]
   backup=$(jq -r .previous_version <<<"$output")
   [ -d "$backup" ]
-  [ "$(dirname "$backup")" = "${skills_dir}/.ci-skills.backups" ]
+  [ "$(dirname "$backup")" = "${skills_dir}/${backup_dir_name}" ]
   [ -f "${backup}/SKILL.md" ]
   mapfile -t manifests < <(find "$skills_dir" -mindepth 2 -maxdepth 2 -name SKILL.md | sort)
   [ "${#manifests[@]}" -eq 1 ]
