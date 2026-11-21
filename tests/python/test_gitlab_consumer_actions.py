@@ -287,25 +287,34 @@ def _description_file(directory: Path, text: str) -> Path:
 
 
 @pytest.mark.parametrize(
-    "described", (True, False), ids=("description-file", "no-description-file")
+    ("text", "stored"),
+    (
+        (MR_DESCRIPTION, MR_DESCRIPTION.rstrip("\n")),
+        ("", ""),
+        (None, None),
+    ),
+    ids=("description-file", "empty-description-file", "no-description-file"),
 )
 def test_mr_create_posts_description_file_text_and_reads_it_back(
-    tmp_path: Path, described: bool
+    tmp_path: Path, text: Optional[str], stored: Optional[str]
 ) -> None:
     """Send the file text as the MR description and verify it before success.
 
     GitLab removes the terminal newline from a stored description, so the
-    read-back and the repeated create compare the text without it. Without the
-    option the POST carries no description field.
+    read-back and the repeated create compare the text without it. An empty
+    file sends ``""``, which GitLab reads back as ``""`` (live MR, 2026-11-21).
+    Without the option the POST carries no description field.
 
     :param tmp_path: Directory holding the caller's description file.
-    :param described: Whether the caller passes ``--description-file``.
+    :param text: Description file content, or ``None`` without ``--description-file``.
+    :param stored: Description GitLab returns on read-back.
     """
-    source = _description_file(tmp_path, MR_DESCRIPTION)
+    described = text is not None
+    source = _description_file(tmp_path, text or "")
     selected = ("--description-file", str(source)) if described else ()
     args = MR_COMMAND.build_parser().parse_args([*MR_CREATE, *selected])
     plan = _plan("gitlab_mr", "create", MERGE_REQUESTS.prepare(args).body)
-    record = _described_record(MR_DESCRIPTION.rstrip("\n") if described else None)
+    record = _described_record(stored)
     api = FakeAPI(
         {
             ("GET", _list(MR_ENDPOINT + "?" + MR_BRANCH_QUERY)): [[], [record]],
@@ -320,7 +329,7 @@ def test_mr_create_posts_description_file_text_and_reads_it_back(
     posts = [body for method, _endpoint, body in api.calls if method == "POST"]
     assert len(posts) == 1
     if described:
-        assert posts[0][ACTIONS.DESCRIPTION_FIELD] == MR_DESCRIPTION
+        assert posts[0][ACTIONS.DESCRIPTION_FIELD] == text
     else:
         assert ACTIONS.DESCRIPTION_FIELD not in posts[0]
     assert (created["action"], created["verified"]) == (STATUS.APPLIED, True)
