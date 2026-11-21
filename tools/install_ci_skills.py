@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the repository's CI skill into a local Codex or Claude skills directory.
+"""Install the repository's CI skill into a local Codex, Claude, or Antigravity skills directory.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -41,6 +41,9 @@ SKILL_NAME = "ci-skills"
 SKILLS_DIRECTORY_NAME: Final = "skills"
 CODEX_HOME_DIRECTORY_NAME: Final = ".codex"
 CLAUDE_HOME_DIRECTORY_NAME: Final = ".claude"
+GEMINI_HOME_DIRECTORY_NAME: Final = ".gemini"
+ANTIGRAVITY_CONFIG_DIRECTORY_NAME: Final = "config"
+AGENTS_DIRECTORY_NAME: Final = ".agents"
 JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
 LOCK_NAME = f".{SKILL_NAME}.install.lock"
 LOCK_WAIT_SECONDS = 30
@@ -123,6 +126,8 @@ class InstallScope(StrEnum):
     CODEX_HOME = "codex-home"
     CLAUDE_USER = "claude-user"
     CLAUDE_PROJECT = "claude-project"
+    ANTIGRAVITY_USER = "antigravity-user"
+    ANTIGRAVITY_PROJECT = "antigravity-project"
 
 
 def repository_root(working_directory: Path) -> Path:
@@ -139,12 +144,35 @@ def repository_root(working_directory: Path) -> Path:
     return Path(repository)
 
 
+def _user_skills_directory(*directory_parts: str) -> Path:
+    """Resolve a user-scoped skills directory under ``HOME``.
+
+    :param directory_parts: Relative directory components under ``HOME``.
+    :returns: ``~/<directory_parts>/skills``.
+    """
+    return Path.home().joinpath(*directory_parts, SKILLS_DIRECTORY_NAME)
+
+
+def _project_skills_directory(working_directory: Path, *directory_parts: str) -> Path:
+    """Resolve a repository-scoped skills directory from the enclosing Git root.
+
+    :param working_directory: Directory inside the repository that receives the skill.
+    :param directory_parts: Relative directory components under the Git root.
+    :returns: ``<git root>/<directory_parts>/skills``.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``working_directory``
+        is not inside a Git repository or Git cannot be run.
+    """  # noqa: DOC502 - repository_root raises AgentProfileError.
+    return repository_root(working_directory).joinpath(
+        *directory_parts, SKILLS_DIRECTORY_NAME
+    )
+
+
 def claude_user_skills_directory() -> Path:
     """Resolve the Claude user skills directory at invocation time.
 
     :returns: ``~/.claude/skills``.
     """
-    return Path.home() / CLAUDE_HOME_DIRECTORY_NAME / SKILLS_DIRECTORY_NAME
+    return _user_skills_directory(CLAUDE_HOME_DIRECTORY_NAME)
 
 
 def claude_project_skills_directory(working_directory: Path) -> Path:
@@ -154,12 +182,29 @@ def claude_project_skills_directory(working_directory: Path) -> Path:
     :returns: ``<git root>/.claude/skills``.
     :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``working_directory``
         is not inside a Git repository or Git cannot be run.
-    """  # noqa: DOC502 - repository_root raises AgentProfileError.
-    return (
-        repository_root(working_directory)
-        / CLAUDE_HOME_DIRECTORY_NAME
-        / SKILLS_DIRECTORY_NAME
+    """  # noqa: DOC502 - _project_skills_directory raises AgentProfileError.
+    return _project_skills_directory(working_directory, CLAUDE_HOME_DIRECTORY_NAME)
+
+
+def antigravity_user_skills_directory() -> Path:
+    """Resolve the Antigravity user skills directory at invocation time.
+
+    :returns: ``~/.gemini/config/skills``.
+    """
+    return _user_skills_directory(
+        GEMINI_HOME_DIRECTORY_NAME, ANTIGRAVITY_CONFIG_DIRECTORY_NAME
     )
+
+
+def antigravity_project_skills_directory(working_directory: Path) -> Path:
+    """Resolve the Antigravity project skills directory of the enclosing Git repository.
+
+    :param working_directory: Directory inside the repository that receives the skill.
+    :returns: ``<git root>/.agents/skills``.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``working_directory``
+        is not inside a Git repository or Git cannot be run.
+    """  # noqa: DOC502 - _project_skills_directory raises AgentProfileError.
+    return _project_skills_directory(working_directory, AGENTS_DIRECTORY_NAME)
 
 
 SCOPE_SKILLS_DIRECTORIES: Final[Mapping[InstallScope, Callable[[Path], Path]]] = (
@@ -170,6 +215,10 @@ SCOPE_SKILLS_DIRECTORIES: Final[Mapping[InstallScope, Callable[[Path], Path]]] =
                 lambda _working_directory: claude_user_skills_directory()
             ),
             InstallScope.CLAUDE_PROJECT: claude_project_skills_directory,
+            InstallScope.ANTIGRAVITY_USER: (
+                lambda _working_directory: antigravity_user_skills_directory()
+            ),
+            InstallScope.ANTIGRAVITY_PROJECT: antigravity_project_skills_directory,
         }
     )
 )
@@ -180,11 +229,12 @@ def scope_skills_directory(scope: InstallScope, working_directory: Path) -> Path
 
     :param scope: Requested install scope.
     :param working_directory: Directory used to find the Git repository for
-        ``claude-project``; user scopes ignore it.
+        project scopes; user scopes ignore it.
     :returns: Directory that receives the ``ci-skills`` entry.
-    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``claude-project`` is
-        requested outside a Git repository.
-    """  # noqa: DOC502 - The claude-project resolver raises AgentProfileError.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when a project scope
+        (``claude-project`` or ``antigravity-project``) is requested outside a
+        Git repository.
+    """  # noqa: DOC502 - Project scope resolvers raise AgentProfileError.
     return SCOPE_SKILLS_DIRECTORIES[scope](working_directory)
 
 
@@ -841,7 +891,9 @@ class InstallerCLI:
             help=(
                 "named skills directory: codex-home ($CODEX_HOME/skills or "
                 "~/.codex/skills), claude-user (~/.claude/skills), "
-                "claude-project (<git root>/.claude/skills of the current directory)"
+                "claude-project (<git root>/.claude/skills of the current directory), "
+                "antigravity-user (~/.gemini/config/skills), "
+                "antigravity-project (<git root>/.agents/skills of the current directory)"
             ),
         )
         location.add_argument(

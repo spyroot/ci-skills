@@ -680,6 +680,7 @@ def isolated_homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     [
         ("codex-home", Path(".codex") / "skills"),
         ("claude-user", Path(".claude") / "skills"),
+        ("antigravity-user", Path(".gemini") / "config" / "skills"),
     ],
 )
 def test_user_scope_resolves_home_skills_directory(
@@ -723,15 +724,24 @@ def test_codex_home_scope_follows_codex_home(
     assert resolved == installer.skills_directory()
 
 
-def test_claude_project_scope_uses_git_root_from_subdirectory(
-    isolated_homes: Path, tmp_path: Path
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        ("claude-project", Path(".claude") / "skills"),
+        ("antigravity-project", Path(".agents") / "skills"),
+    ],
+)
+def test_project_scope_uses_git_root_from_subdirectory(
+    isolated_homes: Path, tmp_path: Path, scope: str, expected: Path
 ) -> None:
-    """Resolve claude-project to the repository root, not the working subdirectory.
+    """Resolve each project scope to the repository root, not the working subdirectory.
 
     The installer can run from any directory inside the consuming repository.
 
     :param isolated_homes: Temporary HOME bounding Git discovery.
     :param tmp_path: Pytest directory holding the repository.
+    :param scope: Repository-scoped ``--scope`` value under test.
+    :param expected: Documented path below the repository root.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -741,19 +751,21 @@ def test_claude_project_scope_uses_git_root_from_subdirectory(
     subdirectory.mkdir(parents=True)
 
     resolved = installer.scope_skills_directory(
-        installer.InstallScope.CLAUDE_PROJECT, subdirectory
+        installer.InstallScope(scope), subdirectory
     )
 
-    assert resolved == repository / ".claude" / "skills"
+    assert resolved == repository / expected
 
 
-def test_claude_project_scope_outside_repository_raises(
-    isolated_homes: Path, tmp_path: Path
+@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
+def test_project_scope_outside_repository_raises(
+    isolated_homes: Path, tmp_path: Path, scope: str
 ) -> None:
-    """Refuse claude-project when the working directory has no Git repository.
+    """Refuse project scopes when the working directory has no Git repository.
 
     :param isolated_homes: Temporary HOME bounding Git discovery.
     :param tmp_path: Pytest directory that is not a repository.
+    :param scope: Repository-scoped ``--scope`` value under test.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -762,9 +774,7 @@ def test_claude_project_scope_outside_repository_raises(
     with pytest.raises(
         installer.AgentProfileError, match="agent_repository_unavailable"
     ):
-        installer.scope_skills_directory(
-            installer.InstallScope.CLAUDE_PROJECT, tmp_path
-        )
+        installer.scope_skills_directory(installer.InstallScope(scope), tmp_path)
 
 
 def test_every_scope_has_one_resolver() -> None:
@@ -779,25 +789,34 @@ def test_every_scope_has_one_resolver() -> None:
         "codex-home",
         "claude-user",
         "claude-project",
+        "antigravity-user",
+        "antigravity-project",
     }
 
 
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        ("claude-user", Path(".claude") / "skills" / "ci-skills"),
+        ("antigravity-user", Path(".gemini") / "config" / "skills" / "ci-skills"),
+    ],
+)
 def test_cli_scope_sets_destination_without_creating_it(
-    isolated_homes: Path,
+    isolated_homes: Path, scope: str, expected: Path
 ) -> None:
-    """Resolve --scope claude-user to its ci-skills destination with no filesystem change.
+    """Resolve user --scope values to ci-skills destinations with no filesystem change.
 
     :param isolated_homes: Temporary HOME with CODEX_HOME unset.
+    :param scope: User-scoped ``--scope`` value under test.
+    :param expected: Expected ``ci-skills`` destination below HOME.
 
     :returns: None; assertions in the body validate the regression.
     """
     installer = _installer()
 
-    cli = _cli(installer, "--scope", "claude-user", "--dry-run")
+    cli = _cli(installer, "--scope", scope, "--dry-run")
 
-    assert (
-        cli.destination == isolated_homes.resolve() / ".claude" / "skills" / "ci-skills"
-    )
+    assert cli.destination == isolated_homes.resolve() / expected
     assert not isolated_homes.exists()
 
 
@@ -817,14 +836,27 @@ def test_cli_without_location_keeps_codex_default(isolated_homes: Path) -> None:
     )
 
 
-def test_cli_claude_project_scope_uses_working_repository(
-    monkeypatch: pytest.MonkeyPatch, isolated_homes: Path, tmp_path: Path
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        ("claude-project", Path(".claude") / "skills" / "ci-skills"),
+        ("antigravity-project", Path(".agents") / "skills" / "ci-skills"),
+    ],
+)
+def test_cli_project_scope_uses_working_repository(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_homes: Path,
+    tmp_path: Path,
+    scope: str,
+    expected: Path,
 ) -> None:
-    """Install claude-project into the repository that contains the working directory.
+    """Install project scopes into the repository that contains the working directory.
 
     :param monkeypatch: Pytest fixture changing the working directory.
     :param isolated_homes: Temporary HOME bounding Git discovery.
     :param tmp_path: Pytest directory holding the repository.
+    :param scope: Repository-scoped ``--scope`` value under test.
+    :param expected: Expected ``ci-skills`` path below the repository root.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -832,9 +864,9 @@ def test_cli_claude_project_scope_uses_working_repository(
     repository = _git_repository(tmp_path / "consumer")
     monkeypatch.chdir(repository)
 
-    cli = _cli(installer, "--scope", "claude-project")
+    cli = _cli(installer, "--scope", scope)
 
-    assert cli.destination == repository / ".claude" / "skills" / "ci-skills"
+    assert cli.destination == repository / expected
 
 
 @pytest.mark.parametrize(
@@ -844,10 +876,19 @@ def test_cli_claude_project_scope_uses_working_repository(
             ("--scope", "claude-user", "--skills-dir", "x"), id="with-skills-dir"
         ),
         pytest.param(
+            ("--scope", "antigravity-user", "--skills-dir", "x"),
+            id="antigravity-with-skills-dir",
+        ),
+        pytest.param(
             ("--scope", "claude-user", "--destination", "/x/ci-skills"),
             id="with-destination",
         ),
+        pytest.param(
+            ("--scope", "antigravity-user", "--destination", "/x/ci-skills"),
+            id="antigravity-with-destination",
+        ),
         pytest.param(("--scope", "claude"), id="unknown-scope"),
+        pytest.param(("--scope", "antigravity"), id="unknown-antigravity-scope"),
     ],
 )
 def test_cli_rejects_invalid_scope_arguments(
@@ -871,6 +912,7 @@ def test_cli_rejects_invalid_scope_arguments(
     assert not isolated_homes.exists()
 
 
+@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
 @pytest.mark.parametrize(
     ("mode", "kind"),
     [
@@ -888,15 +930,16 @@ def test_cli_rejects_invalid_scope_arguments(
         ),
     ],
 )
-def test_cli_claude_project_scope_outside_repository_reports_blocked_json(
+def test_cli_project_scope_outside_repository_reports_blocked_json(
     monkeypatch: pytest.MonkeyPatch,
     isolated_homes: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    scope: str,
     mode: tuple[str, ...],
     kind: str,
 ) -> None:
-    """Report claude-project outside a Git repository as BLOCKED JSON, not usage text.
+    """Report project scopes outside a Git repository as BLOCKED JSON, not usage text.
 
     install.sh adds --json, so a caller parses stdout for every failure.
 
@@ -904,6 +947,7 @@ def test_cli_claude_project_scope_outside_repository_reports_blocked_json(
     :param isolated_homes: Temporary HOME bounding Git discovery.
     :param tmp_path: Pytest directory that is not a repository.
     :param capsys: Pytest fixture capturing stdout and stderr.
+    :param scope: Repository-scoped ``--scope`` value under test.
     :param mode: Installer mode arguments.
     :param kind: Result kind expected for the mode.
 
@@ -914,7 +958,7 @@ def test_cli_claude_project_scope_outside_repository_reports_blocked_json(
     outside.mkdir()
     monkeypatch.chdir(outside)
 
-    cli = _cli(installer, "--scope", "claude-project", *mode, "--json")
+    cli = _cli(installer, "--scope", scope, *mode, "--json")
     status = cli.run()
 
     captured = capsys.readouterr()
@@ -924,7 +968,7 @@ def test_cli_claude_project_scope_outside_repository_reports_blocked_json(
         "schema_version": "1.0",
         "kind": kind,
         "status": "BLOCKED",
-        "scope": "claude-project",
+        "scope": scope,
         "reason": "agent_repository_unavailable",
         "safe_next_step": REPOSITORY_UNAVAILABLE_STEP,
     }
@@ -932,11 +976,13 @@ def test_cli_claude_project_scope_outside_repository_reports_blocked_json(
     assert not isolated_homes.exists()
 
 
+@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
 def test_cli_unresolved_scope_text_output_names_scope(
     monkeypatch: pytest.MonkeyPatch,
     isolated_homes: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    scope: str,
 ) -> None:
     """Name the scope in text output when it has no destination.
 
@@ -944,35 +990,38 @@ def test_cli_unresolved_scope_text_output_names_scope(
     :param isolated_homes: Temporary HOME bounding Git discovery.
     :param tmp_path: Pytest directory that is not a repository.
     :param capsys: Pytest fixture capturing stdout and stderr.
+    :param scope: Repository-scoped ``--scope`` value under test.
 
     :returns: None; assertions in the body validate the regression.
     """
     installer = _installer()
     monkeypatch.chdir(tmp_path)
 
-    status = _cli(installer, "--scope", "claude-project").run()
+    status = _cli(installer, "--scope", scope).run()
 
     captured = capsys.readouterr()
     assert status == 2
-    assert captured.out == "BLOCKED: claude-project\n"
+    assert captured.out == f"BLOCKED: {scope}\n"
     assert captured.err == "agent_repository_unavailable\n"
 
 
+@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
 def test_cli_unresolved_scope_has_no_destination(
-    monkeypatch: pytest.MonkeyPatch, isolated_homes: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, isolated_homes: Path, tmp_path: Path, scope: str
 ) -> None:
     """Refuse to expose a destination for a scope that could not be resolved.
 
     :param monkeypatch: Pytest fixture changing the working directory.
     :param isolated_homes: Temporary HOME bounding Git discovery.
     :param tmp_path: Pytest directory that is not a repository.
+    :param scope: Repository-scoped ``--scope`` value under test.
 
     :returns: None; assertions in the body validate the regression.
     """
     installer = _installer()
     monkeypatch.chdir(tmp_path)
 
-    cli = _cli(installer, "--scope", "claude-project")
+    cli = _cli(installer, "--scope", scope)
 
     with pytest.raises(
         installer.AgentProfileError, match="agent_repository_unavailable"

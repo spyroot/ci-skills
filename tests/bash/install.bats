@@ -106,6 +106,61 @@ make_install_fixture() {
   [ ! -e "$outside/.claude" ]
 }
 
+@test 'scope antigravity-user plans the Antigravity user skills directory without writing' {
+  make_install_fixture
+  home="${BATS_TEST_TMPDIR}/home"
+  run env HOME="$home" "$tool" --scope antigravity-user --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .destination <<<"$output")" = "$(cd "$BATS_TEST_TMPDIR" && pwd -P)/home/.gemini/config/skills/ci-skills" ]
+  [ ! -e "$home" ]
+}
+
+@test 'scope antigravity-project plans the consumer Git root from a subdirectory without writing' {
+  make_install_fixture
+  mkdir -p nested/dir
+  cd nested/dir
+  run "$tool" --scope antigravity-project --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .destination <<<"$output")" = "$(cd "$caller_root" && pwd -P)/.agents/skills/ci-skills" ]
+  [ ! -e "$caller_root/.agents" ]
+}
+
+@test 'scope antigravity-project outside a Git repository reports BLOCKED JSON without usage text' {
+  make_install_fixture
+  outside="${BATS_TEST_TMPDIR}/outside"
+  mkdir -p "$outside"
+  cd "$outside"
+  run env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" "$tool" --scope antigravity-project --dry-run
+  [ "$status" -eq 2 ]
+  jq -e '.status == "BLOCKED" and .kind == "skill_install" and .scope == "antigravity-project"
+    and .reason == "agent_repository_unavailable" and (.safe_next_step | length > 0)' \
+    <<<"$output" >/dev/null
+  [[ "$output" != *'usage:'* ]]
+  [ ! -e "$outside/.agents" ]
+}
+
+@test 'scope antigravity-project apply installs ci-skills alongside glab-stack and upgrades idempotently' {
+  make_install_fixture
+  run "$tool" --scope antigravity-project --dry-run
+  [ "$status" -eq 0 ]
+  fingerprint=$(jq -r .fingerprint <<<"$output")
+  run "$tool" --scope antigravity-project --apply \
+    --timeout 10s --confirm-install "$fingerprint"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .status <<<"$output")" = "PASS" ]
+  [ -d "$caller_root/.agents/skills/ci-skills" ]
+  [ ! -L "$caller_root/.agents/skills/ci-skills" ]
+  [ -f "$caller_root/.agents/skills/glab-stack/SKILL.md" ]
+  cmp "$source_root/ci-skills/SKILL.md" "$caller_root/.agents/skills/ci-skills/SKILL.md"
+  run "$tool" --scope antigravity-project --upgrade --dry-run
+  [ "$status" -eq 0 ]
+  upgrade_fingerprint=$(jq -r .fingerprint <<<"$output")
+  run "$tool" --scope antigravity-project --upgrade --apply \
+    --timeout 10s --confirm-upgrade "$upgrade_fingerprint"
+  [ "$status" -eq 0 ]
+  jq -e '.status == "PASS" and .already_installed == true' <<<"$output" >/dev/null
+}
+
 @test 'scope cannot be combined with another location flag' {
   make_install_fixture
   run "$tool" --scope claude-user --destination "$destination" --dry-run
