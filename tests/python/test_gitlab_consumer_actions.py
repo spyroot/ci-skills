@@ -248,6 +248,89 @@ def test_mr_milestone_assignment_reads_back_before_success(matches: bool) -> Non
         assert result["errors"][0]["reason"] == "mr_readback_mismatch"
 
 
+@pytest.mark.parametrize("matches", (True, False))
+def test_mr_create_binds_description_file_and_reads_back_description(
+    tmp_path: Path, matches: bool
+) -> None:
+    """Bind the Markdown body into the create plan and verify the read-back.
+
+    :param tmp_path: Directory holding the caller's UTF-8 Markdown file.
+    :param matches: Whether the provider returns the planned description bytes.
+    """
+    description = "## Summary\n\n- Consumer change\n"
+    body_file = tmp_path / "description.md"
+    body_file.write_text(description, encoding="utf-8")
+    args = MR_COMMAND.build_parser().parse_args(
+        [
+            "create",
+            "--source-branch",
+            "consumer",
+            "--target-branch",
+            "main",
+            "--title",
+            "Consumer files",
+            "--description-file",
+            str(body_file),
+        ]
+    )
+    prepared = MERGE_REQUESTS.prepare(args)
+    assert prepared.body["description"] == description
+    plan = _plan("gitlab_mr", "create", prepared.body)
+    base = "projects/42/merge_requests"
+    query = urlencode(
+        {"state": "opened", "source_branch": "consumer", "target_branch": "main"}
+    )
+    record = {
+        **_mr_record(113),
+        "description": description if matches else "stale body",
+    }
+    api = FakeAPI(
+        {
+            ("GET", _list(base + "?" + query)): [[], [record]] if matches else [[]],
+            ("POST", base): [{"id": 81, "iid": 7}],
+            ("GET", base + "/7"): [record, record] if matches else [record],
+        }
+    )
+
+    created = MERGE_REQUESTS.apply(api, object(), plan, 42)
+
+    assert created["verified"] is matches
+    assert [call for call in api.calls if call[0] != "GET"] == [
+        ("POST", base, prepared.body)
+    ]
+    if matches:
+        repeated = MERGE_REQUESTS.apply(api, object(), plan, 42)
+        assert repeated["action"] == "NO_OP"
+    else:
+        assert created["mutated"] is True
+        assert created["errors"][0]["reason"] == "mr_readback_mismatch"
+
+
+def test_mr_update_rejects_description_file(tmp_path: Path) -> None:
+    """Keep milestone-only update semantics when a description file is passed.
+
+    :param tmp_path: Directory holding an unused UTF-8 Markdown file.
+    """
+    body_file = tmp_path / "description.md"
+    body_file.write_text("stale body", encoding="utf-8")
+    args = MR_COMMAND.build_parser().parse_args(
+        [
+            "update",
+            "--mr-iid",
+            "7",
+            "--milestone-id",
+            "113",
+            "--description-file",
+            str(body_file),
+        ]
+    )
+
+    with pytest.raises(
+        MERGE_REQUESTS.ActionError, match="^mr_update_accepts_milestone_only$"
+    ):
+        MERGE_REQUESTS.prepare(args)
+
+
 @pytest.mark.parametrize("kind", ("gitlab_repository", "gitlab_merge_request"))
 def test_action_schema_requires_each_delivered_evidence_field(kind: str) -> None:
     """Reject PASS records and read-back that omit the new operation's evidence.

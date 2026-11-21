@@ -1091,6 +1091,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--source-branch": "existing source branch for create",
             "--target-branch": "existing target branch for create",
             "--title": "MR title for create",
+            "--description-file": "file containing the requested description",
             "--mr-iid": "project-local MR number for update, not its global ID",
             "--milestone-id": "global milestone ID, not its project-local IID",
             "--apply": "perform the confirmed MR change",
@@ -1106,7 +1107,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "required_options": ["--source-branch", "--target-branch", "--title"],
                 "result_schema": GITLAB_ACTION_SCHEMA,
                 "mutates": True,
-                "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+                "read_back": "Read the exact MR IID, branches, title, description and requested milestone.",
             },
             "update": {
                 "required_options": ["--mr-iid", "--milestone-id"],

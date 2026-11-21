@@ -738,6 +738,7 @@
         "--binding",
         "--confirm-plan",
         "--describe",
+        "--description-file",
         "--dry-run",
         "--gitlab",
         "--gitlab-profile",
@@ -774,7 +775,7 @@
       "subcommands": {
         "create": {
           "mutates": true,
-          "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+          "read_back": "Read the exact MR IID, branches, title, description and requested milestone.",
           "required_options": [
             "--source-branch",
             "--target-branch",

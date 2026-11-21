@@ -11,6 +11,7 @@ GitLab's other MR capabilities remain available through its native API.
 | `--source-branch` | `source_branch` | Existing branch containing the requested changes. |
 | `--target-branch` | `target_branch` | Existing destination branch. |
 | `--title` | `title` | Requested MR title. |
+| `--description-file` | `description` | UTF-8 Markdown body for `create`, read from a file. |
 | `--mr-iid` | `merge_request_iid` | Project-local MR number shown as `!N`. |
 | `--milestone-id` | `milestone_id` | Global milestone `id`, not its project-local `iid`. |
 
@@ -27,7 +28,10 @@ gitlab_mr.py create --project "$PROJECT" \
   --title "Consumer example" --json
 ```
 
-Add `--milestone-id "$MILESTONE_ID"` to attach it during creation. Apply by
+Add `--milestone-id "$MILESTONE_ID"` to attach it during creation, or
+`--description-file "$DESCRIPTION_FILE"` to set the MR body from UTF-8
+Markdown. The planned description bytes bind into the plan digest and the
+read-back verifies the description GitLab returned. Apply by
 repeating the planned invocation with `--apply --confirm-plan DIGEST`, using
 the returned digest. The response includes verified MR `id`, `iid` and
 `milestone_id`. An exact existing open MR is reused.

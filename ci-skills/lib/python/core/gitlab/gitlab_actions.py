@@ -712,7 +712,7 @@ def _resource_arguments(result: argparse.ArgumentParser, kind: str) -> None:
         "gitlab_merge_request",
     }:
         result.add_argument("--title", help="requested title")
-    if kind in {"gitlab_milestone", "gitlab_issue"}:
+    if kind in {"gitlab_milestone", "gitlab_issue", "gitlab_merge_request"}:
         result.add_argument(
             "--description-file", metavar="PATH", help="UTF-8 description body"
         )

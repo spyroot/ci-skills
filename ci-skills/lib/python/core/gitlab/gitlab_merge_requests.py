@@ -17,6 +17,7 @@ from lib.python.core.gitlab.gitlab_actions import (
     ActionPlan,
     PreparedOperation,
     _fields,
+    _file_text,
     _id,
     _object,
     _pages,
@@ -38,14 +39,20 @@ from lib.python.core.json_types import JSONObject, JSONValue
 def prepare(args: Namespace) -> PreparedOperation:
     """Validate MR creation or milestone assignment without provider access.
 
-    :param args: Action, source and target branches, title, MR IID, and milestone ID.
+    :param args: Action, source and target branches, title, description file,
+        MR IID, and milestone ID.
     :returns: Creation fields or a milestone-only update with the selected MR IID.
     :raises ActionError: The action, required values, or action-specific fields are invalid.
     """
     if args.action == "update":
         if any(
             value is not None
-            for value in (args.source_branch, args.target_branch, args.title)
+            for value in (
+                args.source_branch,
+                args.target_branch,
+                args.title,
+                args.description_file,
+            )
         ):
             raise ActionError("mr_update_accepts_milestone_only")
         return PreparedOperation(
@@ -63,6 +70,9 @@ def prepare(args: Namespace) -> PreparedOperation:
     }
     if args.milestone_id is not None:
         body["milestone_id"] = _positive(args.milestone_id, "milestone_id")
+    description = _file_text(args.description_file, "description_file")
+    if description is not None:
+        body["description"] = description
     return PreparedOperation(body)
 
 
