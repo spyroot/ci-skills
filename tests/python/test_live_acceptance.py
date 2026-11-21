@@ -2378,3 +2378,191 @@ def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evide
     if failure == "rejected-receipt":
         assert f"{MIRROR_NO_OP_FILE}:functional_digest_mismatch" in result["problems"]
         assert "coverage_missing:gitlab_mirror:sync:NO_OP" in result["problems"]
+
+
+AGENT_KIND: Final = "gitlab_agent"
+AGENT_CONNECT: Final = "connect"
+AGENT_VERIFY: Final = "verify"
+AGENT_DELETE: Final = "delete"
+AGENT_REQUIRED_OPERATIONS: Final = (
+    (AGENT_KIND, AGENT_CONNECT, STATUS.APPLIED),
+    (AGENT_KIND, AGENT_CONNECT, STATUS.NO_OP),
+    (AGENT_KIND, AGENT_VERIFY, None),
+    (AGENT_KIND, AGENT_DELETE, STATUS.APPLIED),
+    (AGENT_KIND, AGENT_DELETE, STATUS.NO_OP),
+)
+AGENT_VERIFY_RECEIPT: Final = "agent-verify-read.json"
+AGENT_CONNECT_RECEIPT: Final = f"agent-connect-{STATUS.APPLIED}.json"
+AGENT_DUPLICATE_RECEIPT: Final = "agent-duplicate.json"
+AGENT_SERIES_INCOMPLETE: Final = "agent_series_required_operations_missing"
+AGENT_SERIES_DUPLICATE: Final = "agent_series_duplicate_or_invalid_operation"
+
+
+def test_agent_policy_preserves_existing_operations_and_requires_full_series() -> None:
+    """Keep access and mirror coverage mandatory beside all five Agent keys."""
+    required = POLICY["required_operations"]
+
+    assert len(required) == 8
+    assert set(required) == {
+        ("access_check", None, None),
+        *MIRROR_REQUIRED_OPERATIONS,
+        *AGENT_REQUIRED_OPERATIONS,
+    }
+
+
+@pytest.fixture(scope="module")
+def agent_gate_baseline(policy_coverage_baseline: str) -> str:
+    """Build synthetic cross-receipt join observations for unit tests.
+
+    :param policy_coverage_baseline: Immutable existing access and capability receipts.
+    :returns: JSON fixture with a complete Agent series for isolated test cases.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    access = receipts["access.json"]
+    selected = receipts["gitlab-access.json"]["target"]
+    start = NOW - timedelta(hours=1)
+    owner = {
+        "run_id": "unit-agent-run",
+        "agent_id": 17,
+        "agent_name": "unit-agent",
+        "registration_credential_id": 29,
+        "cluster_uid": "unit-cluster-uid",
+        "resources": [],
+    }
+    selector = {
+        "project": selected["full_path"],
+        "agent_name": owner["agent_name"],
+        "run_id": owner["run_id"],
+    }
+    candidate = {
+        key: access[key] for key in ("execution_host", "tested_revision", "skill")
+    }
+    for offset, (kind, operation, action) in enumerate(AGENT_REQUIRED_OPERATIONS):
+        name = f"agent-{operation}-{action or 'read'}.json"
+        row = {
+            "action": action or STATUS.VERIFIED,
+            "ownership": owner,
+            "installation": {"image_reference": f"fixture/agent@sha256:{'a' * 64}"},
+            "prerequisites": {"cluster_uid": owner["cluster_uid"]},
+        }
+        if operation == AGENT_VERIFY:
+            row["ci_access"] = {"proof": {"captured_at": start.isoformat()}}
+        receipts[name] = {
+            **candidate,
+            "schema_version": SCHEMA_VERSION,
+            "kind": kind,
+            "status": STATUS.PASS,
+            "operation": operation,
+            "target": selected,
+            "filters": selector,
+            "captured_at": (start + timedelta(seconds=offset)).isoformat(),
+            "records": [row],
+        }
+    absent = {
+        name: {
+            "id": owner[field],
+            "http_status": HTTPStatus.NOT_FOUND,
+            "absent": True,
+            "preserved": False,
+        }
+        for name, field in (
+            ("agent", "agent_id"),
+            ("registration_credential", "registration_credential_id"),
+        )
+    }
+    cleanup = {
+        **absent,
+        "resources": [],
+        "release_absent": True,
+        "run_resources_absent": True,
+    }
+    receipts[f"agent-delete-{STATUS.NO_OP}.json"]["smoke_cleanup"] = {
+        "run_id": owner["run_id"],
+        "skill_digest": access["skill"][DIGEST_VALUE_KEY],
+        "execution_host": access["execution_host"],
+        "tested_revision": access["tested_revision"],
+        "captured_at": (
+            start + timedelta(seconds=len(AGENT_REQUIRED_OPERATIONS))
+        ).isoformat(),
+        "original_ownership": owner,
+        "after": cleanup,
+        "repeat": cleanup,
+    }
+    return json.dumps(receipts, sort_keys=True)
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+@pytest.mark.parametrize("case", ("complete", "missing-verify", "duplicate-connect"))
+def test_agent_policy_join_rejects_partial_or_duplicate_series(
+    agent_gate_baseline: str,
+    aggregate: bool,
+    case: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep both acceptance modes fail-closed after individual validation.
+
+    :param agent_gate_baseline: Immutable synthetic Agent lifecycle fixture.
+    :param aggregate: Evaluate the aggregate mode when true, targeted otherwise.
+    :param case: Complete, incomplete, or duplicate Agent evidence.
+    :param monkeypatch: Replace Agent individual validation for the gate-focused case.
+    """
+    receipts = json.loads(agent_gate_baseline)
+    setup = {}
+    for name in ("access.json", "gitlab-access.json"):
+        setup[name] = receipts.pop(name) if aggregate else receipts[name]
+    if case == "missing-verify":
+        del receipts[AGENT_VERIFY_RECEIPT]
+    elif case == "duplicate-connect":
+        receipts[AGENT_DUPLICATE_RECEIPT] = deepcopy(receipts[AGENT_CONNECT_RECEIPT])
+
+    # Bypass only individual Agent receipt/schema validation: this fixture
+    # exercises the real policy and cross-receipt join over accepted observations.
+    individual = ACCEPTANCE._check_targeted_receipt
+
+    def accept_individual(
+        name: str,
+        receipt: JSONObject,
+        review: ACCEPTANCE.AcceptanceReview,
+        *,
+        required: Optional[JSONObject] = None,
+    ) -> Sequence[str]:
+        """Keep other command receipts under their original validators.
+
+        :param name: Selected synthetic receipt filename.
+        :param receipt: Receipt supplied to the production acceptance checker.
+        :param review: Active checker state with candidate provenance and policy.
+        :param required: Context used for aggregate validation of other receipts.
+        :returns: Existing findings for other receipts, an empty tuple for Agent.
+        """
+        if receipt.get("kind") == AGENT_KIND:
+            return ()
+        return individual(name, receipt, review, required=required)
+
+    monkeypatch.setattr(ACCEPTANCE, "_check_targeted_receipt", accept_individual)
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=POLICY["required_operations"],
+    )
+
+    if case == "complete":
+        assert result["status"] == STATUS.PASS, result["problems"]
+        assert AGENT_VERIFY_RECEIPT in result["accepted"]
+    elif case == "missing-verify":
+        assert result["status"] == STATUS.BLOCKED
+        assert f"{AGENT_KIND}:{AGENT_SERIES_INCOMPLETE}" in result["problems"]
+        missing = f"coverage_missing:{AGENT_KIND}:{AGENT_VERIFY}:check"
+        assert missing in result["problems"]
+        assert AGENT_VERIFY_RECEIPT not in result["accepted"]
+    else:
+        assert result["status"] == STATUS.BLOCKED
+        reason = (
+            f"{AGENT_DUPLICATE_RECEIPT}:receipt_ambiguous"
+            if aggregate
+            else f"{AGENT_KIND}:{AGENT_SERIES_DUPLICATE}"
+        )
+        assert reason in result["problems"]

@@ -325,6 +325,88 @@ TARGET_FILENAME = "target.toml"
 PROJECT_DIR = ".ci-skills"
 
 COMMANDS: Mapping[str, CommandDefinition] = {
+    "gitlab_agent.py": {
+        "kind": "gitlab_agent",
+        "purpose": "Connect a selected GitLab project to Kubernetes through its Agent.",
+        "use_when": "Install an Agent, verify selected-project CI access, or remove one owned run.",
+        "requires": (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY),
+        "capabilities": ("namespaced",),
+        "mutates": True,
+        "options": {
+            **PROJECT_NAMING_OPTIONS,
+            "--project": "exact project path or ID; otherwise use the selected target project",
+            "--agent-name": "optional exact name on connect; required on every delete",
+            "--namespace": "exact existing namespace to preserve; connect omission creates an owned consumer namespace",
+            "--run-id": "run identity returned by connect; required for verify and delete",
+            "--job-url": "verify: exact selected-project native CI job producing agent-access.json",
+            "--live-plan": "connect/delete: inspect fresh prerequisites and identities without mutation",
+            "--apply": "connect/delete: perform the operation bound by a fresh live plan",
+            "--confirm-plan": "exact digest binding intent, native identities and installed candidate",
+            "--timeout": "positive operation timeout in seconds, at most 300 (default: 300)",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write the sanitized installed Agent operation receipt",
+                read_operations=("verify",),
+                live_plan=True,
+            ),
+        },
+        "subcommands": {
+            "connect": {
+                "purpose": "Register, install and independently verify one owned Agent connection.",
+                "required_options": [],
+                "result_schema": "schemas/results/gitlab-agent.schema.json",
+                "read_back": "Match native registration, immutable chart/image and active GraphQL "
+                "connection metadata to independently read owned Pod UIDs.",
+            },
+            "verify": {
+                "purpose": "Verify actual selected-project CI access through that Agent.",
+                "required_options": ["--run-id", "--job-url"],
+                "result_schema": "schemas/results/gitlab-agent.schema.json",
+                "mutates": False,
+                "read_back": "Match native project/job/pipeline/consumer SHA and producer bytes "
+                "to the installed candidate, real KAS context and selected cluster UID.",
+            },
+            "delete": {
+                "purpose": "Remove only exact run-owned native identities.",
+                "required_options": ["--run-id", "--agent-name"],
+                "result_schema": "schemas/results/gitlab-agent.schema.json",
+                "read_back": "Check known native IDs/UIDs absent and borrowed objects preserved; "
+                "absent-record repeat proves logical Agent/release/run-marker absence.",
+            },
+        },
+        "related": ("gitlab_access.py", "gitlab_pipeline.py", "gitlab_job.py"),
+        "references": ("GitLab Agent connectivity",),
+        "required_tools": ("glab", "kubectl", "helm", "skopeo"),
+        "returns": "Confirmed plan or native installation, connection, selected-project CI proof "
+        "and exact-owned cleanup evidence.",
+        "execution_surface": "selected GitLab API and Kubernetes authority; shared Helm/OCI adapters",
+        "side_effects": "Confirmed connect may create one Agent registration, token, owned namespace, "
+        "token Secret, nonsecret recovery ConfigMap and Helm release. Successful connect retains "
+        "the installation; failure compensates only run-created objects. Unowned Agent/release "
+        "collisions are blocked and preserved. Verify is read-only. Confirmed delete preserves "
+        "borrowed resources. Connection alone never proves CI access.",
+        "examples": (
+            {
+                "description": "Inspect selected-project prerequisites",
+                "command": "gitlab_agent.py connect --project group/app --live-plan --json",
+            },
+            {
+                "description": "Apply the exact returned run identity and live plan",
+                "command": "gitlab_agent.py connect --project group/app --run-id RUN_ID "
+                "--apply --confirm-plan DIGEST --json",
+            },
+            {
+                "description": "Verify one real selected-project consumer job",
+                "command": "gitlab_agent.py verify --project group/app --run-id RUN_ID "
+                "--job-url JOB_URL --receipt-out agent-verify.json --json",
+            },
+            {
+                "description": "Inspect owned cleanup with a stable repeat selector",
+                "command": "gitlab_agent.py delete --project group/app --run-id RUN_ID "
+                "--agent-name AGENT_NAME --live-plan --json",
+            },
+        ),
+    },
     "gitlab_mirror.py": {
         "kind": "gitlab_mirror",
         "purpose": "Synchronize a selected GitLab project to GitHub with independent ref verification.",
@@ -1681,7 +1763,7 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "pointer": "references/gitlab-runner-manager.md",
         },
         "GitLab Agent connectivity": {
-            "summary": "When a cluster can attach to a GitLab project, KAS address and the planned attach flow.",
+            "summary": "Confirmed Agent connection, selected-project CI proof and exact-owned cleanup.",
             "pointer": "references/gitlab-agent.md",
         },
         "Native OCP YAML example": {
@@ -2188,6 +2270,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "read or manage a GitLab runner": "gitlab_runner.py",
                 "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
                 "mirror GitLab to GitHub": "gitlab_mirror.py",
+                "connect a GitLab project to Kubernetes through its Agent": "gitlab_agent.py",
                 "a volume or claim is stuck": "storage_report.py",
                 "what the cluster said during an interval": "event_trace.py",
                 "connectivity or CNI health": "cilium_status.py",

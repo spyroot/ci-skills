@@ -146,7 +146,11 @@ from lib.python.core.abstract.callbacks import Callbacks
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
-from lib.python.core.toolbox_actions import ConfirmWorkflow, WorkflowAction, workflow_parser
+from lib.python.core.toolbox_actions import (
+    ConfirmWorkflow,
+    WorkflowAction,
+    workflow_parser,
+)
 
 
 def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:

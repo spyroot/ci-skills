@@ -5,7 +5,12 @@
   "requiredOperations": [
     {"kind": "access_check", "operation": null, "action": null},
     {"kind": "gitlab_mirror", "operation": "sync", "action": "APPLIED"},
-    {"kind": "gitlab_mirror", "operation": "sync", "action": "NO_OP"}
+    {"kind": "gitlab_mirror", "operation": "sync", "action": "NO_OP"},
+    {"kind": "gitlab_agent", "operation": "connect", "action": "APPLIED"},
+    {"kind": "gitlab_agent", "operation": "connect", "action": "NO_OP"},
+    {"kind": "gitlab_agent", "operation": "verify", "action": null},
+    {"kind": "gitlab_agent", "operation": "delete", "action": "APPLIED"},
+    {"kind": "gitlab_agent", "operation": "delete", "action": "NO_OP"}
   ],
   "receiptDirectories": [
     "tests/acceptance/receipts",

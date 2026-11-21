@@ -8,7 +8,6 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import base64
-import hashlib
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -27,45 +26,20 @@ from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.cli_api import APIError, response_decoder
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
 from lib.python.core.json_types import JSONObject
+from lib.python.core.oci import DIGEST_PREFIX, inspect_manifest_digest, skopeo_reference
+from lib.python.core.oci import (
+    image_at_digest as image_at_digest,  # noqa: PLC0414 - Preserve the existing Harbor import path.
+)
 from lib.python.core.runtime import error_class, run_command_bounded
 from lib.python.core.target import HarborTarget, Target, TargetError
 from lib.python.protocol.http import HTTPClient
 from lib.python.sys.status import APPLIED, NO_OP
 
 HARBOR_SERVICE_KEY: Final = SkillPluginType.HARBOR.value
-REGISTRY_SCHEME: Final = "docker://"
-DIGEST_PREFIX: Final = "sha256:"
 HARBOR_API: Final = "api/v2.0"
 REGISTRY_TOKEN_ENDPOINT: Final = "service/token"
 REGISTRY_TOKEN_SERVICE: Final = "harbor-registry"
 COPY_FLAGS: Final = ("--all", "--preserve-digests")
-
-
-def image_at_digest(image: str, digest: str) -> str:
-    """Pin an image without retaining a tag that native registry clients reject.
-
-    :param image: Repository with an optional tag or existing digest.
-    :param digest: Manifest digest returned by the registry read-back.
-    :returns: Repository and digest; a registry port is preserved and a tag is removed.
-    """
-    repository = image.partition("@")[0]
-    slash = repository.rfind("/")
-    colon = repository.rfind(":")
-    if colon > slash:
-        repository = repository[:colon]
-    return f"{repository}@{digest}"
-
-
-def _native_image(image: str) -> str:
-    """Render a Docker transport reference accepted by Skopeo.
-
-    :param image: Caller-selected image, optionally containing both tag and digest.
-    :returns: Transport-prefixed reference; the digest takes precedence over a tag.
-    """
-    reference, separator, digest = image.partition("@")
-    if separator:
-        reference = image_at_digest(reference, digest)
-    return REGISTRY_SCHEME + reference
 
 
 @dataclass
@@ -171,22 +145,12 @@ class HarborService:
         :returns: SHA-256 digest of the returned manifest bytes.
         :raises APIError: If the native read fails or yields no manifest.
         """
-        result = run_command_bounded(
-            [
-                "skopeo",
-                "inspect",
-                "--raw",
-                "--authfile",
-                str(self.authfile),
-                _native_image(image),
-            ],
+        return inspect_manifest_digest(
+            image,
             timeout=self.timeout,
+            authfile=self.authfile,
+            command=run_command_bounded,
         )
-        if result.returncode or not result.stdout:
-            raise APIError(
-                error_class(result) if result.returncode else "manifest_missing"
-            )
-        return DIGEST_PREFIX + hashlib.sha256(result.stdout.encode()).hexdigest()
 
     def copy(self, source: str, destination: str) -> str:
         """Copy all manifests and independently prove destination digest equality.
@@ -204,8 +168,8 @@ class HarborService:
                 *COPY_FLAGS,
                 "--authfile",
                 str(self.authfile),
-                _native_image(source),
-                _native_image(destination),
+                skopeo_reference(source),
+                skopeo_reference(destination),
             ],
             timeout=self.timeout,
         )

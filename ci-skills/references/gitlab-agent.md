@@ -1,9 +1,9 @@
 # GitLab Agent for Kubernetes: connectivity and attach
 
-Status: no command uses this yet. `gitlab_agent.py` is planned and not implemented; its name and flags are not
-settled. This page tells the caller of this skill, without network access, when a cluster can attach to a GitLab
-project, what each side needs, and which target value each input comes from. No command attaches ci-skills itself
-to a cluster; the attach connects the project owner's GitLab project to the project owner's cluster.
+Use `gitlab_agent.py connect|verify|delete` to register and install an owned Agent, prove selected-project CI access,
+or remove that owned run. The [D2/D3 contract](../../docs/phases/CI14-GITLAB-CONNECTIONS.md#d2d3-resolution-for-pr-002)
+defines ownership and proof; the [active plan](../../docs/exec-plans/active/ci14-gitlab-connections.md) tracks qualification.
+Caller naming connects the actual consumer project to its selected cluster; it does not connect this skill's repository.
 
 Words used here: "caller" is the program that runs this skill's commands; "project owner" is the team that owns the
 GitLab project and the cluster; "GitLab Agent" is the GitLab feature, and "agentk" is its program running in the
@@ -12,16 +12,24 @@ cluster.
 ## Who opens the connection
 
 agentk, installed in the cluster, opens the connection to the GitLab agent server, KAS (the docs now call it GitLab
-Relay), at `config.kasAddress`. The install is one Helm release:
+Relay), at `config.kasAddress`. The installation pins official chart 2.20.1/app `v18.5.2` and verifies its archive
+hash; the [phase contract](../../docs/phases/CI14-GITLAB-CONNECTIONS.md) defines exact provenance. Resolve the
+official image digest at runtime and verify the rendered image and observed Pod image IDs. A token Secret, created by
+confirmed connect, has key `token` and is passed through `config.secretName`. Never pass token plaintext through Helm
+argv or `config.token`.
+
+Equivalent nonsecret Helm inputs after the owned token Secret exists:
 
 ```bash
-helm upgrade --install <name> gitlab/gitlab-agent \
-  --namespace <namespace> --create-namespace \
-  --set config.token=<agent token> \
-  --set config.kasAddress=<kas address>
+helm upgrade --install <release> <verified-chart-archive> \
+  --namespace <namespace> \
+  --set-string config.secretName=<owned-token-secret> \
+  --set-string config.kasAddress=<metadata-kas-address> \
+  --set-string image.tag=<version>@sha256:<resolved-digest>
 ```
 
-The default chart's service account has cluster-admin. Source: docs.gitlab.com `user/clusters/agent/install`.
+Preserve the chart's existing cluster-admin role; own only newly created bindings/accounts. Helm retains chart-object
+ownership. Successful connect retains the installation; failure compensates only run-created objects.
 
 ## KAS address
 
@@ -31,8 +39,8 @@ The default chart's service account has cluster-admin. Source: docs.gitlab.com `
   with a relative URL root. Source: `administration/clusters/kas`.
 
 On a self-managed GitLab the administrator sets up KAS; the Linux package installs it by default. From 19.5, new Linux
-package and Helm chart installations advertise `grpcs://`. The planned command will read the address from the selected
-GitLab at run time and will not derive it from the target key or host.
+package and Helm chart installations advertise `grpcs://`. The command reads the address from the selected
+GitLab at run time; it never derives it from the target key or host.
 
 ## What the cluster side needs
 
@@ -57,7 +65,9 @@ A receptive agent is one GitLab connects to, at a URL configured through the clu
 
 ## What the project defines, and how its CI uses it
 
-The project that registers the GitLab Agent is its configuration project. Its file
+The project that registers the GitLab Agent is its configuration project; its own CI has access by default.
+The initial command proves this same project's access without a sharing flag or config commit. Additional sharing
+remains outside this slice. Its file
 `.gitlab/agents/<agent-name>/config.yaml` lists the projects whose CI jobs may use the GitLab Agent. Example, in
 `group/app`, file `.gitlab/agents/lab/config.yaml`:
 
@@ -81,61 +91,42 @@ Authorized projects must share the configuration project's top-level group unles
 enabled; `ci_access.projects` and `ci_access.groups` hold up to 500 entries each. Whether GitLab.com allows
 instance-level authorization is not verified here. Source: `user/clusters/agent/ci_cd_workflow`.
 
-## Attach flow (planned)
+## Attach flow
 
-The flow follows the existing confirmed-action pattern: `--describe`, `--live-plan`, then `--apply --confirm-plan`.
+Offline/dry-run makes no API calls. Live-plan reads selected KAS metadata, Kubernetes authority and exact identities;
+it reports fresh-namespace egress UNPROVEN. No extra probe Pod is created. Connect/delete apply requires the fresh
+plan digest through existing `--apply --confirm-plan` controls.
 
-```mermaid
-sequenceDiagram
-    participant Owner as Project owner
-    participant Caller
-    participant Skill as gitlab_agent.py (planned)
-    participant Target as ~/.ci-skills/target.toml
-    participant GL as GitLab (instance chosen by --gitlab)
-    participant K8s as Kubernetes (table named by the routing row)
-    Owner->>Caller: attach group/app to the lab cluster
-    Caller->>Skill: --describe (flags, modes, result schema; no credentials)
-    Caller->>Skill: attach --gitlab private --project group/app --agent-name lab --live-plan
-    Skill->>Target: [gitlab_routing] row -> instance table + kubernetes table
-    Skill->>GL: read KAS address, existing agents (read only)
-    Skill->>K8s: preflight: can the cluster reach that KAS address (read only)
-    Skill-->>Caller: plan + digest, or BLOCKED <missing prerequisite>
-    Caller->>Owner: show plan; Owner confirms
-    Caller->>Skill: same command --apply --confirm-plan <digest>
-    Skill->>GL: POST /projects/:id/cluster_agents {"name":"lab"} -> token
-    Skill->>GL: commit .gitlab/agents/lab/config.yaml (ci_access.projects)
-    Skill->>K8s: helm upgrade --install gitlab/gitlab-agent (config.token, config.kasAddress)
-    Skill->>GL: read back: agent connected; context group/app:lab visible to authorized CI
-    Skill-->>Caller: one result: PASS | BLOCKED <reason> | PARTIAL <what exists> + routing + agent context
-```
+1. Connect creates an owned namespace if needed and one PENDING nonsecret native recovery ConfigMap.
+2. Register the Agent; independently read and persist its native ID. Create its token in a separate REST call and
+   retain its native token ID before delivering plaintext only to the owned token Secret.
+3. Install the verified pinned chart with `config.secretName` and the immutable official image. Keep Helm ownership.
+4. Read native GraphQL active connections and independently match Pod metadata to the owned Pod UID and image.
+   Only then may connect PASS; CI access remains NOT_VERIFIED.
+5. Run one bounded real consumer proof job in the selected project using its GitLab-provided KUBECONFIG.
+6. `verify --run-id RUN_ID --job-url JOB_URL` independently compares native job/pipeline/consumer SHA/artifact,
+   selected Agent context/KAS proxy, cluster/namespace UIDs and producer bytes to the installed candidate.
+7. `delete --run-id RUN_ID --agent-name AGENT_NAME` removes only confirmed owned identities. Use the same selectors
+   for the identical repeat. Borrowed namespaces and every pre-existing object remain.
 
-Where each value comes from:
+A pre-existing Agent/release without proven run ownership is BLOCKED and preserved; no credential adoption or rotation.
+NO_OP reuses only the same fully verified owned run, without another token or Helm revision. After record removal,
+repeat delete proves logical Agent/release/run-marker absence; unexpected presence blocks. Unknown former IDs are not
+claimed absent. Qualification separately repeats exact original receipt IDs/UIDs. No tombstone remains.
 
-| Value | Source | Example | Used as |
-| --- | --- | --- | --- |
-| Instance | `--gitlab`, else `[gitlab_routing].default`, else `gitlab_private` | `private` | API host: its `url` |
-| Cluster | `kubernetes` of the selected `[gitlab_routing]` row | `kubernetes` | where agentk runs |
-| Configuration project | `--project` | `group/app` | holds `.gitlab/agents/lab/config.yaml` |
-| Agent name | `--agent-name` (PROPOSED) | `lab` | registration name and config directory |
-| Authorized projects | `--ci-access-project`, repeatable (PROPOSED) | `group/svc` | `ci_access.projects[].id` |
-| KAS address | read live from the selected GitLab | `grpcs://kas.gitlab.com` | `config.kasAddress` |
-| CI context | derived | `group/app:lab` | `$KUBECONFIG` context in authorized jobs |
+| Value | Source | Invariant |
+| --- | --- | --- |
+| GitLab/cluster | Existing target/profile/binding resolution | Actual selected authorities |
+| Project | `--project`, else selected target project | Real configuration project identity |
+| Naming base | Optional `--project-name`, else consumer repository | New names only; never skill-name defaults |
+| Agent | Optional `--agent-name` on connect | Required on every delete |
+| Namespace | Explicit `--namespace`, else new consumer namespace | Existing namespace is borrowed |
+| Run | `--run-id` returned by connect | Required for verify/delete; binds release identity |
+| Job | `verify --job-url` | Actual selected-project native proof job |
+| KAS | Selected GitLab metadata | Never constructed from a hostname |
 
-## When a `[gitlab_routing]` row names a cluster
-
-Whether a `[gitlab_routing]` row ([access reference](access.md#gitlab-private-and-public-targets)) should name a
-cluster and a registry for a GitLab depends on where the work runs:
-
-- A GitLab.com project plus a lab cluster works for a GitLab Agent, or for a self-managed runner in that cluster,
-  when the cluster has egress to GitLab.com.
-- GitLab.com hosted runners cannot pull from a Harbor behind a private DMZ, so the template leaves
-  `gitlab_public = {}` for that case.
-- An empty row, `gitlab_public = {}` in the template, names no cluster and no registry; a command that needs them
-  returns BLOCKED `target is missing required authority tables` (access reference). Fill the row only for the first
-  case above.
-
-Whether the cluster reaches KAS is an infrastructure fact. The planned command checks it live before any
-registration and returns BLOCKED naming the missing egress.
+The selected configuration project's own CI already has access; this slice adds no `--ci-access-project` or sharing
+configuration commit. Additional project sharing remains outside this command.
 
 ## Token path
 
@@ -182,3 +173,21 @@ Live read on 2026-11-21, project `hott/test`, run `efc9e7db47ff427bbc53df1978834
 | Helm values | `config.kasAddress`, `config.secretName`, `fullnameOverride`, `image.tag`; `glagent-` count `0` |
 | Connection `4355863225129730728` | Pod `…-v2-fcc7b988c-b2v55`, UID `436878ac-1cd3-4077-b220-65f5f6dd48c1` |
 | Connection `5964489850388898347` | Pod `…-v2-fcc7b988c-tf77w`, UID `47c956b5-ea02-4507-ae9f-8594edd8f1f5` |
+
+## When a `[gitlab_routing]` row names a cluster
+
+Whether a `[gitlab_routing]` row ([access reference](access.md#gitlab-private-and-public-targets)) should name a
+cluster and a registry for a GitLab depends on where the work runs:
+
+- A GitLab.com project plus a lab cluster works for a GitLab Agent, or for a self-managed runner in that cluster,
+  when the cluster has egress to GitLab.com.
+- GitLab.com hosted runners cannot pull from a Harbor behind a private DMZ, so the template leaves
+  `gitlab_public = {}` for that case.
+- An empty row, `gitlab_public = {}` in the template, names no cluster and no registry; a command that needs them
+  returns BLOCKED `target is missing required authority tables` (access reference). Fill the row only for the first
+  case above.
+
+A fresh namespace has no workload with which to prove KAS egress during a read-only plan. Report UNPROVEN, preserve
+KAS prerequisite discovery and selected Kubernetes authority, then require actual GraphQL/owned-Pod connection
+before confirmed connect can PASS. Compensate only run-created objects on failure. This corrects the planned
+preflight promise; it removes no implemented check or selected-project CI requirement.
