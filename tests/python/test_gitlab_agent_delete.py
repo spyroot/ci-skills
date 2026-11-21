@@ -31,6 +31,8 @@ PROVIDER = ORIGINAL.PROVIDER
 KUBERNETES = ORIGINAL.KUBERNETES
 HELM = ORIGINAL.HELM
 INSTALL = ORIGINAL.INSTALL_TEST
+REGISTRATION = ORIGINAL.REGISTRATION
+KUBE_AGENT = ORIGINAL.CONNECT_TEST.POD
 
 NAMESPACE: Final = ORIGINAL.NAMESPACE
 CLUSTER_UID: Final = RECOVERY_TEST.CLUSTER_UID
@@ -65,6 +67,14 @@ STORAGE_ROW: Final = ("Secret", STORAGE.name, NAMESPACE)
 ABSENT_SCOPE: Final = ABSENCE.LogicalAgentAbsence(
     SELECTED.project, SELECTED.release, CLUSTER_UID
 )
+REPLICA_SET_KIND: Final = KUBE_AGENT.REPLICA_SET_KIND
+LEASE_KIND: Final = KUBE_AGENT.LEASE_KIND
+LEASE_ROW: Final = (LEASE_KIND, KUBE_AGENT.agent_lease_name(AGENT_ID), NAMESPACE)
+REPLICA_SET_NAME: Final = "agent-workload-replica-{index}"
+REPLICA_SET_UID: Final = "replica-set-uid-{index}"
+LEASE_UID: Final = "lease-uid-{index}"
+MAX_REPLICA_SETS: Final = DELETE._MAX_REPLICA_SETS
+PENDING: Final = "PENDING"
 
 Identity = tuple[str, str, str]
 
@@ -212,6 +222,19 @@ def _delete(case: SimpleNamespace) -> DELETE.AgentCleanup:
     )
 
 
+def _own_namespace(case: SimpleNamespace) -> None:
+    """Select a run-owned namespace and record the Namespace row as created.
+
+    :param case: Tracked delete harness to change.
+    """
+    case.selection = replace(
+        SELECTED, scope=replace(SELECTED.scope, owns_namespace=True)
+    )
+    case.record.document["created"]["namespace"] = True
+    case.rows[NAMESPACE_ROW]["created"] = True
+    case.journal = deepcopy(case.record)
+
+
 @pytest.mark.parametrize("owns_namespace", (False, True), ids=("borrowed", "owned"))
 def test_tracked_delete_removes_only_original_native_ids(
     tracked: SimpleNamespace, owns_namespace: bool
@@ -219,12 +242,7 @@ def test_tracked_delete_removes_only_original_native_ids(
     """A fresh delete proves all old identities absent and protects borrowed state."""
     case = tracked
     if owns_namespace:
-        case.selection = replace(
-            SELECTED, scope=replace(SELECTED.scope, owns_namespace=True)
-        )
-        case.record.document["created"]["namespace"] = True
-        case.rows[NAMESPACE_ROW]["created"] = True
-        case.journal = deepcopy(case.record)
+        _own_namespace(case)
     before = deepcopy(case.record)
     original_token = case.token
 
@@ -260,9 +278,11 @@ def test_tracked_delete_removes_only_original_native_ids(
     assert events[-1] == "absence"
     assert case.provider.read_agent.call_args_list == [call(AGENT_ID)] * 2
     assert case.provider.read_token.call_args_list == [call(AGENT_ID, TOKEN_ID)] * 2
-    assert Counter(item.args for item in case.kube.read.call_args_list) == {
-        key: 2 for key in case.rows
-    }
+    reads = {key: 2 for key in case.rows}
+    if owns_namespace:
+        # The record has no Lease row, so delete reads the Agent's Lease once.
+        reads[LEASE_ROW] = 1
+    assert Counter(item.args for item in case.kube.read.call_args_list) == reads
     if owns_namespace:
         case.namespace_guard.assert_called_once()
         assert case.namespace_guard.call_args.args == (
@@ -307,6 +327,7 @@ REGISTRATION_MISMATCH: Final = "agent_delete_registration_mismatch"
 TOKEN_MISMATCH: Final = "agent_delete_token_mismatch"
 RELEASE_MISMATCH: Final = "agent_delete_release_mismatch"
 RESOURCE_MISMATCH: Final = "agent_delete_resource_mismatch"
+RECORD_MISMATCH: Final = "agent_delete_record_mismatch"
 
 
 def _replace_pod(case: SimpleNamespace) -> None:
@@ -476,3 +497,289 @@ def test_tracked_delete_confirmation_gates_all_writes(
         case.kube.delete.assert_not_called()
         case.provider.delete_agent.assert_not_called()
         case.provider.delete_token.assert_not_called()
+
+
+def _replica_set(index: int) -> dict[str, object]:
+    """Build the ownership row connect writes for one controlling ReplicaSet.
+
+    :param index: Distinguishes the name and UID of each ReplicaSet.
+    :returns: Created, present ReplicaSet row in the Agent namespace.
+    """
+    return REGISTRATION.observed_resource(
+        REPLICA_SET_KIND,
+        REPLICA_SET_NAME.format(index=index),
+        NAMESPACE,
+        REPLICA_SET_UID.format(index=index),
+        created=True,
+        api_version=KUBE_AGENT.REPLICA_SET_API_VERSION,
+    )
+
+
+def _lease(index: int) -> dict[str, object]:
+    """Build the ownership row connect writes for an agentk Lease.
+
+    :param index: 0 names this Agent's Lease; another value names the Lease of
+        Agent ID ``AGENT_ID + index``, so each row has its own name and UID.
+    :returns: Created, present Lease row in the Agent namespace.
+    """
+    return REGISTRATION.observed_resource(
+        LEASE_KIND,
+        KUBE_AGENT.agent_lease_name(AGENT_ID + index),
+        NAMESPACE,
+        LEASE_UID.format(index=index),
+        created=True,
+        api_version=KUBE_AGENT.LEASE_API_VERSION,
+    )
+
+
+def _runtime_rows(replica_sets: int, leases: int) -> list[dict[str, object]]:
+    """Build fresh ReplicaSet and Lease rows.
+
+    :param replica_sets: Number of ReplicaSet rows.
+    :param leases: Number of Lease rows.
+    :returns: New row objects; no two cases share one.
+    """
+    return [
+        *(_replica_set(index) for index in range(replica_sets)),
+        *(_lease(index) for index in range(leases)),
+    ]
+
+
+def _record_rows(
+    case: SimpleNamespace, rows: list[dict[str, object]], *, native: bool
+) -> None:
+    """Add rows to the ownership record and the journal read back for it.
+
+    :param case: Tracked delete harness to change.
+    :param rows: Ownership rows to append.
+    :param native: Whether the cluster still holds each recorded object.
+    """
+    for row in rows:
+        case.record.document[RESOURCES].append(row)
+        case.rows[_identity(row)] = row
+        if native:
+            case.objects[_identity(row)] = _native(row)
+    case.journal = deepcopy(case.record)
+
+
+def _assert_nothing_read_or_written(case: SimpleNamespace) -> None:
+    """Check that a rejected record caused no native read and no write.
+
+    :param case: Tracked delete harness after the rejected call.
+    """
+    case.scope.assert_not_called()
+    case.kube.read.assert_not_called()
+    case.kube.delete.assert_not_called()
+    case.store.replace.assert_not_called()
+    case.provider.delete_agent.assert_not_called()
+    case.provider.delete_token.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("pending", "replica_sets", "leases"),
+    (
+        pytest.param(False, MAX_REPLICA_SETS + 1, 0, id="replica-sets-over-bound"),
+        pytest.param(False, 0, 2, id="two-leases"),
+        pytest.param(True, 1, 0, id="installation-only-replica-set"),
+        pytest.param(True, 0, 1, id="installation-only-lease"),
+    ),
+)
+def test_delete_refuses_record_with_runtime_rows_out_of_bounds(
+    tracked: SimpleNamespace, pending: bool, replica_sets: int, leases: int
+) -> None:
+    """Refuse an ownership record whose ReplicaSet or Lease rows connect cannot write.
+
+    ``confirm_fresh_agent_connection`` writes one row per distinct ReplicaSet of at
+    most 10 connected Pods and one Lease row, in the same update that sets the state
+    CONNECTED, so a PENDING install journal has neither. The passing neighbours are
+    ``test_tracked_delete_removes_runtime_rows_at_bound`` and the PENDING
+    compensation without runtime rows in
+    ``test_pending_installation_compensation_preserves_strict_public_delete``.
+
+    :param tracked: Tracked delete harness.
+    :param pending: Use the PENDING journal and ``compensate_installed_agent``.
+    :param replica_sets: ReplicaSet rows added to the record.
+    :param leases: Lease rows added to the record.
+    """
+    case = tracked
+    operation = DELETE.delete_tracked_agent
+    if pending:
+        case.record.document[STATE] = PENDING
+        case.record.document[RESOURCES].remove(case.rows.pop(POD_ROW))
+        del case.objects[POD_ROW]
+        operation = DELETE.compensate_installed_agent
+    _record_rows(case, _runtime_rows(replica_sets, leases), native=True)
+
+    with pytest.raises(KUBERNETES.KubernetesError, match=f"^{RECORD_MISMATCH}$"):
+        operation(case.gitlab, case.kube, case.selection, case.record, timeout=TIMEOUT)
+
+    _assert_nothing_read_or_written(case)
+
+
+def test_tracked_delete_removes_runtime_rows_at_bound(
+    tracked: SimpleNamespace,
+) -> None:
+    """Delete the maximum recorded ReplicaSets and the Lease by UID, in kind order.
+
+    The order is ``_DELETE_ORDER`` in delete.py: Deployment, then ReplicaSet, then
+    Pod, then Lease.
+
+    :param tracked: Tracked delete harness.
+    """
+    case = tracked
+    _record_rows(case, _runtime_rows(MAX_REPLICA_SETS, 1), native=True)
+    expected = {key: row[UID] for key, row in case.rows.items() if row["created"]}
+
+    result = _delete(case)
+
+    deleted = case.kube.delete.call_args_list
+    assert len(deleted) == len(expected)
+    assert {item.args: item.kwargs["expected_uid"] for item in deleted} == expected
+    kinds = [item.args[0] for item in deleted]
+    assert (
+        kinds.index("Deployment")
+        < kinds.index(REPLICA_SET_KIND)
+        < kinds.index("Pod")
+        < kinds.index(LEASE_KIND)
+    )
+    assert {_identity(row): row[STATE] for row in result.resources} == {
+        key: ABSENT if row["created"] else PRESENT for key, row in case.rows.items()
+    }
+    assert result.present == frozenset(row[UID] for row in case.rows.values())
+
+
+@pytest.mark.parametrize(
+    "gone",
+    (
+        pytest.param((REPLICA_SET_KIND,), id="replica-set-gone"),
+        pytest.param((LEASE_KIND,), id="lease-gone"),
+        pytest.param((REPLICA_SET_KIND, LEASE_KIND), id="both-gone"),
+    ),
+)
+def test_tracked_delete_accepts_recorded_runtime_rows_already_gone(
+    tracked: SimpleNamespace, gone: tuple[str, ...]
+) -> None:
+    """A first delete does not require recorded ReplicaSet or Lease objects to exist.
+
+    delete.py excludes ``_RUNTIME_KINDS`` from the rows that must be present before
+    the first write; it deletes the ones still present and reports every one ABSENT.
+    ``AgentCleanup.present`` names only the objects read present before the writes.
+
+    :param tracked: Tracked delete harness.
+    :param gone: Kinds whose recorded objects no longer exist at the first read.
+    """
+    case = tracked
+    _record_rows(case, _runtime_rows(1, 1), native=True)
+    missing = {key: row for key, row in case.rows.items() if key[0] in gone}
+    for key in missing:
+        del case.objects[key]
+
+    result = _delete(case)
+
+    deleted = {item.args for item in case.kube.delete.call_args_list}
+    assert deleted.isdisjoint(missing)
+    for key, row in case.rows.items():
+        if key[0] in (REPLICA_SET_KIND, LEASE_KIND) and key not in missing:
+            case.kube.delete.assert_any_call(*key, expected_uid=row[UID])
+    assert {_identity(row): row[STATE] for row in result.resources} == {
+        key: ABSENT if row["created"] else PRESENT for key, row in case.rows.items()
+    }
+    assert result.present == frozenset(
+        row[UID] for key, row in case.rows.items() if key not in missing
+    )
+    assert (result.agent_present, result.token_present) == (True, True)
+
+
+def test_tracked_delete_refuses_recorded_pod_already_gone(
+    tracked: SimpleNamespace,
+) -> None:
+    """A first delete still requires every recorded install object, here the Pod.
+
+    Control for the runtime-row exception: only ReplicaSet and Lease rows may be
+    absent before the first write.
+
+    :param tracked: Tracked delete harness.
+    """
+    case = tracked
+    del case.objects[POD_ROW]
+
+    with pytest.raises(KUBERNETES.KubernetesError, match=f"^{RESOURCE_MISMATCH}$"):
+        _delete(case)
+
+    case.store.replace.assert_not_called()
+    case.kube.delete.assert_not_called()
+    case.provider.delete_agent.assert_not_called()
+    case.provider.delete_token.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("recorded", "native", "lease_reads"),
+    (
+        pytest.param(False, True, 1, id="unrecorded-lease-present"),
+        pytest.param(False, False, 1, id="unrecorded-lease-absent"),
+        pytest.param(True, True, 2, id="recorded-lease"),
+    ),
+)
+def test_owned_namespace_delete_removes_agent_lease_by_uid(
+    tracked: SimpleNamespace, recorded: bool, native: bool, lease_reads: int
+) -> None:
+    """Delete ``agent-<agent_id>-lock`` by UID before the run-owned namespace inventory.
+
+    A record written before connect recorded the Lease has no Lease row; delete reads
+    the Lease named after the recorded Agent ID, deletes it by the UID it read and
+    adds that UID to the UIDs the namespace inventory accepts. A record with a Lease
+    row deletes it as a recorded row, with no extra read.
+
+    :param tracked: Tracked delete harness.
+    :param recorded: Whether the ownership record has the Lease row.
+    :param native: Whether the Lease exists in the namespace.
+    :param lease_reads: Native reads of the Lease during the delete.
+    """
+    case = tracked
+    _own_namespace(case)
+    lease = _lease(0)
+    if recorded:
+        _record_rows(case, [lease], native=native)
+    elif native:
+        case.objects[LEASE_ROW] = _native(lease)
+    recorded_uids = frozenset(row[UID] for row in case.rows.values())
+
+    _delete(case)
+
+    lease_deletes = [
+        item for item in case.kube.delete.call_args_list if item.args[0] == LEASE_KIND
+    ]
+    assert lease_deletes == (
+        [call(*LEASE_ROW, expected_uid=lease[UID])] if native else []
+    )
+    permitted = case.namespace_guard.call_args.args[-1]
+    assert permitted == recorded_uids | (
+        {lease[UID]} if native and not recorded else frozenset()
+    )
+    reads = Counter(item.args for item in case.kube.read.call_args_list)
+    assert reads[LEASE_ROW] == lease_reads
+    events = case.trace.mock_calls
+    names = [item[0] for item in events]
+    if native:
+        removal = call.kube.delete(*LEASE_ROW, expected_uid=lease[UID])
+        assert events.index(removal) < names.index("guard")
+    assert case.objects == {}
+
+
+def test_borrowed_namespace_delete_leaves_unrecorded_lease_untouched(
+    tracked: SimpleNamespace,
+) -> None:
+    """Never read or delete an unrecorded Lease in a namespace the run did not create.
+
+    :param tracked: Tracked delete harness with a borrowed namespace.
+    """
+    case = tracked
+    native = _native(_lease(0))
+    case.objects[LEASE_ROW] = deepcopy(native)
+
+    _delete(case)
+
+    assert all(item.args != LEASE_ROW for item in case.kube.read.call_args_list)
+    assert all(item.args[0] != LEASE_KIND for item in case.kube.delete.call_args_list)
+    case.namespace_guard.assert_not_called()
+    assert case.objects[LEASE_ROW] == native

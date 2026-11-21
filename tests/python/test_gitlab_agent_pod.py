@@ -12,8 +12,9 @@ from conftest import import_script_module
 AGENT = import_script_module("lib.python.core.kubernetes.gitlab_agent")
 
 POD: Final = "Pod"
-REPLICA_SET: Final = "ReplicaSet"
+REPLICA_SET: Final = AGENT.REPLICA_SET_KIND
 DEPLOYMENT: Final = "Deployment"
+LEASE: Final = AGENT.LEASE_KIND
 CONNECTION: Final = "connection"
 METADATA: Final = "metadata"
 NAMESPACE: Final = "agent-system"
@@ -44,6 +45,28 @@ PLATFORM_IMAGE_ID: Final = f"docker-pullable://{IMAGE_REPOSITORY}@{PLATFORM_DIGE
 CONNECTION_STALE: Final = "agent_connection_predates_pod"
 CONTROLLER_DRIFT: Final = "agent_pod_controller_identity_mismatch"
 IMAGE_OR_READY: Final = "agent_pod_image_or_readiness_mismatch"
+POD_READBACK_INVALID: Final = "agent_pod_readback_invalid"
+LEASE_MISMATCH: Final = "agent_lease_identity_mismatch"
+LEASE_READBACK_INVALID: Final = "agent_lease_readback_invalid"
+AGENT_ID: Final = 2
+LEASE_NAME: Final = AGENT.agent_lease_name(AGENT_ID)
+LEASE_UID: Final = "agent-lease-uid"
+# A holder that connection._held_by accepts: the Pod name followed by "_<suffix>".
+HOLDER: Final = f"{POD_NAME}_holder-suffix"
+API_VERSION: Final = "apiVersion"
+SPEC: Final = "spec"
+HOLDER_FIELD: Final = "holderIdentity"
+DELETED_AT: Final = "deletionTimestamp"
+DELETION_TIME: Final = "2026-01-01T00:05:00Z"
+OWNERS: Final = "ownerReferences"
+OTHER_LEASE_API_VERSION: Final = "coordination.k8s.io/v1beta1"
+OTHER_KIND: Final = "ConfigMap"
+OTHER_CONTROLLER_KIND: Final = "StatefulSet"
+OTHER_DEPLOYMENT_NAME: Final = "other-agent"
+NOT_TEXT: Final = 7
+CONTROLLER_KIND_MISMATCH: Final = "agent_pod_controller_mismatch"
+# Marks a field the case deletes from the decoded response instead of replacing.
+REMOVED: Final = object()
 EXPECTED = AGENT.AgentPodExpectation(
     NAMESPACE,
     DEPLOYMENT_NAME,
@@ -123,6 +146,12 @@ BASELINE: Final = json.dumps(
                 NAMESPACE_FIELD: NAMESPACE,
                 UID: DEPLOYMENT_UID,
             },
+        },
+        LEASE: {
+            API_VERSION: AGENT.LEASE_API_VERSION,
+            KIND: LEASE,
+            METADATA: {NAME: LEASE_NAME, NAMESPACE_FIELD: NAMESPACE, UID: LEASE_UID},
+            SPEC: {HOLDER_FIELD: HOLDER},
         },
     }
 )
@@ -236,6 +265,217 @@ def test_agent_pod_rejects_one_mismatched_native_observation(
 
     with pytest.raises(AGENT.KubernetesError) as rejected:
         AGENT.correlate_agent_pod(service, connection, EXPECTED)
+
+    assert str(rejected.value) == reason
+    assert tuple(service.mock_calls) == READS[:reads]
+
+
+def _edit(wire: dict[str, object], path: tuple[str | int, ...], value: object) -> None:
+    """Replace or remove one field of the decoded native response copy.
+
+    :param wire: Decoded copy of ``BASELINE`` for one case.
+    :param path: Keys and list indexes that lead to the field.
+    :param value: New field value, or ``REMOVED`` to delete the field.
+    """
+    current = wire
+    for key in path[:-1]:
+        current = current[key]
+    if value is REMOVED:
+        del current[path[-1]]
+    else:
+        current[path[-1]] = value
+
+
+def test_agent_lease_absent_returns_none(
+    wire: dict[str, object], service: Mock
+) -> None:
+    """Return None when agentk has not written its Lease yet.
+
+    :param wire: Decoded native responses for this case.
+    :param service: Fake Kubernetes service serving ``wire``.
+    """
+    wire[LEASE] = None
+
+    assert AGENT.read_agent_lease(service, NAMESPACE, AGENT_ID) is None
+    assert service.mock_calls == [call.read(LEASE, LEASE_NAME, NAMESPACE)]
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "holder"),
+    (
+        pytest.param((LEASE, SPEC, HOLDER_FIELD), HOLDER, HOLDER, id="suffixed-holder"),
+        pytest.param(
+            (LEASE, SPEC, HOLDER_FIELD), POD_NAME, POD_NAME, id="pod-name-holder"
+        ),
+        pytest.param((LEASE, SPEC, HOLDER_FIELD), REMOVED, "", id="holder-missing"),
+        pytest.param((LEASE, SPEC, HOLDER_FIELD), None, "", id="holder-null"),
+        pytest.param((LEASE, SPEC), REMOVED, "", id="spec-missing"),
+    ),
+)
+def test_agent_lease_reads_holder_from_spec_and_native_uid(
+    wire: dict[str, object],
+    service: Mock,
+    path: tuple[str, ...],
+    value: object,
+    holder: str,
+) -> None:
+    """Return ``spec.holderIdentity`` and the Lease UID; an unheld Lease gives "".
+
+    A missing, null or empty holder reads as "", which ``connection._held_by``
+    matches to no Pod.
+
+    :param wire: Decoded native responses for this case.
+    :param service: Fake Kubernetes service serving ``wire``.
+    :param path: Field of the Lease the case sets or removes.
+    :param value: New value, or ``REMOVED``.
+    :param holder: Holder the reader must return.
+    """
+    _edit(wire, path, value)
+
+    assert AGENT.read_agent_lease(service, NAMESPACE, AGENT_ID) == (holder, LEASE_UID)
+    assert service.mock_calls == [call.read(LEASE, LEASE_NAME, NAMESPACE)]
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "reason"),
+    (
+        pytest.param(
+            (LEASE, API_VERSION),
+            OTHER_LEASE_API_VERSION,
+            LEASE_MISMATCH,
+            id="other-api-version",
+        ),
+        pytest.param((LEASE, KIND), OTHER_KIND, LEASE_MISMATCH, id="other-kind"),
+        pytest.param(
+            (LEASE, METADATA, NAME),
+            AGENT.agent_lease_name(AGENT_ID + 1),
+            LEASE_MISMATCH,
+            id="other-agent-lease",
+        ),
+        pytest.param(
+            (LEASE, METADATA, NAMESPACE_FIELD),
+            OTHER_NAMESPACE,
+            LEASE_MISMATCH,
+            id="other-namespace",
+        ),
+        pytest.param(
+            (LEASE, METADATA, DELETED_AT),
+            DELETION_TIME,
+            LEASE_MISMATCH,
+            id="being-deleted",
+        ),
+        pytest.param(
+            (LEASE, METADATA, UID), REMOVED, LEASE_READBACK_INVALID, id="uid-missing"
+        ),
+        pytest.param(
+            (LEASE, SPEC, HOLDER_FIELD),
+            NOT_TEXT,
+            LEASE_READBACK_INVALID,
+            id="holder-not-text",
+        ),
+    ),
+)
+def test_agent_lease_rejects_one_changed_identity(
+    wire: dict[str, object],
+    service: Mock,
+    path: tuple[str, ...],
+    value: object,
+    reason: str,
+) -> None:
+    """Refuse a read-back that is not this Agent's live Lease in its namespace.
+
+    :param wire: Decoded native responses for this case.
+    :param service: Fake Kubernetes service serving ``wire``.
+    :param path: Field of the Lease the case sets or removes.
+    :param value: New value, or ``REMOVED``.
+    :param reason: Stable error the reader must raise.
+    """
+    _edit(wire, path, value)
+
+    with pytest.raises(AGENT.KubernetesError) as rejected:
+        AGENT.read_agent_lease(service, NAMESPACE, AGENT_ID)
+
+    assert str(rejected.value) == reason
+    assert service.mock_calls == [call.read(LEASE, LEASE_NAME, NAMESPACE)]
+
+
+def test_agent_replica_set_reads_pod_controller_owned_by_recorded_deployment(
+    service: Mock,
+) -> None:
+    """Return the ReplicaSet that controls the Pod, without reading the Deployment.
+
+    :param service: Fake Kubernetes service serving the baseline responses.
+    """
+    result = AGENT.read_agent_replica_set(service, POD_NAME, EXPECTED)
+
+    assert result == (REPLICA_SET_NAME, REPLICA_SET_UID)
+    assert tuple(service.mock_calls) == READS[:2]
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "reason", "reads"),
+    (
+        pytest.param(
+            (REPLICA_SET, METADATA, OWNERS, 0, UID),
+            REPLACEMENT_UID,
+            CONTROLLER_DRIFT,
+            2,
+            id="other-deployment-uid",
+        ),
+        pytest.param(
+            (REPLICA_SET, METADATA, OWNERS, 0, NAME),
+            OTHER_DEPLOYMENT_NAME,
+            CONTROLLER_DRIFT,
+            2,
+            id="other-deployment-name",
+        ),
+        pytest.param(
+            (REPLICA_SET, METADATA, UID),
+            REPLACEMENT_UID,
+            CONTROLLER_DRIFT,
+            2,
+            id="replaced-replica-set",
+        ),
+        pytest.param(
+            (REPLICA_SET, METADATA, UID),
+            REMOVED,
+            POD_READBACK_INVALID,
+            2,
+            id="replica-set-uid-missing",
+        ),
+        pytest.param(
+            (POD, METADATA, OWNERS, 0, KIND),
+            OTHER_CONTROLLER_KIND,
+            CONTROLLER_KIND_MISMATCH,
+            1,
+            id="pod-not-controlled-by-replica-set",
+        ),
+    ),
+)
+def test_agent_replica_set_rejects_one_changed_controller(
+    wire: dict[str, object],
+    service: Mock,
+    path: tuple[str | int, ...],
+    value: object,
+    reason: str,
+    reads: int,
+) -> None:
+    """Refuse a ReplicaSet that another Deployment controls or that replaced the original.
+
+    The Deployment is matched by the name and UID recorded in ``EXPECTED``, never by
+    reading the Deployment object.
+
+    :param wire: Decoded native responses for this case.
+    :param service: Fake Kubernetes service serving ``wire``.
+    :param path: Field of the Pod or ReplicaSet the case sets or removes.
+    :param value: New value, or ``REMOVED``.
+    :param reason: Stable error the reader must raise.
+    :param reads: Native reads made before the reader stops.
+    """
+    _edit(wire, path, value)
+
+    with pytest.raises(AGENT.KubernetesError) as rejected:
+        AGENT.read_agent_replica_set(service, POD_NAME, EXPECTED)
 
     assert str(rejected.value) == reason
     assert tuple(service.mock_calls) == READS[:reads]

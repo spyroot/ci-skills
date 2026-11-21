@@ -191,7 +191,11 @@ def _installation(
 
 def _held_by(holder: str, pods: dict[str, str]) -> bool:
     # A leader-election identity is the Pod name, optionally followed by "_<suffix>".
-    return any(holder == name or holder.startswith(name + "_") for name in pods)
+    return any(
+        holder == name
+        or (holder.startswith(name + "_") and len(holder) > len(name) + 1)
+        for name in pods
+    )
 
 
 def _runtime_rows(
