@@ -48,7 +48,15 @@ from lib.python.core.json_types import (
     json_string,
 )
 from lib.python.core.kubernetes.agent_namespace import verify_agent_namespace_cleanup
-from lib.python.core.kubernetes.gitlab_agent import read_agent_cluster_scope
+from lib.python.core.kubernetes.gitlab_agent import (
+    LEASE_API_VERSION,
+    LEASE_KIND,
+    REPLICA_SET_API_VERSION,
+    REPLICA_SET_KIND,
+    agent_lease_name,
+    read_agent_cluster_scope,
+    read_agent_lease,
+)
 from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.kubernetes.run_scope import run_owned
@@ -60,7 +68,9 @@ _RESOURCE_MISMATCH: Final = "agent_delete_resource_mismatch"
 _ABSENCE_UNVERIFIED: Final = "agent_delete_native_absence_unverified"
 _DELETE_ORDER: Final = (
     "Deployment",
+    REPLICA_SET_KIND,
     "Pod",
+    LEASE_KIND,
     "Service",
     "ServiceAccount",
     "ClusterRoleBinding",
@@ -79,7 +89,13 @@ _KIND_VERSIONS: Final = {
     **dict.fromkeys((*_REQUIRED_COUNTS, "Pod"), "v1"),
     "Deployment": "apps/v1",
     "ClusterRoleBinding": "rbac.authorization.k8s.io/v1",
+    REPLICA_SET_KIND: REPLICA_SET_API_VERSION,
+    LEASE_KIND: LEASE_API_VERSION,
 }
+# Objects the Agent workload created after install. Connect records them; delete
+# removes the ones still present and accepts the ones already gone.
+_RUNTIME_KINDS: Final = frozenset((REPLICA_SET_KIND, LEASE_KIND))
+_MAX_REPLICA_SETS: Final = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,9 +176,15 @@ def _original_resources(
         collected.append(_Resource(row, kind, name, scope, uid, version, created))
     counts = Counter(item.kind for item in collected)
     valid_pods = counts["Pod"] == 0 if installation_only else 1 <= counts["Pod"] <= 10
+    valid_runtime = (
+        counts[REPLICA_SET_KIND] == counts[LEASE_KIND] == 0
+        if installation_only
+        else counts[REPLICA_SET_KIND] <= _MAX_REPLICA_SETS and counts[LEASE_KIND] <= 1
+    )
     if (
         any(counts[kind] != count for kind, count in _REQUIRED_COUNTS.items())
         or not valid_pods
+        or not valid_runtime
         or len({item.uid for item in collected}) != len(collected)
     ):
         raise KubernetesError(_RECORD_MISMATCH)
@@ -241,6 +263,49 @@ def _delete_resource(
             resource.namespace,
             expected_uid=resource.uid,
         )
+
+
+def _unrecorded_lease(
+    kubernetes: KubernetesService,
+    deadline: RequestDeadline,
+    namespace: str,
+    agent: AgentRegistration,
+    resources: tuple[_Resource, ...],
+) -> frozenset[str]:
+    """Delete the agentk Lease of a record made before connect recorded it.
+
+    Only for a run-owned namespace whose ownership record has no Lease row: the Lease
+    named after the recorded Agent ID is deleted by its UID, and that UID is returned so
+    the namespace inventory accepts events about it.
+
+    :param kubernetes: Bound Kubernetes service of the recorded installation.
+    :param deadline: Shared delete deadline.
+    :param namespace: Verified run-owned namespace.
+    :param agent: Recorded Agent registration.
+    :param resources: Recorded resource rows.
+    :returns: The deleted Lease UID, or an empty set when the record has a Lease row
+        or no such Lease exists.
+    :raises KubernetesError: The Lease identity or its deletion cannot be verified.
+    """  # noqa: DOC503 - Shared deadline and delete propagate their errors.
+    if any(item.kind == LEASE_KIND for item in resources):
+        return frozenset()
+    lease = deadline.call(read_agent_lease, kubernetes, namespace, agent.id)
+    if lease is None:
+        return frozenset()
+    _delete_resource(
+        kubernetes,
+        deadline,
+        _Resource(
+            {},
+            LEASE_KIND,
+            agent_lease_name(agent.id),
+            namespace,
+            lease[1],
+            LEASE_API_VERSION,
+            True,
+        ),
+    )
+    return frozenset((lease[1],))
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,7 +548,8 @@ def _read_delete(
     required = {
         item.uid
         for item in resources
-        if not resume or not item.created or item.kind in ("ConfigMap", "Namespace")
+        if item.kind not in _RUNTIME_KINDS
+        and (not resume or not item.created or item.kind in ("ConfigMap", "Namespace"))
     }
     if not required <= present:
         raise KubernetesError(_RESOURCE_MISMATCH)
@@ -557,7 +623,10 @@ def _delete_tracked(
             scope.namespace,
             namespace_uid,
             scope.run_id,
-            frozenset(item.uid for item in resources),
+            frozenset(item.uid for item in resources)
+            | _unrecorded_lease(
+                kubernetes, deadline, scope.namespace, agent, resources
+            ),
             timeout=deadline.remaining(),
         )
         namespace = next(item for item in resources if item.kind == "Namespace")

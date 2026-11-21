@@ -31,15 +31,23 @@ from lib.python.core.gitlab.cluster_agent.terms import PRESENT
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.json_types import (
     JSONObject,
+    json_integer,
     json_object,
     json_objects,
     json_string,
 )
 from lib.python.core.kubernetes.gitlab_agent import (
+    LEASE_API_VERSION,
+    LEASE_KIND,
+    REPLICA_SET_API_VERSION,
+    REPLICA_SET_KIND,
     AgentPodExpectation,
     AgentPodObservation,
+    agent_lease_name,
     correlate_agent_pod,
     read_agent_cluster_scope,
+    read_agent_lease,
+    read_agent_replica_set,
 )
 from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
 from lib.python.core.oci import ImageManifestIdentity
@@ -181,6 +189,64 @@ def _installation(
         raise KubernetesError("agent_connection_record_mismatch") from None
 
 
+def _held_by(holder: str, pods: dict[str, str]) -> bool:
+    # A leader-election identity is the Pod name, optionally followed by "_<suffix>".
+    return any(holder == name or holder.startswith(name + "_") for name in pods)
+
+
+def _runtime_rows(
+    kubernetes: KubernetesService,
+    correlation: AgentPodExpectation,
+    agent_id: int,
+    pods: dict[str, str],
+    deadline: RequestDeadline,
+) -> tuple[JSONObject, ...]:
+    """Read the objects the connected Agent workload created, for the ownership record.
+
+    :param kubernetes: Bound Kubernetes service of the recorded installation.
+    :param correlation: Recorded Deployment identity of the installation.
+    :param agent_id: Native GitLab Agent ID.
+    :param pods: Connected Agent Pod names mapped to their UIDs.
+    :param deadline: Shared proof deadline; the Lease wait ends with it.
+    :returns: One row per controlling ReplicaSet and one row for the agentk Lease,
+        each marked created by this run.
+    :raises KubernetesError: The Pod, ReplicaSet or Lease identity does not match.
+    """  # noqa: DOC503 - The shared deadline propagates its expiry error.
+    namespace = correlation.namespace
+    replica_sets = sorted(
+        {
+            deadline.call(read_agent_replica_set, kubernetes, name, correlation)
+            for name in sorted(pods)
+        }
+    )
+    while True:
+        lease = deadline.call(read_agent_lease, kubernetes, namespace, agent_id)
+        if lease is not None and _held_by(lease[0], pods):
+            break
+        time.sleep(min(_POLL_SECONDS, deadline.remaining()))
+    return (
+        *(
+            observed_resource(
+                REPLICA_SET_KIND,
+                name,
+                namespace,
+                uid,
+                created=True,
+                api_version=REPLICA_SET_API_VERSION,
+            )
+            for name, uid in replica_sets
+        ),
+        observed_resource(
+            LEASE_KIND,
+            agent_lease_name(agent_id),
+            namespace,
+            lease[1],
+            created=True,
+            api_version=LEASE_API_VERSION,
+        ),
+    )
+
+
 def _active_connections(
     provider: AgentProvider,
     selection: ConnectSelection,
@@ -305,6 +371,14 @@ def confirm_fresh_agent_connection(
         wait=True,
     )
     pods = {entry.connection.pod_name: entry.pod.uid for entry in connections}
+    _, correlation, _ = _installation(gitlab, selection, record, image)
+    runtime = _runtime_rows(
+        kubernetes,
+        correlation,
+        json_integer(record.document.get("agent_id")),
+        pods,
+        deadline,
+    )
     cluster_uid, namespace_uid = _scope(record)
     store = AgentRecoveryStore(
         kubernetes, selection, gitlab.session.origin, cluster_uid, namespace_uid
@@ -319,5 +393,6 @@ def confirm_fresh_agent_connection(
             observed_resource("Pod", name, selection.scope.namespace, uid, created=True)
             for name, uid in sorted(pods.items())
         ),
+        *runtime,
     )
     return AgentConnectivity(saved, connections)
