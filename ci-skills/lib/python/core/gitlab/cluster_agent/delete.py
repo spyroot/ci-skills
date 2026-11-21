@@ -32,6 +32,7 @@ from lib.python.core.gitlab.cluster_agent.selection import (
     ConnectSelection,
     release_name,
 )
+from lib.python.core.gitlab.cluster_agent.terms import ABSENT, DELETE, PRESENT
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.helm.native import HelmClient, HelmRelease
 from lib.python.core.helm.storage import (
@@ -253,7 +254,7 @@ def _delete_digest(
     skill = gitlab.session.skill
     return plan_digest(
         {
-            "operation": "delete",
+            "operation": DELETE,
             "ownership": record.document,
             "journal_uid": record.uid,
             "journal_version": record.resource_version,
@@ -559,7 +560,7 @@ def _delete_tracked(
         )
         if alive is item.created:
             raise KubernetesError(_ABSENCE_UNVERIFIED)
-        final.append({**item.row, "state": "PRESENT" if alive else "ABSENT"})
+        final.append({**item.row, "state": PRESENT if alive else ABSENT})
     absence = verify_agent_logical_absence(
         gitlab, kubernetes, selection, timeout=deadline.remaining()
     )

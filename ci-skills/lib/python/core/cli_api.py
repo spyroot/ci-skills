@@ -297,7 +297,7 @@ def validate_endpoint(value: str) -> str:
 
     :param value: Caller-selected relative provider endpoint.
     :returns: The validated endpoint without changing its query.
-    :raises APIError: If the endpoint is empty, malformed, absolute, option-like,
+    :raises APIError: If the endpoint or its path is empty, malformed, absolute, option-like,
         contains a fragment, or traverses through dot path components.
     """
     try:
@@ -306,6 +306,7 @@ def validate_endpoint(value: str) -> str:
         raise APIError("invalid_relative_endpoint") from None
     if (
         not value
+        or not parsed.path
         or value.startswith(("/", "-"))
         or parsed.scheme
         or parsed.netloc

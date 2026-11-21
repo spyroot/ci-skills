@@ -26,6 +26,7 @@ from lib.python.core.gitlab.cluster_agent.authority import (
     resolve_agent_target,
 )
 from lib.python.core.gitlab.cluster_agent.receipt import agent_result
+from lib.python.core.gitlab.cluster_agent.terms import VERIFY
 from lib.python.core.gitlab.cluster_agent.workflow import run_agent_workflow
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.kubernetes import KubernetesError
@@ -39,7 +40,6 @@ COMMAND: Final = "gitlab_agent.py"
 KIND: Final = "gitlab_agent"
 INTENT_SCHEMA: Final = "gitlab-agent.schema.json"
 RESULT_SCHEMA: Final = "results/gitlab-agent.schema.json"
-VERIFY: Final = "verify"
 _BOOLEAN_OPTIONS: Final = frozenset(("--live-plan", "--apply"))
 
 

@@ -16,6 +16,13 @@ from lib.python.core.gitlab.cluster_agent.recovery import (
     CREDENTIAL_RESOURCE_UID,
     PREEXISTING_CREDENTIAL_IDS,
 )
+from lib.python.core.gitlab.cluster_agent.terms import (
+    ABSENT,
+    CONNECT,
+    DELETE,
+    PRESENT,
+    VERIFY,
+)
 from lib.python.core.gitlab.job_read import gitlab_job_reference
 from lib.python.core.json_types import (
     JSONObject,
@@ -32,11 +39,11 @@ AGENT_KIND = "gitlab_agent"
 RESULT_SCHEMA = "results/gitlab-agent.schema.json"
 AgentOperationKey = tuple[str, str, Optional[str]]
 AGENT_OPERATION_KEYS: tuple[AgentOperationKey, ...] = (
-    (AGENT_KIND, "connect", APPLIED),
-    (AGENT_KIND, "connect", NO_OP),
-    (AGENT_KIND, "verify", None),
-    (AGENT_KIND, "delete", APPLIED),
-    (AGENT_KIND, "delete", NO_OP),
+    (AGENT_KIND, CONNECT, APPLIED),
+    (AGENT_KIND, CONNECT, NO_OP),
+    (AGENT_KIND, VERIFY, None),
+    (AGENT_KIND, DELETE, APPLIED),
+    (AGENT_KIND, DELETE, NO_OP),
 )
 
 CREDENTIAL_IDS = "registration_credential_ids"
@@ -77,9 +84,9 @@ def agent_operation_key(receipt: JSONObject) -> Optional[AgentOperationKey]:
         action = json_string(record.get("action"))
     except (TypeError, ValueError):
         return None
-    if operation == "verify" and action != VERIFIED:
+    if operation == VERIFY and action != VERIFIED:
         return None
-    key = (AGENT_KIND, operation, None if operation == "verify" else action)
+    key = (AGENT_KIND, operation, None if operation == VERIFY else action)
     return key if key in AGENT_OPERATION_KEYS else None
 
 
@@ -157,8 +164,7 @@ def _connected_snapshot(snapshot: JSONObject, owner: JSONObject) -> bool:
         and snapshot.get(CREDENTIAL_IDS) == [owner.get(CREDENTIAL_ID)]
         and _resource_identities(snapshot) == _resource_identities(owner)
         and all(
-            item.get("state") == "PRESENT"
-            for item in _resource_index(snapshot).values()
+            item.get("state") == PRESENT for item in _resource_index(snapshot).values()
         )
     )
 
@@ -226,7 +232,7 @@ def verified_agent_owner(owner: JSONObject) -> bool:
             return False
     return all(
         item.get("uid") is not None
-        and item.get("state") == "PRESENT"
+        and item.get("state") == PRESENT
         and type(item.get("created")) is bool
         for item in identities.values()
     )
@@ -359,7 +365,7 @@ def _delete_applied(row: JSONObject, owner: JSONObject) -> bool:
         fields = ("api_version", "uid", "created")
         if not _match(final, resource, fields):
             return False
-        if final.get("state") != ("ABSENT" if resource.get("created") else "PRESENT"):
+        if final.get("state") != (ABSENT if resource.get("created") else PRESENT):
             return False
     return True
 
@@ -399,7 +405,7 @@ def check_agent_receipt(receipt: JSONObject) -> tuple[str, ...]:
             "/"
         ) != json_string(owner.get("origin")).rstrip("/"):
             return ("agent_ownership_unverified",)
-        if key[1] == "delete":
+        if key[1] == DELETE:
             if not _delete_applied(row, owner):
                 return ("agent_delete_identity_unverified",)
             return ()
@@ -416,7 +422,7 @@ def check_agent_receipt(receipt: JSONObject) -> tuple[str, ...]:
             return ("agent_connect_preexisting_installation",)
         if key == AGENT_OPERATION_KEYS[1] and not _connected_snapshot(before, owner):
             return ("agent_connect_noop_identity_changed",)
-        if key[1] == "verify" and not _ci_proof_verified(receipt, row, owner):
+        if key[1] == VERIFY and not _ci_proof_verified(receipt, row, owner):
             return ("agent_ci_proof_identity_mismatch",)
     except (KeyError, TypeError, ValueError):
         return ("agent_receipt_cross_field_shape_invalid",)

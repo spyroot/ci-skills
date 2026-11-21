@@ -40,6 +40,7 @@ from lib.python.core.gitlab.cluster_agent.selection import (
     ConnectSelection,
     select_connect,
 )
+from lib.python.core.gitlab.cluster_agent.terms import CONNECT, DELETE, VERIFY
 from lib.python.core.helm.native import pull_verified_chart
 from lib.python.core.json_types import JSONObject, JSONValue, json_integer, json_string
 from lib.python.core.kubernetes.kubernetes import KubernetesError
@@ -185,15 +186,15 @@ def run_agent_workflow(
     run_id = _optional(intent["run_id"])
     agent_name = _optional(intent["agent_name"])
     namespace = _optional(intent["namespace"])
-    verify = operation == "verify"
+    verify = operation == VERIFY
     if (
         intent["project"] != authorities.gitlab.session.target_reference
-        or operation not in ("connect", "delete", "verify")
+        or operation not in (CONNECT, DELETE, VERIFY)
         or (mode == ActionMode.APPLY) != bool(confirmation)
         or (verify and mode != ActionMode.READ)
         or (not verify and mode not in (ActionMode.LIVE_PLAN, ActionMode.APPLY))
-        or ((mode == ActionMode.APPLY or operation != "connect") and not run_id)
-        or (operation == "delete" and not agent_name)
+        or ((mode == ActionMode.APPLY or operation != CONNECT) and not run_id)
+        or (operation == DELETE and not agent_name)
         or (verify and (not producers or not intent["job_url"]))
     ):
         raise ValueError("agent_workflow_intent_invalid")
@@ -221,7 +222,7 @@ def run_agent_workflow(
         record = None
     else:
         selection, record = existing
-    if operation == "delete":
+    if operation == DELETE:
         return _delete(authorities, selection, record, confirmation, deadline)
 
     image = inspect_image_identity(IMAGE_TAG, timeout=deadline.remaining())

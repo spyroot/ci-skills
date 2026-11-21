@@ -23,6 +23,7 @@ PLAN = import_script_module("lib.python.core.gitlab.cluster_agent.plan")
 PORTABLE = import_script_module("lib.python.core.portable")
 RECEIPT = import_script_module("lib.python.core.gitlab.cluster_agent.receipt")
 RECOVERY = import_script_module("lib.python.core.gitlab.cluster_agent.recovery")
+TERMS = import_script_module("lib.python.core.gitlab.cluster_agent.terms")
 REPORT = import_script_module("lib.python.core.report")
 RUNTIME = import_script_module("lib.python.core.runtime")
 SCHEMA = import_script_module("lib.python.core.schema")
@@ -165,7 +166,7 @@ CREDENTIALS_BASELINE: Final = json.dumps(
             ],
         },
         "agent_credential": {
-            "state": RECOVERY.PRESENT,
+            "state": TERMS.PRESENT,
             "id": TOKEN_ID,
             "name": TOKEN_NAME,
             "created": True,
@@ -263,7 +264,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.APPLIED,
             True,
             True,
-            RECOVERY.PRESENT,
+            TERMS.PRESENT,
             True,
             (NAMESPACE_KIND, SECRET_KIND),
             id="fresh-apply",
@@ -273,7 +274,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.NO_OP,
             True,
             True,
-            RECOVERY.PRESENT,
+            TERMS.PRESENT,
             False,
             (),
             id="repeat-no-op",
@@ -283,7 +284,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.PLANNED,
             True,
             True,
-            RECOVERY.PRESENT,
+            TERMS.PRESENT,
             False,
             (),
             id="repeat-connect-plan",
@@ -303,7 +304,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.VERIFIED,
             True,
             True,
-            RECOVERY.PRESENT,
+            TERMS.PRESENT,
             False,
             (),
             id="verify",
@@ -313,7 +314,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.PLANNED,
             True,
             False,
-            RECOVERY.RECORDED,
+            TERMS.RECORDED,
             False,
             (),
             id="tracked-delete-plan",
@@ -323,7 +324,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.PLANNED,
             False,
             False,
-            RECOVERY.ABSENT,
+            TERMS.ABSENT,
             False,
             (),
             id="logical-delete-plan",
@@ -333,7 +334,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.NO_OP,
             False,
             False,
-            RECOVERY.ABSENT,
+            TERMS.ABSENT,
             False,
             (),
             id="logical-delete-no-op",
@@ -343,7 +344,7 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             STATUS.APPLIED,
             False,
             False,
-            RECOVERY.ABSENT,
+            TERMS.ABSENT,
             False,
             (),
             id="applied-without-ownership",
@@ -483,7 +484,7 @@ def test_credentials_trace_reads_only_owned_rows_and_creation_markers(
     _definition_validator(CREDENTIALS_FIELD).validate(trace)
     agent = trace["agent_credential"]
     assert (agent["state"], agent["id"], agent["created"]) == (
-        RECOVERY.PRESENT,
+        TERMS.PRESENT,
         TOKEN_ID,
         token_created,
     )
@@ -497,9 +498,7 @@ def test_credentials_trace_reads_only_owned_rows_and_creation_markers(
     ("operation", "observe", "state"),
     (
         pytest.param(CONNECT, _fresh_plan, STATUS.PLANNED, id="fresh-connect-plan"),
-        pytest.param(
-            DELETE, _logical_absence, RECOVERY.ABSENT, id="logical-delete-plan"
-        ),
+        pytest.param(DELETE, _logical_absence, TERMS.ABSENT, id="logical-delete-plan"),
     ),
 )
 def test_record_carries_a_schema_valid_credentials_trace(

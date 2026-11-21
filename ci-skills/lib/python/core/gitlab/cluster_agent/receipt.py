@@ -18,17 +18,22 @@ from lib.python.core.gitlab.cluster_agent.evidence import (
 )
 from lib.python.core.gitlab.cluster_agent.plan import FreshConnectPlan
 from lib.python.core.gitlab.cluster_agent.recovery import (
-    ABSENT,
     CREDENTIAL,
     CREDENTIAL_ID,
     CREDENTIAL_NAME,
     CREDENTIAL_RESOURCE_NAME,
     CREDENTIAL_RESOURCE_UID,
-    PRESENT,
-    RECORDED,
 )
 from lib.python.core.gitlab.cluster_agent.secret import TOKEN_KEY
 from lib.python.core.gitlab.cluster_agent.selection import IMAGE_TAG, ConnectSelection
+from lib.python.core.gitlab.cluster_agent.terms import (
+    ABSENT,
+    CONNECT,
+    DELETE,
+    PRESENT,
+    RECORDED,
+    VERIFY,
+)
 from lib.python.core.gitlab.cluster_agent.workflow import AgentOutcome
 from lib.python.core.json_types import (
     JSONObject,
@@ -39,11 +44,12 @@ from lib.python.core.json_types import (
     json_objects,
     json_string,
 )
+from lib.python.core.kubernetes.runner_scope import SECRET_KIND
 from lib.python.core.report import report
 from lib.python.core.schema import validate_specification
 from lib.python.sys.status import APPLIED, NO_OP, PASS, PLANNED, UNKNOWN, VERIFIED
 
-_APPLIED_OPERATIONS: Final = frozenset(("connect", "delete"))
+_APPLIED_OPERATIONS: Final = frozenset((CONNECT, DELETE))
 _INSTALLATION_FIELDS: Final = (
     "namespace",
     "namespace_uid",
@@ -135,7 +141,7 @@ def _connected_record(
     _owner_selection(authorities, selection, owner)
     agent_id = json_integer(owner["agent_id"])
     credential_id = json_integer(owner[CREDENTIAL_ID])
-    if not connected.connections or (operation == "verify") != (
+    if not connected.connections or (operation == VERIFY) != (
         outcome.ci_access is not None
     ):
         raise ValueError(_RESULT_MISMATCH)
@@ -237,10 +243,10 @@ def _credentials(
             "uid": item["uid"],
         }
         for item in owned
-        if action == APPLIED and item.get("created") is True
+        if operation == CONNECT and action == APPLIED and item.get("created") is True
     ]
     agent: JSONObject = {
-        "state": PLANNED if operation == "connect" and action == PLANNED else ABSENT,
+        "state": PLANNED if operation == CONNECT and action == PLANNED else ABSENT,
         "id": None,
         "name": None,
         "created": False,
@@ -254,10 +260,11 @@ def _credentials(
             "state": PRESENT if connection["state"] == _CONNECTED else RECORDED,
             "id": json_integer(record[CREDENTIAL_ID]),
             "name": json_string(record[CREDENTIAL_NAME]),
-            "created": action == APPLIED
+            "created": operation == CONNECT
+            and action == APPLIED
             and json_object(record["created"]).get(CREDENTIAL) is True,
             "storage": {
-                "kind": "Secret",
+                "kind": SECRET_KIND,
                 "namespace": json_string(record["namespace"]),
                 "name": json_string(record[CREDENTIAL_RESOURCE_NAME]),
                 "uid": record[CREDENTIAL_RESOURCE_UID],
@@ -329,8 +336,8 @@ def _record_fields(
     }
     observation = outcome.observation
     if isinstance(observation, AgentConnectivity) and (
-        (operation == "connect" and outcome.action in (PLANNED, APPLIED, NO_OP))
-        or (operation == "verify" and outcome.action == VERIFIED)
+        (operation == CONNECT and outcome.action in (PLANNED, APPLIED, NO_OP))
+        or (operation == VERIFY and outcome.action == VERIFIED)
     ):
         _connected_record(authorities, outcome, observation, operation, row)
         row["prerequisites"] = {
@@ -350,7 +357,7 @@ def _record_fields(
     if outcome.ci_access is not None:
         raise ValueError(_RESULT_MISMATCH)
     if (
-        operation == "connect"
+        operation == CONNECT
         and outcome.action == PLANNED
         and isinstance(observation, FreshConnectPlan)
         and outcome.before is None
@@ -362,14 +369,14 @@ def _record_fields(
         }
         row.update(before=snapshot, after=snapshot, absence=_absence(_LOGICAL_SCOPE))
     elif (
-        operation == "delete"
+        operation == DELETE
         and outcome.action in (PLANNED, NO_OP)
         and isinstance(observation, LogicalAgentAbsence)
         and outcome.before is None
     ):
         _logical_record(authorities, selection, observation, row)
     elif (
-        operation == "delete"
+        operation == DELETE
         and outcome.action == PLANNED
         and observation is None
         and outcome.before is not None
@@ -405,7 +412,7 @@ def agent_result(
         or intent.get("agent_name") not in (None, selection.agent_name)
         or intent.get("namespace") not in (None, selection.scope.namespace)
         or (outcome.action == APPLIED and operation not in _APPLIED_OPERATIONS)
-        or (operation == "verify") != (outcome.digest is None)
+        or (operation == VERIFY) != (outcome.digest is None)
     ):
         raise ValueError(_RESULT_MISMATCH)
     filters: JSONObject = {**intent, "run_id": selection.scope.run_id}

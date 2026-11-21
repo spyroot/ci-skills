@@ -378,19 +378,6 @@
             },
             "observed_image_ids": {
               "minItems": 1
-            },
-            "resources": {
-              "minItems": 1,
-              "items": {
-                "properties": {
-                  "uid": {
-                    "$ref": "../gitlab-agent.schema.json#/$defs/uid"
-                  },
-                  "state": {
-                    "const": "PRESENT"
-                  }
-                }
-              }
             }
           }
         }
@@ -623,6 +610,19 @@
                 "CONNECTED",
                 "VERIFIED"
               ]
+            },
+            "resources": {
+              "minItems": 1,
+              "items": {
+                "properties": {
+                  "uid": {
+                    "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+                  },
+                  "state": {
+                    "const": "PRESENT"
+                  }
+                }
+              }
             }
           }
         }

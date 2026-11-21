@@ -38,7 +38,13 @@ from lib.python.core.kubernetes.runner import (
     DeployRunner,
     PullImage,
 )
-from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
+from lib.python.core.kubernetes.runner_scope import (
+    DEPLOYMENT_KIND,
+    ROLE_BINDING_KIND,
+    SECRET_KIND,
+    observe_namespace,
+    scope_key,
+)
 from lib.python.core.kubernetes.scc_access import role_binding_names
 from lib.python.core.runner import RunnerAction, runner_runtime_identities
 from lib.python.core.runner_identity import NameSource, ResolvedName
@@ -339,7 +345,7 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
             owned = scope.resources(self.kubernetes)
             if any(
                 owned.owned_objects(kind)
-                for kind in ("Deployment", "Secret", "RoleBinding")
+                for kind in (DEPLOYMENT_KIND, SECRET_KIND, ROLE_BINDING_KIND)
             ):
                 raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
         if namespace is None and scope.owns_namespace:

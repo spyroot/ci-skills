@@ -20,6 +20,7 @@ from lib.python.core.gitlab.cluster_agent.recovery import (
 )
 from lib.python.core.gitlab.cluster_agent.secret import AgentSecretStore
 from lib.python.core.gitlab.cluster_agent.selection import ConnectSelection
+from lib.python.core.gitlab.cluster_agent.terms import PRESENT
 from lib.python.core.gitlab.gitlab_api import GitLabAPIError
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.json_types import (
@@ -74,7 +75,7 @@ def observed_resource(
         "name": name,
         "namespace": namespace,
         "uid": uid,
-        "state": "PRESENT",
+        "state": PRESENT,
         "created": created,
     }
 

@@ -27,6 +27,7 @@ from lib.python.core.gitlab.cluster_agent.selection import (
     IMAGE_TAG,
     ConnectSelection,
 )
+from lib.python.core.gitlab.cluster_agent.terms import PRESENT
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.json_types import (
     JSONObject,
@@ -146,7 +147,7 @@ def _installation(
             deployment.get("api_version") != "apps/v1"
             or deployment.get("namespace") != namespace
             or deployment.get("created") is not True
-            or deployment.get("state") != "PRESENT"
+            or deployment.get("state") != PRESENT
         ):
             raise TypeError
         pods: dict[str, str] = {}
@@ -158,7 +159,7 @@ def _installation(
                 document.get("state") == "PENDING"
                 or entry.get("namespace") != namespace
                 or entry.get("created") is not True
-                or entry.get("state") != "PRESENT"
+                or entry.get("state") != PRESENT
                 or name in pods
             ):
                 raise TypeError

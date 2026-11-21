@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Final
 
 from lib.python.core.cli_api import RequestDeadline
 from lib.python.core.gitlab.cluster_agent.absence import (
@@ -26,14 +25,13 @@ from lib.python.core.gitlab.cluster_agent.selection import (
     IMAGE_TAG,
     ConnectSelection,
 )
+from lib.python.core.gitlab.cluster_agent.terms import CONNECT, DELETE
 from lib.python.core.helm.native import HelmClient, VerifiedChart
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.gitlab_agent import read_agent_cluster_scope
 from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.oci import ImageManifestIdentity
 from lib.python.core.report import plan_digest
-
-_CONNECT: Final = "connect"
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +128,7 @@ def prepare_fresh_connect(
 
     document: JSONObject = {
         **_binding(authorities, selection),
-        "operation": _CONNECT,
+        "operation": CONNECT,
         "namespace_uid": namespace_uid,
         "chart_version": CHART_VERSION,
         "chart_sha256": chart.sha256,
@@ -217,7 +215,7 @@ def observe_repeat_connect(
     )
     document: JSONObject = {
         **_binding(authorities, selection),
-        "operation": _CONNECT,
+        "operation": CONNECT,
         "ownership": result.record.document,
         "journal_uid": result.record.uid,
         "journal_version": result.record.resource_version,
@@ -257,7 +255,7 @@ def observe_repeat_delete(
         raise KubernetesError("agent_plan_cluster_changed")
     document: JSONObject = {
         **_binding(authorities, selection),
-        "operation": "delete",
+        "operation": DELETE,
         "logical_absence": True,
     }
     return _observed_digest(document, confirmation), result
