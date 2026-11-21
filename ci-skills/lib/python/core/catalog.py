@@ -44,6 +44,8 @@ from lib.python.core.endpoints import (
     GITHUB_AUTHORITY,
     GITLAB_AUTHORITY,
     GITLAB_DEFAULT_INSTANCE,
+    GITLAB_PRIVATE_TABLE,
+    GITLAB_PUBLIC_TABLE,
     GITLAB_ROUTING_DEFAULT_KEY,
     GITLAB_ROUTING_TABLE,
     GITLAB_SELECTORS,
@@ -385,6 +387,28 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "the installation; failure compensates only run-created objects. Unowned Agent/release "
         "collisions are blocked and preserved. Verify is read-only. Confirmed delete preserves "
         "borrowed resources. Connection alone never proves CI access.",
+        "credentials": (
+            (
+                f"T1 GitLab token, from the selected [{GITLAB_PRIVATE_TABLE}] or "
+                f"[{GITLAB_PUBLIC_TABLE}] token_file: "
+                "reads the project and KAS metadata, registers the Agent, creates the Agent token, "
+                "reads connections."
+            ),
+            (
+                "T2 Kubernetes credential, from the selected [kubernetes] kubeconfig: creates the "
+                "namespace, recovery ConfigMap and token Secret, installs the Helm release, reads Pods."
+            ),
+            (
+                "T3 Agent token: GitLab returns it once; the command writes it only to Secret key "
+                "token; agentk mounts that Secret and connects to KAS. T3 never appears in argv, "
+                "Helm values, reports or logs."
+            ),
+            (
+                "Flow: T1 -> GitLab creates T3 -> T2 stores T3 in the Secret -> agentk Pod -> KAS. "
+                "Result field credentials lists each GitLab request, each created object, the T3 ID, "
+                "its Secret UID and the connected Pods."
+            ),
+        ),
         "examples": (
             {
                 "description": "Inspect selected-project prerequisites",
@@ -2102,6 +2126,11 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
         "mutates": entry.get("mutates", False),
         "subcommands": entry.get("subcommands", {}),
         "side_effects": entry.get("side_effects", "none"),
+        **(
+            {"credentials": list(json_strings(entry["credentials"]))}
+            if "credentials" in entry
+            else {}
+        ),
         "execution_surface": entry.get("execution_surface", "selected authority API"),
         "required_tools": list(json_strings(entry.get("required_tools", ()))),
         "status_values": STATUS_MEANING,

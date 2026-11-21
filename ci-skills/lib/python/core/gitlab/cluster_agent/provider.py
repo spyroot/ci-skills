@@ -335,6 +335,23 @@ def _connections(
     return result
 
 
+@dataclass(frozen=True)
+class ProviderCall:
+    """One GitLab API request that the Agent provider sent with the selected GitLab token.
+
+    .. attribute :: method
+
+        HTTP method of the request.
+
+    .. attribute :: endpoint
+
+        API path relative to ``/api/v4``, without the query string. It holds native IDs only.
+    """
+
+    method: str
+    endpoint: str
+
+
 class AgentProvider:
     """Operate on one existing bound GitLab project and native numeric IDs."""
 
@@ -349,9 +366,22 @@ class AgentProvider:
         self._service = service
         self._project_endpoint = f"projects/{_id(service.target_id)}"
         self._agent_endpoint = f"{self._project_endpoint}/cluster_agents"
+        self._calls: list[ProviderCall] = []
+
+    @property
+    def calls(self) -> tuple[ProviderCall, ...]:
+        """Return the GitLab requests this provider sent, in order.
+
+        :returns: One entry per request, including failed requests.
+        """
+        return tuple(self._calls)
+
+    def _trace(self, method: str, endpoint: str) -> None:
+        self._calls.append(ProviderCall(method, endpoint))
 
     def _read_optional(self, endpoint: str) -> Optional[JSONDocument]:
         service = self._service
+        self._trace("GET", endpoint)
         try:
             return service.api.get_json(service.session, endpoint)
         except GitLabAPIError as exc:
@@ -364,6 +394,7 @@ class AgentProvider:
         records: list[JSONObject] = []
         ids: set[int] = set()
         for page in range(1, _MAX_PAGES + 1):
+            self._trace("GET", endpoint)
             response = service.api.get_json(
                 service.session, f"{endpoint}?per_page={_PAGE_SIZE}&page={page}"
             )
@@ -401,6 +432,7 @@ class AgentProvider:
         :raises GitLabAPIError: If the read fails or the native ID differs.
         """
         service = self._service
+        self._trace("GET", self._project_endpoint)
         project = _decode(
             _project, service.api.get_json(service.session, self._project_endpoint)
         )
@@ -414,6 +446,7 @@ class AgentProvider:
         :returns: Enabled KAS metadata with advertised endpoints and versions.
         """
         service = self._service
+        self._trace("GET", "metadata")
         return _decode(_kas, service.api.get_json(service.session, "metadata"))
 
     def find_agent(self, name: str) -> Optional[AgentRegistration]:
@@ -452,6 +485,7 @@ class AgentProvider:
         :raises GitLabAPIError: If creation fails or returns an invalid identity.
         """
         service = self._service
+        self._trace("POST", self._agent_endpoint)
         agent = self._bound_agent(
             service.api.post_json(service.session, self._agent_endpoint, {"name": name})
         )
@@ -498,6 +532,7 @@ class AgentProvider:
         """
         service = self._service
         endpoint = f"{self._agent_route(agent_id)}/tokens"
+        self._trace("POST", endpoint)
         response = service.api.post_json(service.session, endpoint, {"name": name})
         token = _decode(_token, response)
         if token.agent_id != agent_id or token.name != name:
@@ -513,6 +548,7 @@ class AgentProvider:
 
     def _delete(self, endpoint: str) -> bool:
         service = self._service
+        self._trace("DELETE", endpoint)
         try:
             service.api.request_no_content(service.session, "DELETE", endpoint)
         except GitLabAPIError as exc:
@@ -575,6 +611,7 @@ class AgentProvider:
         service = self._service
         if project.id != service.target_id or expected.project_id != project.id:
             raise GitLabAPIError("agent_project_identity_mismatch")
+        self._trace("POST", "graphql")
         response = service.api.post_json(
             service.session,
             "graphql",

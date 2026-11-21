@@ -18,6 +18,7 @@ from lib.python.core.gitlab.cluster_agent.evidence import (
 )
 from lib.python.core.gitlab.cluster_agent.plan import FreshConnectPlan
 from lib.python.core.gitlab.cluster_agent.recovery import CREDENTIAL_ID
+from lib.python.core.gitlab.cluster_agent.secret import TOKEN_KEY
 from lib.python.core.gitlab.cluster_agent.selection import IMAGE_TAG, ConnectSelection
 from lib.python.core.gitlab.cluster_agent.workflow import AgentOutcome
 from lib.python.core.json_types import (
@@ -51,6 +52,8 @@ _NOT_CHECKED: Final = "NOT_CHECKED"
 _CONNECTED: Final = "CONNECTED"
 _RESULT_MISMATCH: Final = "agent_receipt_native_observation_mismatch"
 _REPORT_KIND: Final = "GitLabAgent"
+_PRESENT: Final = "PRESENT"
+_ABSENT: Final = "ABSENT"
 
 
 def _snapshot(selection: ConnectSelection) -> dict[str, JSONValue]:
@@ -201,7 +204,87 @@ def _logical_record(
     row.update(absence=_absence(_LOGICAL_SCOPE))
 
 
+def _credentials(
+    authorities: AgentAuthorities, row: dict[str, JSONValue]
+) -> JSONObject:
+    """Trace the three credentials of this invocation without any credential value.
+
+    :param authorities: Selected providers; the GitLab provider holds the request trace.
+    :param row: Completed record whose ownership, installation and connection are final.
+    :returns: GitLab requests sent with the selected GitLab token, Kubernetes objects
+        created with the selected kubeconfig, and the Agent token's ID, Secret and consumers.
+    """
+    routing = authorities.kubernetes.target.routing
+    action = row["action"]
+    owner = row["ownership"]
+    installation = json_object(row["installation"])
+    created_objects: list[JSONValue] = [
+        {
+            "kind": item["kind"],
+            "name": item["name"],
+            "namespace": item["namespace"],
+            "uid": item["uid"],
+        }
+        for item in json_objects(installation["resources"])
+        if action == APPLIED and item.get("created") is True
+    ]
+    agent: JSONObject = {
+        "state": PLANNED if action == PLANNED else _ABSENT,
+        "id": None,
+        "name": None,
+        "created": False,
+        "storage": None,
+        "consumers": [],
+    }
+    if owner is not None:
+        record = json_object(owner)
+        agent = {
+            "state": _PRESENT,
+            "id": json_integer(record[CREDENTIAL_ID]),
+            "name": json_string(record["registration_credential_name"]),
+            "created": action == APPLIED
+            and json_object(record["created"]).get("registration_credential") is True,
+            "storage": {
+                "kind": "Secret",
+                "namespace": json_string(record["namespace"]),
+                "name": json_string(record["credential_resource_name"]),
+                "uid": record["credential_resource_uid"],
+                "key": TOKEN_KEY,
+            },
+            "consumers": [
+                {
+                    "connection_id": item["connection_id"],
+                    "pod_name": item["pod_name"],
+                    "pod_uid": item["pod_uid"],
+                }
+                for item in json_objects(json_object(row["connection"])["items"])
+            ],
+        }
+    return {
+        "gitlab": {
+            "table": None if routing is None else routing.gitlab,
+            "calls": [
+                {"method": call.method, "endpoint": call.endpoint}
+                for call in authorities.provider.calls
+            ],
+        },
+        "kubernetes": {
+            "table": None if routing is None else routing.kubernetes,
+            "created_objects": created_objects,
+        },
+        "agent_credential": agent,
+    }
+
+
 def _record(
+    authorities: AgentAuthorities, outcome: AgentOutcome, operation: str
+) -> JSONObject:
+    row = dict(_record_fields(authorities, outcome, operation))
+    row["credentials"] = _credentials(authorities, row)
+    return row
+
+
+def _record_fields(
     authorities: AgentAuthorities, outcome: AgentOutcome, operation: str
 ) -> JSONObject:
     selection = outcome.selection

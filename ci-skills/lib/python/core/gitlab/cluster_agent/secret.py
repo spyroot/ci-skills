@@ -18,7 +18,8 @@ from lib.python.core.kubernetes.resources import (
 from lib.python.core.kubernetes.run_scope import RUN_ID_LABEL
 from lib.python.core.runtime import execution_trace
 
-_TOKEN_KEY: Final = "token"
+# Secret data key that holds the Agent token; chart config.secretName reads it.
+TOKEN_KEY: Final = "token"
 _SECRET_KIND: Final = "Secret"
 _SECRET_TYPE: Final = "Opaque"
 _NATIVE_FIELDS: Final = (
@@ -35,8 +36,8 @@ _NATIVE_FIELDS: Final = (
     "{{if not .metadata.deletionTimestamp}}live{{end}}",
     (
         "{{if .data}}"
-        f'{{{{if and (eq (len .data) 1) (index .data "{_TOKEN_KEY}")}}}}'
-        f"{_TOKEN_KEY}{{{{end}}}}{{{{end}}}}"
+        f'{{{{if and (eq (len .data) 1) (index .data "{TOKEN_KEY}")}}}}'
+        f"{TOKEN_KEY}{{{{end}}}}{{{{end}}}}"
     ),
 )
 _OUTPUT: Final = "go-template=" + r'{{"\n"}}'.join((*_NATIVE_FIELDS, ""))
@@ -81,7 +82,7 @@ class AgentSecretStore:
             _SECRET_TYPE,
             "true",
             "live",
-            _TOKEN_KEY,
+            TOKEN_KEY,
         ]
         if (
             len(fields) != len(_NATIVE_FIELDS)
@@ -127,7 +128,7 @@ class AgentSecretStore:
             "type": _SECRET_TYPE,
             "immutable": True,
             "metadata": self._metadata,
-            "stringData": {_TOKEN_KEY: credential.take_secret()},
+            "stringData": {TOKEN_KEY: credential.take_secret()},
         }
         # Native projection failures can include the source Secret.
         with execution_trace(None):

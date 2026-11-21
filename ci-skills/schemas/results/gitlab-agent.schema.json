@@ -875,6 +875,9 @@
         },
         "prerequisites": {
           "$ref": "#/$defs/prerequisites"
+        },
+        "credentials": {
+          "$ref": "#/$defs/credentials"
         }
       }
     },
@@ -1093,6 +1096,214 @@
         },
         "repeat": {
           "$ref": "#/$defs/cleanup_observation"
+        }
+      }
+    },
+    "credentials": {
+      "description": "Credential trace of this invocation. It carries native IDs, names and UIDs only, never a credential value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gitlab",
+        "kubernetes",
+        "agent_credential"
+      ],
+      "properties": {
+        "gitlab": {
+          "description": "Requests sent with the selected GitLab token, in order.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "table",
+            "calls"
+          ],
+          "properties": {
+            "table": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "calls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "method",
+                  "endpoint"
+                ],
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "DELETE"
+                    ]
+                  },
+                  "endpoint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[^?#\\s]+$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "kubernetes": {
+          "description": "Objects this invocation created with the selected kubeconfig.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "table",
+            "created_objects"
+          ],
+          "properties": {
+            "table": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "created_objects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "name",
+                  "namespace",
+                  "uid"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "namespace": {
+                    "type": "string"
+                  },
+                  "uid": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "agent_credential": {
+          "description": "The Agent token: native ID, the Secret that holds it, and the connections that used it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "id",
+            "name",
+            "created",
+            "storage",
+            "consumers"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "PLANNED",
+                "PRESENT",
+                "ABSENT"
+              ]
+            },
+            "id": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "created": {
+              "type": "boolean"
+            },
+            "storage": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "namespace",
+                    "name",
+                    "uid",
+                    "key"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "Secret"
+                    },
+                    "namespace": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uid": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "key": {
+                      "const": "token"
+                    }
+                  }
+                }
+              ]
+            },
+            "consumers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "connection_id",
+                  "pod_name",
+                  "pod_uid"
+                ],
+                "properties": {
+                  "connection_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pod_name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pod_uid": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
