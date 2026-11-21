@@ -33,7 +33,10 @@ from lib.python.core.gitlab.runner_manager import (
     VerifyGitLabRunnerPreserved,
     workload_action,
 )
-from lib.python.core.gitlab.runner_manager.workload import ObserveManagerNamespace
+from lib.python.core.gitlab.runner_manager.workload import (
+    ObserveManagerNamespace,
+    present_manager_cleanup,
+)
 from lib.python.core.harbor.registry_mirror import HarborAuth
 from lib.python.core.kubernetes.kubernetes import K8SAuth
 from lib.python.core.kubernetes.run_scope import (
@@ -103,8 +106,8 @@ def workflow(
                 (
                     DeleteManagerRunner(workload),
                     VerifyGitLabRunnerPreserved(action),
-                    RemoveSCCAccess(action.scc_access()),
-                    RemoveScope(resolve),
+                    present_manager_cleanup(RemoveSCCAccess(action.scc_access())),
+                    present_manager_cleanup(RemoveScope(resolve)),
                     ObserveManagerNamespace(workload),
                 )
             )
