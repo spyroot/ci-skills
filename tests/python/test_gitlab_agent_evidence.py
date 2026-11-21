@@ -578,6 +578,47 @@ def test_live_delete_applied_receipt_rejects_one_broken_invariant(
     assert _outcome(receipt) == expected
 
 
+@pytest.mark.parametrize(
+    ("absent", "expected"),
+    (
+        pytest.param((REPLICA_SET_KIND,), (), id="replica-set-gone"),
+        pytest.param((LEASE_KIND,), (), id="lease-gone"),
+        pytest.param(
+            (REPLICA_SET_KIND, LEASE_KIND), (), id="replica-set-and-lease-gone"
+        ),
+        pytest.param(
+            (SECRET_KIND,), (DELETE_IDENTITY_UNVERIFIED,), id="recorded-secret-gone"
+        ),
+        pytest.param(
+            (REPLICA_SET_KIND, SECRET_KIND),
+            (DELETE_IDENTITY_UNVERIFIED,),
+            id="replica-set-and-secret-gone",
+        ),
+    ),
+)
+def test_delete_applied_accepts_runtime_rows_already_gone_before_delete(
+    absent: tuple[str, ...], expected: tuple[str, ...]
+) -> None:
+    """Accept a delete whose before read found only a ReplicaSet or Lease already gone.
+
+    The delete accepts a recorded ReplicaSet or agentk Lease that is already absent at
+    its before read, for example after a rollout, and writes that row ABSENT in
+    ``before.resources``. Every other recorded kind must still read PRESENT.
+
+    :param absent: Kinds whose owned rows read ABSENT before the delete.
+    :param expected: Findings returned by ``check_agent_receipt``.
+    """
+    receipt = json.loads(DELETE_APPLIED_RECEIPT)
+    record = _record(receipt)
+    rows = [dict(item) for item in _owned_rows(record)]
+    for item in rows:
+        if item[KIND_FIELD] in absent:
+            item[STATE_FIELD] = TERMS.ABSENT
+    record[BEFORE_FIELD][RESOURCES_FIELD] = rows
+
+    assert EVIDENCE.check_agent_receipt(receipt) == expected
+
+
 def test_live_resumed_delete_receipt_is_not_tracked_delete_evidence() -> None:
     """Reject the recorded resumed delete: its before read is not the connected state.
 

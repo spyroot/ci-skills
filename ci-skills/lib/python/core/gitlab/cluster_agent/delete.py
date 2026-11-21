@@ -35,6 +35,7 @@ from lib.python.core.gitlab.cluster_agent.selection import (
 from lib.python.core.gitlab.cluster_agent.terms import (
     ABSENT,
     AGENT_POD_LIMIT,
+    AGENT_RUNTIME_KINDS,
     DELETE,
     PRESENT,
 )
@@ -99,9 +100,6 @@ _KIND_VERSIONS: Final = {
     REPLICA_SET_KIND: APPS_API_VERSION,
     LEASE_KIND: COORDINATION_API_VERSION,
 }
-# Objects the Agent workload created after install. Connect records them; delete
-# removes the ones still present and accepts the ones already gone.
-_RUNTIME_KINDS: Final = frozenset((REPLICA_SET_KIND, LEASE_KIND))
 
 
 @dataclass(frozen=True, slots=True)
@@ -573,7 +571,7 @@ def _read_delete(
     required = {
         item.uid
         for item in resources
-        if item.kind not in _RUNTIME_KINDS
+        if item.kind not in AGENT_RUNTIME_KINDS
         and (not resume or not item.created or item.kind in ("ConfigMap", "Namespace"))
     }
     if not required <= present:

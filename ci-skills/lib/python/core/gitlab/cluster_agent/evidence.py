@@ -18,6 +18,7 @@ from lib.python.core.gitlab.cluster_agent.recovery import (
 )
 from lib.python.core.gitlab.cluster_agent.terms import (
     ABSENT,
+    AGENT_RUNTIME_KINDS,
     CONNECT,
     DELETE,
     PRESENT,
@@ -155,7 +156,12 @@ def _resolved(snapshot: JSONObject, owner: JSONObject) -> JSONObject:
     return snapshot
 
 
-def _connected_snapshot(snapshot: JSONObject, owner: JSONObject) -> bool:
+def _connected_snapshot(
+    snapshot: JSONObject,
+    owner: JSONObject,
+    *,
+    absent_kinds: frozenset[str] = frozenset(),
+) -> bool:
     snapshot = _resolved(snapshot, owner)
     return (
         _match(snapshot, owner, _SNAPSHOT_FIELDS)
@@ -164,7 +170,9 @@ def _connected_snapshot(snapshot: JSONObject, owner: JSONObject) -> bool:
         and snapshot.get(CREDENTIAL_IDS) == [owner.get(CREDENTIAL_ID)]
         and _resource_identities(snapshot) == _resource_identities(owner)
         and all(
-            item.get("state") == PRESENT for item in _resource_index(snapshot).values()
+            item.get("state") == PRESENT
+            or (item.get("kind") in absent_kinds and item.get("state") == ABSENT)
+            for item in _resource_index(snapshot).values()
         )
     )
 
@@ -351,7 +359,7 @@ def _delete_applied(row: JSONObject, owner: JSONObject) -> bool:
     prior = _resource_index(owner)
     observed = _resource_index(after)
     if (
-        not _connected_snapshot(before, owner)
+        not _connected_snapshot(before, owner, absent_kinds=AGENT_RUNTIME_KINDS)
         or not _match(after, owner, ("project_id", "agent_id", "agent_name"))
         or after.get("agent_http_status") != 404
         or after.get(CREDENTIAL_HTTP_STATUS) != 404
