@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-11-11T08:01:33.928328+00:00",
+  "captured_at": "2026-11-21T08:24:16.967361+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -10,7 +10,7 @@
     "gitlab": "file:path:4b0921934998",
     "kubernetes": "target:kubernetes.kubeconfigs"
   },
-  "execution_host": "ci-skills-run-tool-pod-39e2353b09b190ff",
+  "execution_host": "ci15-guard-live-3882722",
   "kind": "access_check",
   "live_checks": {
     "ceph_cluster": {
@@ -22,29 +22,29 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "39ea9f77dfe0bee749f6f89c41d7e9ec85db169190bd053f3d36ecdf742a2a51",
+      "readback_sha256": "bbcd359975d6844079b19685fdbd4458b30569338d7c8ebaec50493fd75d393a",
       "record_count": 15,
       "status": "PASS"
     },
     "cilium_status": {
       "access_proven": true,
       "agent_health": {
-        "passed": 10,
-        "total": 10
+        "passed": 13,
+        "total": 13
       },
-      "ciliumnode_count": 10,
+      "ciliumnode_count": 13,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "3bc13a51feb2942a13666a082e93b8dc6c7eb368a7732c5a2691199c803c50ea",
-      "record_count": 10,
+      "readback_sha256": "25378ea488f01eb25a79c06d1f93c99ea5d770fc57227c0922fef7ba697cb2c2",
+      "record_count": 13,
       "status": "PASS"
     },
     "event_trace": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "ce2b088d3cb6ed8f4a3359cadb7aadb32f9588da0a7037e3fedddae1253981e8",
-      "record_count": 11476,
+      "readback_sha256": "043401bb0f18fc645fc58bdc3f324f4a2719ee6165f8e1082d6ce4e57bca0062",
+      "record_count": 2892,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -58,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "523c794e510ff67e4eb1e238bd30061b38a20015e98ace427802c04f3f8c1c96",
+      "readback_sha256": "40adb1dac20750325528dc011cf71a34e6f199da3493730f7ddf9170077a5b34",
       "record_count": 1,
       "status": "PASS"
     },
@@ -66,21 +66,21 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "b87a7ab1ceaf574dddbbcf5187c8e964f892b6a364b5d38da88304db074a1b90",
-      "record_count": 80,
+      "readback_sha256": "cdcb439fae8eefa715a189f49623dbdeea8ca550290e2fefcf5756bb9964f1f2",
+      "record_count": 85,
       "resource_counts": {
-        "attachments": 43,
-        "csidrivers": 5,
-        "csinodes": 10,
-        "daemonsets": 44,
-        "deployments": 217,
-        "nodes": 10,
-        "pods": 769,
-        "pvcs": 74,
-        "pvs": 80,
-        "replicasets": 504,
+        "attachments": 40,
+        "csidrivers": 6,
+        "csinodes": 13,
+        "daemonsets": 45,
+        "deployments": 223,
+        "nodes": 13,
+        "pods": 844,
+        "pvcs": 78,
+        "pvs": 85,
+        "replicasets": 553,
         "statefulsets": 15,
-        "storageclasses": 9
+        "storageclasses": 10
       },
       "status": "PASS"
     }
@@ -100,12 +100,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "d98120b2ac16fa294a23415277b3e83be807742df85c4bb76cc75ffb13449535",
+    "digest": "3b3a45e144e27d90119faab14a507d65b74ab5a783f6c0730c926235cb55b24d",
     "file_count": 276,
-    "functional_digest": "bb36bdf8db3cdabfffe86c2b4ef75a88274f9b61bb5689e9c3147a831b4ec7eb",
+    "functional_digest": "856b17d44475818b042ac7016ba92744bb50b2807c099a12f30a84db2422ccea",
     "revision": {
       "source": "installer_record",
-      "value": "82303632d65359b3f33585a90ddc2e78b879b480",
+      "value": "388272292655fff293b6a5f727058ee161253054",
       "verified": true
     }
   },
@@ -150,7 +150,7 @@
           "source": "selected kubeconfig user entry",
           "type": "embedded-token"
         },
-        "cilium_health_pod": "cilium-7lrww",
+        "cilium_health_pod": "cilium-7722l",
         "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
         "kubeconfig_files": [
           "path:002657a1c181"
@@ -189,5 +189,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "82303632d65359b3f33585a90ddc2e78b879b480"
+  "tested_revision": "388272292655fff293b6a5f727058ee161253054"
 }
