@@ -44,6 +44,13 @@ def _installer() -> ModuleType:
     return load_module("skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py")
 
 
+INSTALL_SCOPE = _installer().InstallScope
+PROJECT_SCOPES: Final[tuple[str, ...]] = (
+    INSTALL_SCOPE.CLAUDE_PROJECT.value,
+    INSTALL_SCOPE.ANTIGRAVITY_PROJECT.value,
+)
+
+
 def _source(tmp_path: Path) -> Path:
     """Create a minimal skill package with a manifest and one script.
 
@@ -757,7 +764,7 @@ def test_project_scope_uses_git_root_from_subdirectory(
     assert resolved == repository / expected
 
 
-@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
+@pytest.mark.parametrize("scope", PROJECT_SCOPES)
 def test_project_scope_outside_repository_raises(
     isolated_homes: Path, tmp_path: Path, scope: str
 ) -> None:
@@ -873,18 +880,29 @@ def test_cli_project_scope_uses_working_repository(
     "arguments",
     [
         pytest.param(
-            ("--scope", "claude-user", "--skills-dir", "x"), id="with-skills-dir"
+            ("--scope", INSTALL_SCOPE.CLAUDE_USER.value, "--skills-dir", "x"),
+            id="with-skills-dir",
         ),
         pytest.param(
-            ("--scope", "antigravity-user", "--skills-dir", "x"),
+            ("--scope", INSTALL_SCOPE.ANTIGRAVITY_USER.value, "--skills-dir", "x"),
             id="antigravity-with-skills-dir",
         ),
         pytest.param(
-            ("--scope", "claude-user", "--destination", "/x/ci-skills"),
+            (
+                "--scope",
+                INSTALL_SCOPE.CLAUDE_USER.value,
+                "--destination",
+                "/x/ci-skills",
+            ),
             id="with-destination",
         ),
         pytest.param(
-            ("--scope", "antigravity-user", "--destination", "/x/ci-skills"),
+            (
+                "--scope",
+                INSTALL_SCOPE.ANTIGRAVITY_USER.value,
+                "--destination",
+                "/x/ci-skills",
+            ),
             id="antigravity-with-destination",
         ),
         pytest.param(("--scope", "claude"), id="unknown-scope"),
@@ -912,7 +930,7 @@ def test_cli_rejects_invalid_scope_arguments(
     assert not isolated_homes.exists()
 
 
-@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
+@pytest.mark.parametrize("scope", PROJECT_SCOPES)
 @pytest.mark.parametrize(
     ("mode", "kind"),
     [
@@ -976,7 +994,7 @@ def test_cli_project_scope_outside_repository_reports_blocked_json(
     assert not isolated_homes.exists()
 
 
-@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
+@pytest.mark.parametrize("scope", PROJECT_SCOPES)
 def test_cli_unresolved_scope_text_output_names_scope(
     monkeypatch: pytest.MonkeyPatch,
     isolated_homes: Path,
@@ -1005,7 +1023,7 @@ def test_cli_unresolved_scope_text_output_names_scope(
     assert captured.err == "agent_repository_unavailable\n"
 
 
-@pytest.mark.parametrize("scope", ["claude-project", "antigravity-project"])
+@pytest.mark.parametrize("scope", PROJECT_SCOPES)
 def test_cli_unresolved_scope_has_no_destination(
     monkeypatch: pytest.MonkeyPatch, isolated_homes: Path, tmp_path: Path, scope: str
 ) -> None:

@@ -47,6 +47,58 @@ make_install_fixture() {
   cd "$caller_root" || return 1
 }
 
+# Summary: Verify a user-scoped dry-run plans the expected path under HOME without writing.
+# Arguments:
+#   $1: --scope value.
+#   $2: Expected relative path under HOME.
+# Returns: 0 when destination matches and HOME remains absent.
+assert_user_scope_dry_run() {
+  local scope=$1 expected_rel=$2 home
+  make_install_fixture
+  home="${BATS_TEST_TMPDIR}/home"
+  run env HOME="$home" "$tool" --scope "$scope" --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .destination <<<"$output")" = "$(cd "$BATS_TEST_TMPDIR" && pwd -P)/home/${expected_rel}" ]
+  [ ! -e "$home" ]
+}
+
+# Summary: Verify a project-scoped dry-run resolves the Git root from a subdirectory without writing.
+# Arguments:
+#   $1: --scope value.
+#   $2: Top-level project directory name (for example .claude or .agents).
+# Returns: 0 when destination matches and the project directory remains absent.
+assert_project_scope_subdir_dry_run() {
+  local scope=$1 project_dir=$2
+  make_install_fixture
+  mkdir -p nested/dir
+  cd nested/dir || return 1
+  run "$tool" --scope "$scope" --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .destination <<<"$output")" = "$(cd "$caller_root" && pwd -P)/${project_dir}/skills/ci-skills" ]
+  [ ! -e "${caller_root}/${project_dir}" ]
+}
+
+# Summary: Verify a project scope outside a Git repository emits BLOCKED JSON without usage text.
+# Arguments:
+#   $1: --scope value.
+#   $2: Top-level project directory name that must remain absent.
+# Returns: 0 when exit status, JSON payload, and clean filesystem match.
+assert_project_scope_outside_repo_blocked() {
+  local scope=$1 project_dir=$2 outside
+  make_install_fixture
+  outside="${BATS_TEST_TMPDIR}/outside"
+  mkdir -p "$outside"
+  cd "$outside" || return 1
+  run env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" "$tool" --scope "$scope" --dry-run
+  [ "$status" -eq 2 ]
+  jq -e --arg scope "$scope" \
+    '.status == "BLOCKED" and .kind == "skill_install" and .scope == $scope
+    and .reason == "agent_repository_unavailable" and (.safe_next_step | length > 0)' \
+    <<<"$output" >/dev/null
+  [[ "$output" != *'usage:'* ]]
+  [ ! -e "${outside}/${project_dir}" ]
+}
+
 @test 'dry-run binds a clean package and destination without writing' {
   make_install_fixture
   run "$tool" --destination "$destination" --dry-run
@@ -74,69 +126,27 @@ make_install_fixture() {
 }
 
 @test 'scope claude-user plans the Claude user skills directory without writing' {
-  make_install_fixture
-  home="${BATS_TEST_TMPDIR}/home"
-  run env HOME="$home" "$tool" --scope claude-user --dry-run
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .destination <<<"$output")" = "$(cd "$BATS_TEST_TMPDIR" && pwd -P)/home/.claude/skills/ci-skills" ]
-  [ ! -e "$home" ]
+  assert_user_scope_dry_run claude-user .claude/skills/ci-skills
 }
 
 @test 'scope claude-project plans the consumer Git root from a subdirectory without writing' {
-  make_install_fixture
-  mkdir -p nested/dir
-  cd nested/dir
-  run "$tool" --scope claude-project --dry-run
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .destination <<<"$output")" = "$(cd "$caller_root" && pwd -P)/.claude/skills/ci-skills" ]
-  [ ! -e "$caller_root/.claude" ]
+  assert_project_scope_subdir_dry_run claude-project .claude
 }
 
 @test 'scope claude-project outside a Git repository reports BLOCKED JSON without usage text' {
-  make_install_fixture
-  outside="${BATS_TEST_TMPDIR}/outside"
-  mkdir -p "$outside"
-  cd "$outside"
-  run env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" "$tool" --scope claude-project --dry-run
-  [ "$status" -eq 2 ]
-  jq -e '.status == "BLOCKED" and .kind == "skill_install" and .scope == "claude-project"
-    and .reason == "agent_repository_unavailable" and (.safe_next_step | length > 0)' \
-    <<<"$output" >/dev/null
-  [[ "$output" != *'usage:'* ]]
-  [ ! -e "$outside/.claude" ]
+  assert_project_scope_outside_repo_blocked claude-project .claude
 }
 
 @test 'scope antigravity-user plans the Antigravity user skills directory without writing' {
-  make_install_fixture
-  home="${BATS_TEST_TMPDIR}/home"
-  run env HOME="$home" "$tool" --scope antigravity-user --dry-run
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .destination <<<"$output")" = "$(cd "$BATS_TEST_TMPDIR" && pwd -P)/home/.gemini/config/skills/ci-skills" ]
-  [ ! -e "$home" ]
+  assert_user_scope_dry_run antigravity-user .gemini/config/skills/ci-skills
 }
 
 @test 'scope antigravity-project plans the consumer Git root from a subdirectory without writing' {
-  make_install_fixture
-  mkdir -p nested/dir
-  cd nested/dir
-  run "$tool" --scope antigravity-project --dry-run
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .destination <<<"$output")" = "$(cd "$caller_root" && pwd -P)/.agents/skills/ci-skills" ]
-  [ ! -e "$caller_root/.agents" ]
+  assert_project_scope_subdir_dry_run antigravity-project .agents
 }
 
 @test 'scope antigravity-project outside a Git repository reports BLOCKED JSON without usage text' {
-  make_install_fixture
-  outside="${BATS_TEST_TMPDIR}/outside"
-  mkdir -p "$outside"
-  cd "$outside"
-  run env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" "$tool" --scope antigravity-project --dry-run
-  [ "$status" -eq 2 ]
-  jq -e '.status == "BLOCKED" and .kind == "skill_install" and .scope == "antigravity-project"
-    and .reason == "agent_repository_unavailable" and (.safe_next_step | length > 0)' \
-    <<<"$output" >/dev/null
-  [[ "$output" != *'usage:'* ]]
-  [ ! -e "$outside/.agents" ]
+  assert_project_scope_outside_repo_blocked antigravity-project .agents
 }
 
 @test 'scope antigravity-project apply installs ci-skills alongside glab-stack and upgrades idempotently' {

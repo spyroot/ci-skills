@@ -113,11 +113,9 @@ def skills_directory() -> Path:
     :returns: CODEX_HOME/skills when configured, otherwise ~/.codex/skills.
     """
     codex_home = os.environ.get("CODEX_HOME")
-    return (
-        Path(codex_home).expanduser()
-        if codex_home
-        else Path.home() / CODEX_HOME_DIRECTORY_NAME
-    ) / SKILLS_DIRECTORY_NAME
+    if codex_home:
+        return Path(codex_home).expanduser() / SKILLS_DIRECTORY_NAME
+    return _user_skills_directory(CODEX_HOME_DIRECTORY_NAME)
 
 
 class InstallScope(StrEnum):
