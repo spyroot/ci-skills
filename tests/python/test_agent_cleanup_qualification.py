@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from importlib import import_module, invalidate_caches
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, Optional
+from unittest.mock import Mock
 
 import pytest
 from conftest import REPO_ROOT, SKILL_ROOT, import_script_module, load_module
@@ -34,6 +36,7 @@ PROVENANCE = import_script_module("lib.python.core.provenance")
 STATUS = import_script_module("lib.python.sys.status")
 SCHEMA = import_script_module("lib.python.core.schema")
 ENDPOINTS = import_script_module("lib.python.core.endpoints")
+CATALOG = import_script_module("lib.python.core.catalog")
 
 KEYS: Final = CLEANUP.AgentKeys(
     RECOVERY.CREDENTIAL, RECOVERY.CREDENTIAL_ID, PROVENANCE.DIGEST_VALUE_KEY
@@ -50,6 +53,28 @@ OTHER_RUN: Final = "another-run"
 BINDING: Final = "/consumer/.ci-skills/binding.toml"
 PUBLIC: Final = ENDPOINTS.GITLAB_PUBLIC_SELECTOR
 GITLAB_OPTION: Final = ENDPOINTS.GITLAB_TARGET_OPTION
+PROFILE_OPTION: Final = CATALOG.GITLAB_PROFILE_OPTION
+LEGACY_PROFILE: Final = "legacy-profile"
+CONNECT_RECEIPT_OPTION: Final = "--connect-receipt"
+OUT_OPTION: Final = "--out"
+OTHER_ORIGIN: Final = "https://gitlab.other.example.test"
+OTHER_RELEASE: Final = "other-agent-release"
+SCOPE_MISMATCH: Final = "agent_cleanup_scope_mismatch"
+RELEASE_MISMATCH: Final = "agent_cleanup_release_mismatch"
+# Load guard reasons of tools/skillkit/installed_copy.py, before the module name.
+LIB_UNAVAILABLE: Final = "installed_lib_unavailable"
+LIB_SHADOWED: Final = "installed_lib_shadowed"
+# A package written into two copies to test where installed_module loads from.
+PROBE_PACKAGE: Final = "installed_copy_probe"
+PROBE_FILE: Final = "marker.py"
+PROBE_MODULE: Final = f"{PROBE_PACKAGE}.{Path(PROBE_FILE).stem}"
+MISSING_MODULE: Final = f"{PROBE_PACKAGE}.absent"
+# A directory without __init__.py, imported as a namespace package.
+NAMESPACE_PROBE: Final = "installed_copy_namespace_probe"
+COPY_DIR: Final = "copy"
+OTHER_COPY_DIR: Final = "other-copy"
+PACKAGE_INIT: Final = "__init__.py"
+NOT_PYTHON_FILE: Final = "status.txt"
 CONNECT: Final = "connect"
 VERIFY: Final = "verify"
 DELETE: Final = "delete"
@@ -481,23 +506,23 @@ def _authorities(
     )
 
 
-@pytest.mark.parametrize("case", ("recorded", "other-cluster", "other-copy"))
-def test_observe_binds_the_series_target_and_copy(
+def _observe(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    case: str,
-) -> None:
-    """Observe passes the series' selection through and refuses another cluster or copy."""
-    connect = _fixture(CONNECT_FIXTURE)
-    ownership = CLEANUP.connect_ownership(connect)
-    authorities = _authorities(
-        connect,
-        cluster_uid=OTHER_CLUSTER
-        if case == "other-cluster"
-        else ownership["cluster_uid"],
-        digest=OTHER_DIGEST if case == "other-copy" else connect["skill"][KEYS.digest],
-    )
+    connect: Mapping[str, Any],
+    authorities: SimpleNamespace,
+    *selection: str,
+) -> tuple[int, list[tuple[object, ...]], list[object], Path]:
+    """Run the adapter's observe against fake installed reads and record the calls.
+
+    :param monkeypatch: Replaces the installed resolver, authority and absence reads.
+    :param tmp_path: Directory of the connect receipt and the stage file.
+    :param connect: Connect APPLIED receipt written for ``--connect-receipt``.
+    :param authorities: Value the installed ``observe_authorities`` returns.
+    :param selection: Binding and GitLab selection arguments appended to argv.
+    :returns: Exit code, resolver positional arguments, selections given to the
+        logical absence read, and the stage file path.
+    """
     selected: list[tuple[object, ...]] = []
     logical: list[object] = []
     monkeypatch.setattr(
@@ -520,15 +545,43 @@ def test_observe_binds_the_series_target_and_copy(
             CLI.OBSERVE,
             CLI.SKILL_OPTION,
             str(SKILL_ROOT),
-            "--connect-receipt",
+            CONNECT_RECEIPT_OPTION,
             str(receipt),
-            "--out",
+            OUT_OPTION,
             str(out),
-            CLI.BINDING_OPTION,
-            BINDING,
-            GITLAB_OPTION,
-            PUBLIC,
+            *selection,
         ]
+    )
+    return code, selected, logical, out
+
+
+@pytest.mark.parametrize("case", ("recorded", "other-cluster", "other-copy"))
+def test_observe_binds_the_series_target_and_copy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    case: str,
+) -> None:
+    """Observe passes the series' selection through and refuses another cluster or copy."""
+    connect = _fixture(CONNECT_FIXTURE)
+    ownership = CLEANUP.connect_ownership(connect)
+    authorities = _authorities(
+        connect,
+        cluster_uid=OTHER_CLUSTER
+        if case == "other-cluster"
+        else ownership["cluster_uid"],
+        digest=OTHER_DIGEST if case == "other-copy" else connect["skill"][KEYS.digest],
+    )
+
+    code, selected, logical, out = _observe(
+        monkeypatch,
+        tmp_path,
+        connect,
+        authorities,
+        CLI.BINDING_OPTION,
+        BINDING,
+        GITLAB_OPTION,
+        PUBLIC,
     )
 
     status, reason = _reason(capsys)
@@ -587,3 +640,280 @@ def test_observe_refuses_a_skill_whose_lib_is_already_loaded_elsewhere(
             INSTALLED_COPY.INSTALLED_LIB_SHADOWED.format(name=CLI.STATUS_MODULE),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    (
+        ("other-project", SCOPE_MISMATCH),
+        ("other-origin", SCOPE_MISMATCH),
+        ("other-release", RELEASE_MISMATCH),
+    ),
+)
+def test_observe_refuses_another_project_origin_or_release(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    case: str,
+    reason: str,
+) -> None:
+    """Another bound project or origin, or another release name, stops observe.
+
+    ``--binding`` and ``--gitlab`` can select another project or GitLab instance
+    than the series used, and an edited receipt can record a release name the
+    bound copy does not derive from the run scope. No Agent, Kubernetes or
+    release read runs and no stage file is written.
+    """
+    connect = _fixture(CONNECT_FIXTURE)
+    ownership = CLEANUP.connect_ownership(connect)
+    authorities = _authorities(
+        connect,
+        cluster_uid=ownership["cluster_uid"],
+        digest=connect["skill"][KEYS.digest],
+    )
+    if case == "other-project":
+        authorities.project.id = ownership["project_id"] + 1
+    elif case == "other-origin":
+        authorities.gitlab.session.origin = OTHER_ORIGIN
+    else:
+        record = connect[CLEANUP.RECORDS_KEY][0]
+        record[CLEANUP.OWNERSHIP_KEY][CLEANUP.RELEASE_KEY] = OTHER_RELEASE
+
+    code, selected, logical, out = _observe(monkeypatch, tmp_path, connect, authorities)
+
+    assert (code, _reason(capsys)) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        (STATUS.BLOCKED, reason),
+    )
+    assert len(selected) == 1
+    assert (authorities.provider.calls, authorities.kubernetes.calls, logical) == (
+        [],
+        [],
+        [],
+    )
+    assert not out.exists()
+
+
+def test_observe_passes_the_legacy_gitlab_profile_to_the_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--gitlab-profile`` reaches the installed resolver as the selection profile.
+
+    A series run against a legacy ``[gitlab.NAME]`` target selects it with this
+    option, so the cleanup read must resolve the same table.
+    """
+    connect = _fixture(CONNECT_FIXTURE)
+    ownership = CLEANUP.connect_ownership(connect)
+    authorities = _authorities(
+        connect,
+        cluster_uid=ownership["cluster_uid"],
+        digest=connect["skill"][KEYS.digest],
+    )
+
+    code, selected, _, out = _observe(
+        monkeypatch, tmp_path, connect, authorities, PROFILE_OPTION, LEGACY_PROFILE
+    )
+
+    ((_, binding, project, gitlab),) = selected
+    assert (binding, project, gitlab.selector, gitlab.profile) == (
+        None,
+        ownership["project_path"],
+        None,
+        LEGACY_PROFILE,
+    )
+    assert (code, _reason(capsys)[0]) == (STATUS.exit_code(STATUS.PASS), STATUS.PASS)
+    assert out.exists()
+
+
+def test_observe_without_the_connect_receipt_is_blocked_before_resolving(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A connect receipt path that does not exist returns the installed BLOCKED code.
+
+    The path is typed by hand and can name a receipt that was never copied from
+    the run. No target is resolved and no stage file is written.
+    """
+    resolver = Mock()
+    monkeypatch.setattr(AUTHORITY, "resolve_agent_target", resolver)
+    missing = tmp_path / FILES["connect"]
+    out = tmp_path / FILES["stage"]
+
+    code = CLI.main(
+        [
+            CLI.OBSERVE,
+            CLI.SKILL_OPTION,
+            str(SKILL_ROOT),
+            CONNECT_RECEIPT_OPTION,
+            str(missing),
+            OUT_OPTION,
+            str(out),
+        ]
+    )
+
+    status, reason = _reason(capsys)
+    assert (code, status) == (STATUS.exit_code(STATUS.BLOCKED), STATUS.BLOCKED)
+    assert str(missing) in reason
+    resolver.assert_not_called()
+    assert not out.exists()
+
+
+def _probe_copy(root: Path) -> Path:
+    """Write the probe package into one copy; its module records the copy path.
+
+    :param root: Copy directory to create.
+    :returns: ``root``.
+    """
+    package = root / PROBE_PACKAGE
+    package.mkdir(parents=True)
+    (package / PACKAGE_INIT).write_text("", encoding="utf-8")
+    (package / PROBE_FILE).write_text(
+        f"ROOT = {json.dumps(str(root))}\n", encoding="utf-8"
+    )
+    return root
+
+
+@pytest.fixture
+def probe_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[Path, Path]]:
+    """Write the probe package into two copies and drop it from sys.modules after.
+
+    ``sys.path`` is a copy for the test, restored by ``monkeypatch``.
+
+    :param tmp_path: Pytest temporary directory holding both copies.
+    :param monkeypatch: Restores ``sys.path``.
+    :yields: The copy under test and another copy.
+    :ytype: tuple[Path, Path]
+    """
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    copy = _probe_copy(tmp_path / COPY_DIR)
+    other = _probe_copy(tmp_path / OTHER_COPY_DIR)
+    invalidate_caches()
+    yield copy, other
+    for name in (PROBE_MODULE, PROBE_PACKAGE):
+        sys.modules.pop(name, None)
+
+
+def test_installed_module_loads_the_module_from_the_bound_copy(
+    probe_copies: tuple[Path, Path],
+) -> None:
+    """A module found first in the bound copy is returned and registered."""
+    copy, _ = probe_copies
+    INSTALLED_COPY.bind_skill(copy)
+
+    module = INSTALLED_COPY.installed_module(copy, PROBE_MODULE)
+
+    assert module.ROOT == str(copy)
+    assert sys.modules[PROBE_MODULE] is module
+
+
+def test_installed_module_refuses_a_module_loaded_from_another_copy(
+    probe_copies: tuple[Path, Path],
+) -> None:
+    """A package imported earlier from another copy is not read through.
+
+    A process that imported ``lib`` from one copy keeps it in ``sys.modules``,
+    so binding a second copy afterwards still returns the first copy's module.
+    """
+    copy, other = probe_copies
+    INSTALLED_COPY.bind_skill(other)
+    import_module(PROBE_MODULE)
+    INSTALLED_COPY.bind_skill(copy)
+
+    with pytest.raises(INSTALLED_COPY.InstalledCopyError) as refused:
+        INSTALLED_COPY.installed_module(copy, PROBE_MODULE)
+
+    assert str(refused.value) == f"{LIB_SHADOWED}:{PROBE_MODULE}"
+
+
+def test_installed_module_refuses_a_namespace_package_without_a_file(
+    probe_copies: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A namespace package has no ``__file__``; it never counts as the bound copy.
+
+    The working directory sits inside the bound copy, so a check that resolved a
+    missing ``__file__`` to the working directory would accept the other copy.
+    """
+    copy, other = probe_copies
+    (other / NAMESPACE_PROBE).mkdir()
+    monkeypatch.chdir(copy)
+    INSTALLED_COPY.bind_skill(other)
+    try:
+        assert getattr(import_module(NAMESPACE_PROBE), "__file__", None) is None
+
+        with pytest.raises(INSTALLED_COPY.InstalledCopyError) as refused:
+            INSTALLED_COPY.installed_module(copy, NAMESPACE_PROBE)
+    finally:
+        sys.modules.pop(NAMESPACE_PROBE, None)
+
+    assert str(refused.value) == f"{LIB_SHADOWED}:{NAMESPACE_PROBE}"
+
+
+def test_installed_module_reports_a_module_missing_from_the_copy(
+    probe_copies: tuple[Path, Path],
+) -> None:
+    """A copy without the module reports it unavailable by name.
+
+    An older install lacks a module a newer tool imports.
+    """
+    copy, _ = probe_copies
+    INSTALLED_COPY.bind_skill(copy)
+
+    with pytest.raises(INSTALLED_COPY.InstalledCopyError) as refused:
+        INSTALLED_COPY.installed_module(copy, MISSING_MODULE)
+
+    assert str(refused.value) == f"{LIB_UNAVAILABLE}:{MISSING_MODULE}"
+
+
+def test_bind_skill_puts_the_copy_first_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Binding the same copy twice leaves one entry, at the front of sys.path."""
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    before = list(sys.path)
+
+    INSTALLED_COPY.bind_skill(tmp_path)
+    INSTALLED_COPY.bind_skill(tmp_path)
+
+    assert sys.path == [str(tmp_path), *before]
+
+
+def test_file_module_loads_the_status_file_outside_sys_modules() -> None:
+    """The repository status file loads by path and is not registered.
+
+    The tool reports BLOCKED with it before any copy is bound, so the loaded
+    name stays out of ``sys.modules``.
+    """
+    status = INSTALLED_COPY.file_module(
+        CLI.REPOSITORY_STATUS_NAME, CLI.REPOSITORY_STATUS_FILE
+    )
+
+    assert status is not STATUS
+    assert status.__name__ == CLI.REPOSITORY_STATUS_NAME
+    assert (status.BLOCKED, status.exit_code(status.BLOCKED)) == (
+        STATUS.BLOCKED,
+        STATUS.exit_code(STATUS.BLOCKED),
+    )
+    assert CLI.REPOSITORY_STATUS_NAME not in sys.modules
+
+
+def test_file_module_refuses_a_file_without_a_python_loader(tmp_path: Path) -> None:
+    """A path whose suffix has no import loader raises ImportError naming the module.
+
+    ``file_module`` accepts any path, and ``importlib`` has no source loader for
+    a path without a Python suffix.
+    """
+    source = tmp_path / NOT_PYTHON_FILE
+    source.write_text(
+        CLI.REPOSITORY_STATUS_FILE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    with pytest.raises(ImportError) as refused:
+        INSTALLED_COPY.file_module(CLI.REPOSITORY_STATUS_NAME, source)
+
+    assert refused.value.name == CLI.REPOSITORY_STATUS_NAME
+    assert CLI.REPOSITORY_STATUS_NAME not in sys.modules

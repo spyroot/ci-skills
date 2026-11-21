@@ -52,8 +52,8 @@ def installed_module(skill: Path, name: str) -> ModuleType:
         module = import_module(name)
     except ImportError as exc:
         raise InstalledCopyError(INSTALLED_LIB_UNAVAILABLE.format(name=name)) from exc
-    location = Path(module.__file__ or "").resolve()
-    if not location.is_relative_to(skill.resolve()):
+    location = getattr(module, "__file__", None)
+    if location is None or not Path(location).resolve().is_relative_to(skill.resolve()):
         raise InstalledCopyError(INSTALLED_LIB_SHADOWED.format(name=name))
     return module
 
