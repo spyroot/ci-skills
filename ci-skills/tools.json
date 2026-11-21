@@ -933,6 +933,7 @@
         "--description",
         "--dry-run",
         "--filter",
+        "--from-tag",
         "--gitlab",
         "--gitlab-profile",
         "--group",
@@ -955,6 +956,7 @@
         "--runner-type",
         "--tag",
         "--timeout",
+        "--to-tag",
         "--token-out",
         "--yaml"
       ],
@@ -967,7 +969,7 @@
         "gitlab"
       ],
       "returns": "Public runner fields, a sanitized plan, or verified before/after action evidence.",
-      "side_effects": "Apply may create, assign, tag, or delete a runner record.",
+      "side_effects": "Apply may create, assign, update, or delete a runner record.",
       "subcommands": {
         "assign": {
           "mutates": true,
@@ -978,6 +980,17 @@
           ],
           "result_schema": "schemas/results/gitlab-action.schema.json",
           "side_effects": "Apply may attach a runner to selected projects."
+        },
+        "bind-project": {
+          "mutates": true,
+          "purpose": "Lock a runner after verifying the selected project is its sole assignment.",
+          "read_back": "Read the exact runner lock and sole project assignment.",
+          "required_options": [
+            "--project",
+            "--runner-id"
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json",
+          "side_effects": "Apply locks the runner. Additional assignments block the operation."
         },
         "create": {
           "mutates": true,
@@ -1013,6 +1026,40 @@
           "read_back": "Read each matching runner from the bound GitLab API.",
           "required_options": [],
           "result_schema": "schemas/results/gitlab-runner-read.schema.json"
+        },
+        "rename-tag": {
+          "mutates": true,
+          "purpose": "Replace one scheduling tag and preserve the remaining tags.",
+          "read_back": "Read the exact runner tags and unchanged project assignments.",
+          "required_options": [
+            "--runner-id",
+            "--from-tag",
+            "--to-tag"
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json",
+          "side_effects": "Apply updates only the runner tag list."
+        },
+        "set-name": {
+          "mutates": true,
+          "purpose": "Set the display name of one existing GitLab runner.",
+          "read_back": "Read the exact description and unchanged tags, protection, lock, and project assignments.",
+          "required_options": [
+            "--runner-id",
+            "--description"
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json",
+          "side_effects": "Apply updates only the runner description."
+        },
+        "set-protected": {
+          "mutates": true,
+          "purpose": "Set the exact runner access level.",
+          "read_back": "Read the exact access level and unchanged tags and project assignments.",
+          "required_options": [
+            "--runner-id",
+            "--protected"
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json",
+          "side_effects": "Apply updates only the runner access level."
         },
         "tag": {
           "mutates": true,
@@ -1320,7 +1367,7 @@
         "--toolbox-spec",
         "--yaml"
       ],
-      "purpose": "Probe nested Podman or build and publish a toolbox for a running GitLab runner.",
+      "purpose": "Probe nested Podman or publish the configured Harbor toolbox for a GitLab runner.",
       "read_only": false,
       "report_kind": "image_build_readiness",
       "required_options": [],
@@ -1336,11 +1383,8 @@
       "subcommands": {
         "chain": {
           "mutates": true,
-          "purpose": "Build and publish the toolbox, then configure a runner using that image.",
+          "purpose": "Copy the reference toolbox from the selected Harbor target into the consumer repository and deploy a runner using its published digest.",
           "read_back": "Published toolbox digest and the configured runner deployment using that image.",
-          "required_options": [
-            "--toolbox-spec"
-          ],
           "requires_authorities": [
             "kubernetes",
             "gitlab",

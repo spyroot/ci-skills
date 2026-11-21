@@ -176,7 +176,7 @@ class ImageBuildChain:
             if hasattr(state, "chain_plan"):
                 output["plan"] = state.chain_plan
                 output["plan_digest"] = state.chain_plan_digest
-                output["confirmable"] = True
+                output["confirmable"] = False
             if hasattr(state, "selected_node"):
                 output["selected_node"] = state.selected_node
             if state.chain_cleanup:

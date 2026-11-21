@@ -28,6 +28,7 @@ from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.gitlab.callback import GitlabCallback, GitLabState
 from lib.python.core.gitlab.cli import resolve_gitlab_target
 from lib.python.core.gitlab.gitlab_actions import (
+    RUNNER_CONTROLS,
     ActionError,
     ActionPlan,
     _access_failure,
@@ -70,10 +71,11 @@ def _requires_snapshot(plan: ActionPlan) -> bool:
     """Identify plans whose confirmation must include live before-state.
 
     :param plan: Prepared operation before authentication.
-    :returns: Whether deletion or group assignment needs a live snapshot.
+    :returns: Whether the operation needs a live snapshot.
     """
     return plan.kind == "gitlab_runner" and (
         plan.operation == "delete"
+        or plan.operation in RUNNER_CONTROLS
         or (plan.operation == "assign" and plan.target_kind == "group")
     )
 
@@ -216,8 +218,21 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
                     service.api, service.session, service.target_id
                 ),
             )
-        from lib.python.core.gitlab.gitlab_runners import delete_snapshot
+        from lib.python.core.gitlab.gitlab_runners import (
+            RunnerControl,
+            RunnerControlScopeError,
+            delete_snapshot,
+        )
 
+        if plan.operation in RUNNER_CONTROLS:
+            try:
+                snapshot = RunnerControl.snapshot(
+                    service.api, service.session, plan, service.target_id
+                )
+            except RunnerControlScopeError as exc:
+                self.state.plan = replace(plan, project_ids=exc.project_ids)
+                raise
+            return replace(plan, runner_snapshot=snapshot)
         return replace(
             plan,
             runner_snapshot=delete_snapshot(
@@ -500,7 +515,7 @@ class GitLabWorkflow:
         if self.mode == "live-plan" and not (
             _requires_snapshot(plan) or pending_identity
         ):
-            raise ActionError("live_plan_requires_group_assignment_or_runner_delete")
+            raise ActionError("live_plan_requires_live_runner_inputs")
         if self.mode == "offline":
             self.state.report = _result(
                 plan, DRY_RUN, phase="OFFLINE_PLAN", mutated=False
@@ -542,6 +557,8 @@ class GitLabWorkflow:
         snapshot = (
             {"runner_snapshot": plan.runner_snapshot}
             if plan.operation == "delete"
+            else {"runner_control": plan.runner_snapshot}
+            if plan.kind == "gitlab_runner" and plan.operation in RUNNER_CONTROLS
             else {"project_ids": [state.gitlab.target_id]}
             if plan.kind == "gitlab_runner" and plan.operation == "create"
             else {"project_ids": list(plan.project_ids or ())}
@@ -645,6 +662,7 @@ def operation_callback(plan: ActionPlan) -> GitLabOperation:
         CreateRunner,
         DeleteRunner,
         ReadRunner,
+        RunnerControl,
         SetTag,
     )
 
@@ -661,6 +679,7 @@ def operation_callback(plan: ActionPlan) -> GitLabOperation:
             "get": ReadRunner,
             "list": ReadRunner,
             "tag": SetTag,
+            **dict.fromkeys(RUNNER_CONTROLS, RunnerControl),
         },
         "gitlab_milestone": {
             "create": CreateMilestone,

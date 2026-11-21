@@ -68,7 +68,7 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
     result.add_argument(
         "--toolbox-spec",
         metavar="PATH",
-        help="toolbox specification used by the chain runner manager",
+        help="optional toolbox specification retaining explicit publication fields",
     )
     result.add_argument(
         "--project",

@@ -34,6 +34,8 @@ from lib.python.core.runtime import sanitize
 from lib.python.core.target import GitLabOperationTarget, GitLabRoute
 from lib.python.sys.status import BLOCKED, PASS, exit_code
 
+RUNNER_CONTROLS = ("rename-tag", "bind-project", "set-protected", "set-name")
+
 
 class ActionError(ValueError):
     """An operation cannot be planned or independently verified."""
@@ -85,7 +87,7 @@ class ActionPlan(SkillAction):
     :param token_out: Optional one-time sink for a created runner token.
     :param revision: Optional exact source revision bound to the action.
     :param project_ids: Optional project IDs selected for runner assignment.
-    :param runner_snapshot: Optional before-state bound to runner deletion.
+    :param runner_snapshot: Optional before-state bound to runner deletion or an exact runner update.
     :param project_name: Optional consumer naming input bound privately into confirmation.
     :param routing: Route of the GitLab table the target read. ``ActionPlan`` binds it into
         ``plan_digest``, and ``_result`` copies it into ``routing``. The value is
@@ -155,7 +157,7 @@ class ActionPlan(SkillAction):
     .. attribute :: runner_snapshot
         :type: Optional[JSONObject]
 
-        Optional before-state bound to runner deletion.
+        Optional before-state bound to runner deletion or an exact runner update.
 
     .. attribute :: routing
         :type: Optional[GitLabRoute]
@@ -213,7 +215,9 @@ class ActionPlan(SkillAction):
         }
         if self.project_name is not None:
             data["project_name"] = validate_project_name(self.project_name)
-        if self.kind == "gitlab_runner" and self.operation == "delete":
+        if self.kind == "gitlab_runner" and (
+            self.operation == "delete" or self.operation in RUNNER_CONTROLS
+        ):
             data["runner_snapshot"] = self.runner_snapshot
         if self.routing is not None:
             data[ROUTING_RESULT_KEY] = self.routing.as_dict()
@@ -269,7 +273,13 @@ class ActionPlan(SkillAction):
                         and self.target_kind == "group"
                         and self.project_ids is None
                     )
-                    or (self.operation == "delete" and self.runner_snapshot is None)
+                    or (
+                        (
+                            self.operation == "delete"
+                            or self.operation in RUNNER_CONTROLS
+                        )
+                        and self.runner_snapshot is None
+                    )
                     or pending_runner_identity(self)
                 )
             ),
@@ -289,6 +299,12 @@ class ActionPlan(SkillAction):
                 raise ActionError("runner_tags_invalid_shape")
         if self.kind == "gitlab_runner" and self.operation == "delete":
             result["runner_snapshot"] = self.runner_snapshot
+        if (
+            self.kind == "gitlab_runner"
+            and self.operation in RUNNER_CONTROLS
+            and self.runner_snapshot is not None
+        ):
+            result["runner_control"] = self.runner_snapshot
         return result
 
 
@@ -694,7 +710,15 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "gitlab_wiki": ("create", "update"),
         "gitlab_repository": ("commit",),
         "gitlab_merge_request": ("create", "update"),
-        "gitlab_runner": ("assign", "create", "delete", "get", "list", "tag"),
+        "gitlab_runner": (
+            "assign",
+            "create",
+            "delete",
+            "get",
+            "list",
+            "tag",
+            *RUNNER_CONTROLS,
+        ),
     }
     result.set_defaults(kind=kind)
     result.add_argument(
@@ -778,12 +802,12 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
     result.add_argument(
         "--live-plan",
         action="store_true",
-        help="read group assignment or runner deletion identity for an apply-ready plan",
+        help="read target and runner state for an apply-ready plan",
     )
     result.add_argument(
         "--runner-id",
         type=int,
-        help="numeric runner ID; required for assign, tag, and delete",
+        help="numeric runner ID; required for existing-runner mutations",
     )
     result.add_argument(
         "--job-id", type=int, help="get the runner related to one project job ID"
@@ -794,13 +818,15 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
         help="runner scope for create",
     )
     result.add_argument(
-        "--description", action=SingleValue, help="server-visible runner recovery key"
+        "--description",
+        action=SingleValue,
+        help="runner description for create, reads, or set-name",
     )
     result.add_argument(
         "--protected",
         choices=tuple(PROTECTION_VALUES),
         action=SingleValue,
-        help="create: protected or unprotected runner refs; omission uses provider default",
+        help="create or set-protected: exact protection setting; create omission uses provider default",
     )
     result.add_argument(
         "--limit",
@@ -830,6 +856,8 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
         default=[],
         help="runner tag for create or tag; repeat to add several",
     )
+    result.add_argument("--from-tag", action=SingleValue, help="old tag for rename-tag")
+    result.add_argument("--to-tag", action=SingleValue, help="new tag for rename-tag")
     result.add_argument(
         "--token-out", metavar="PATH", help="create-only one-time token destination"
     )

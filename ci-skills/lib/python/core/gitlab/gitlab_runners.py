@@ -16,6 +16,7 @@ from typing import Final, Optional, TypedDict
 
 from lib.python.core.gitlab.gitlab_action import GitLabOperation
 from lib.python.core.gitlab.gitlab_actions import (
+    RUNNER_CONTROLS,
     ActionError,
     ActionPlan,
     PreparedOperation,
@@ -51,6 +52,7 @@ from lib.python.core.runner_identity import (
 )
 from lib.python.core.runner_options import (
     PROTECTION_READBACK_MISMATCH,
+    PROTECTION_VALUES,
     parse_protected,
     runner_tags,
     validate_runner_tags,
@@ -250,8 +252,16 @@ def prepare(
     :raises ActionError: If the action or its arguments are invalid.
     """  # noqa: DOC502 - input errors propagate from the selected preparation helper
     validate_project_name(getattr(args, "project_name", None))
-    if args.action != "create" and getattr(args, "protected", None) is not None:
+    if (
+        args.action not in {"create", "set-protected"}
+        and getattr(args, "protected", None) is not None
+    ):
         raise ActionError("protected_only_valid_for_runner_create")
+    if args.action != "rename-tag" and (
+        getattr(args, "from_tag", None) is not None
+        or getattr(args, "to_tag", None) is not None
+    ):
+        raise ActionError("from_tag_and_to_tag_only_valid_for_rename_tag")
     if args.action in {"get", "list", "delete"}:
         return _prepare_runner_read(args, target_kind)
     try:
@@ -332,6 +342,8 @@ def _prepare_runner_mutation(
         raise ActionError("runner_filter_only_valid_for_list")
     if args.job_id is not None:
         raise ActionError("job_id_only_valid_for_runner_get")
+    if args.action in RUNNER_CONTROLS:
+        return RunnerControl.prepare(args, target_kind)
     if args.action == "assign":
         identifier = _positive(args.runner_id or target.gitlab.runner_id, "runner_id")
         if args.token_out or args.description or args.tag or args.runner_type:
@@ -1117,6 +1129,259 @@ def read_runner_record(
     return record
 
 
+class RunnerControlScopeError(ActionError):
+    """Carry observed project IDs when a runner scope cannot be confirmed."""
+
+    def __init__(self, reason: str, project_ids: tuple[int, ...]) -> None:
+        """Retain the observed assignments without authorizing a write.
+
+        :param reason: Reason the project scope cannot be used.
+        :param project_ids: Exact IDs visible at the provider.
+        """
+        super().__init__(reason)
+        self.project_ids = project_ids
+
+
+class RunnerControl(GitLabOperation):
+    """Plan and verify one exact GitLab project runner field update."""
+
+    _FIELDS: Final = {
+        "rename-tag": "tag_list",
+        "bind-project": "locked",
+        "set-protected": "access_level",
+        "set-name": "description",
+    }
+    _PROJECT_COUNT: Final = (
+        "query RunnerProjects($id: CiRunnerID!) { runner(id: $id) { id projectCount } }"
+    )
+
+    @staticmethod
+    def prepare(args: Namespace, target_kind: str) -> PreparedOperation:
+        """Validate selectors and only the fields supported by this control.
+
+        :param args: Parsed command inputs.
+        :param target_kind: Provider scope selected by the shared target resolver.
+        :returns: Exact runner ID and request intent.
+        :raises ActionError: An input is missing, conflicting, or invalid.
+        """  # noqa: DOC502 - shared input checks raise ActionError.
+        operation = args.action
+        if target_kind != "project" or (
+            operation == "bind-project" and not args.project
+        ):
+            raise ActionError("runner_control_requires_project")
+        if (
+            args.token_out
+            or args.tag
+            or args.runner_type
+            or (args.description is not None and operation != "set-name")
+        ):
+            raise ActionError("runner_control_rejects_unrelated_options")
+        runner_id = _positive(args.runner_id, "runner_id")
+        if operation == "rename-tag":
+            tags = _requested_tags(
+                [
+                    _required_text(getattr(args, "from_tag", None), "from_tag"),
+                    _required_text(getattr(args, "to_tag", None), "to_tag"),
+                ]
+            )
+            body: JSONObject = {"from_tag": tags[0], "to_tag": tags[1]}
+        elif operation == "set-protected":
+            protection = parse_protected(getattr(args, "protected", None))
+            if protection is None:
+                raise ActionError("set_protected_requires_protected")
+            body = {"access_level": protection}
+        elif operation == "set-name":
+            body = {"description": _required_text(args.description, "description")}
+        else:
+            body = {"locked": True}
+        return PreparedOperation(body, resource_id=runner_id)
+
+    @classmethod
+    def observe(
+        cls,
+        api: GlabAPIClient,
+        session: BoundGitLabSession,
+        runner_id: int,
+        project_id: int,
+    ) -> JSONObject:
+        """Read runner state and prove that all direct project IDs are visible.
+
+        :param api: Existing bounded provider transport.
+        :param session: Access-verified session on the selected GitLab instance.
+        :param runner_id: Existing runner resource selector.
+        :param project_id: Access-verified project ID.
+        :returns: Canonical runner state used by confirmation and read-back.
+        :raises ActionError: The runner fields or assignments cannot be proven.
+        :raises GitLabAPIError: A provider read fails.
+        """  # noqa: DOC503 - shared native reads propagate domain errors.
+        raw = _runner_readback(
+            api, session, f"projects/{project_id}/runners", runner_id
+        )
+        record = _record(raw)
+        projects = record["projects"]
+        locked = raw.get("locked")
+        access_level = record["access_level"]
+        if (
+            record["runner_type"] != "project_type"
+            or projects is None
+            or not isinstance(locked, bool)
+            or access_level not in PROTECTION_VALUES.values()
+        ):
+            raise ActionError("runner_control_state_unavailable")
+        project_ids = tuple(sorted(projects))
+        gid = f"gid://gitlab/Ci::Runner/{runner_id}"
+        # GitLab can filter REST project IDs by the caller's visibility.
+        response = _object(
+            api.post_json(
+                session,
+                "graphql",
+                {
+                    "query": cls._PROJECT_COUNT,
+                    "variables": {"id": gid},
+                },
+            ),
+            "runner_project_count",
+        )
+        data = response.get("data")
+        runner = data.get("runner") if isinstance(data, Mapping) else None
+        count = runner.get("projectCount") if isinstance(runner, Mapping) else None
+        if (
+            response.get("errors")
+            or not isinstance(runner, Mapping)
+            or runner.get("id") != gid
+            or type(count) is not int
+            or count != len(project_ids)
+            or project_id not in project_ids
+        ):
+            raise RunnerControlScopeError(
+                "runner_project_assignments_unverified; verify project visibility",
+                project_ids,
+            )
+        return {
+            "description": record["description"],
+            "project_ids": list(project_ids),
+            "tag_list": sorted(record["tag_list"]),
+            "locked": locked,
+            "access_level": access_level,
+        }
+
+    @classmethod
+    def snapshot(
+        cls,
+        api: GlabAPIClient,
+        session: BoundGitLabSession,
+        plan: ActionPlan,
+        project_id: int,
+    ) -> JSONObject:
+        """Bind desired state to the observed runner and selected project.
+
+        :param api: Existing bounded provider transport.
+        :param session: Access-verified session on the selected GitLab instance.
+        :param plan: Original caller intent before observing provider state.
+        :param project_id: Access-verified project ID.
+        :returns: Confirmable before and desired state.
+        :raises ActionError: The current state prevents the requested change.
+        :raises GitLabAPIError: A provider read fails.
+        """  # noqa: DOC503 - shared native reads propagate domain errors.
+        runner_id = _positive(plan.resource_id, "runner_id")
+        before = cls.observe(api, session, runner_id, project_id)
+        desired = dict(before)
+        field = cls._FIELDS[plan.operation]
+        if plan.operation == "bind-project" and before["project_ids"] != [project_id]:
+            projects = before["project_ids"]
+            assert isinstance(projects, list)
+            raise RunnerControlScopeError(
+                "runner_has_other_project_assignments; separate approval required before detaching",
+                tuple(_id(project, "project") for project in projects),
+            )
+        if plan.operation == "rename-tag":
+            old = _required_text(plan.body.get("from_tag"), "from_tag")
+            new = _required_text(plan.body.get("to_tag"), "to_tag")
+            tags = set(_observed_tags(before["tag_list"]))
+            if old not in tags and new not in tags:
+                raise ActionError("runner_rename_tag_source_missing")
+            tags.discard(old)
+            tags.add(new)
+            desired[field] = sorted(tags)
+        else:
+            desired[field] = plan.body[field]
+        return {
+            "runner_id": runner_id,
+            "project_id": project_id,
+            "before": before,
+            "desired": desired,
+        }
+
+    def run(self) -> JSONObject:
+        """Recheck under the existing runner guard, then update and verify one field.
+
+        :returns: The independently observed state and exact operation result.
+        :raises ActionError: The plan is absent, invalid, or stale.
+        :raises GitLabAPIError: A terminal provider operation or lock fails.
+        :raises OSError: The runner guard cannot be accessed.
+        """  # noqa: DOC503 - lock and provider errors retain existing classification.
+        plan, service = self.plan, self.gitlab
+        runner_id = _positive(plan.resource_id, "runner_id")
+        snapshot = plan.runner_snapshot
+        self.state.mutated = False
+        if snapshot is None:
+            raise ActionError("runner_control_requires_live_plan")
+        before = _object(snapshot.get("before"), "runner_control_before")
+        desired = _object(snapshot.get("desired"), "runner_control_desired")
+        with runner_update_guard(plan.origin, runner_id):
+            if (
+                self.snapshot(service.api, service.session, plan, service.target_id)
+                != snapshot
+            ):
+                raise ActionError("runner_changed_rerun_live_plan")
+            evidence: JSONObject = {"id": runner_id, "runner_control": snapshot}
+            if before == desired:
+                return {
+                    **evidence,
+                    "action": "NO_OP",
+                    "verified": True,
+                    "mutated": False,
+                    "observed": before,
+                }
+            field = self._FIELDS[plan.operation]
+            self.state.mutated = None
+            try:
+                service.api.put_json(
+                    service.session, f"runners/{runner_id}", {field: desired[field]}
+                )
+            except GitLabAPIError as exc:
+                if not uncertain_write(exc):
+                    self.state.mutated = False
+                    raise
+            else:
+                self.state.mutated = True
+            try:
+                observed = self.observe(
+                    service.api, service.session, runner_id, service.target_id
+                )
+            except (ActionError, GitLabAPIError):
+                observed = None
+            if observed != desired:
+                failure = dict(
+                    unverified_write(
+                        service.target_id,
+                        evidence,
+                        "runner_control_readback_unverified",
+                    )
+                )
+                failure.update(
+                    action="UNVERIFIED", mutated=self.state.mutated, observed=observed
+                )
+                return failure
+            return {
+                **evidence,
+                "action": "APPLIED",
+                "verified": True,
+                "mutated": True,
+                "observed": observed,
+            }
+
+
 class SetTag(GitLabOperation):
     """Add requested tags while retaining concurrent provider additions."""
 
@@ -1745,6 +2010,8 @@ def apply(
         return SetTag(action=plan).execute(api, session, target_id)
     if plan.operation == "delete":
         return DeleteRunner(action=plan).execute(api, session, target_id)
+    if plan.operation in RUNNER_CONTROLS:
+        return RunnerControl(action=plan).execute(api, session, target_id)
     if plan.operation != "create":
         raise ActionError("unsupported_runner_action")
     return CreateRunner(action=plan).execute(api, session, target_id)

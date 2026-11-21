@@ -27,18 +27,16 @@ from lib.python.core.kubernetes.run_scope import (
     ResolveRunScopes,
 )
 from lib.python.core.kubernetes.scc_access import EnsureSCCAccess
-from lib.python.core.toolbox_actions import (
-    ConfirmWorkflow,
-    EnsureNamespace,
-    HarborBuild,
-)
+from lib.python.core.toolbox_actions import ConfirmWorkflow
 
 from .callbacks import (
+    ConfirmChainDestination,
     ConfirmChainManager,
     CreateRunnerRecord,
     DeferredComponent,
     PrepareRunnerManager,
     ProviderTransition,
+    ResolveChainConsumer,
     ResolveChainPlan,
     RetainProvider,
     ScopedGitLabAuth,
@@ -57,31 +55,32 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
     state = action.state
     callbacks: AbstractCallbacks[ImageBuildChainState, SkillAction] = [
         K8SAuth(action.target, action.args.timeout),
-        HarborAuth(
-            action.target,
-            action.toolbox.repository,
-            ("pull", "push"),
-            action.args.timeout,
-        ),
-        RetainProvider(action, ProviderTransition.RETAIN_TOOLBOX_HARBOR),
-        ConfirmWorkflow(action.toolbox),
-        RetainProvider(action, ProviderTransition.USE_TOOLBOX_HARBOR),
         ScopedGitLabAuth(action, state.runner_auth_plan),
         RetainProvider(action, ProviderTransition.RETAIN_RUNNER_GITLAB),
         RetainProvider(action, ProviderTransition.USE_RUNNER_GITLAB),
+        ResolveChainConsumer(action),
+        DeferredComponent(
+            action,
+            lambda _: HarborAuth(
+                action.target,
+                action.naming_base.value,
+                ("pull", "push"),
+                action.args.timeout,
+            ),
+        ),
+        DeferredComponent(action, lambda _: ConfirmWorkflow(action.toolbox)),
         ResolveChainPlan(action),
     ]
     if action.mode == ProbeMode.APPLY:
         callbacks.extend(
             (
                 CleanupChain(action),
-                EnsureNamespace(action.toolbox),
-                HarborBuild(action.toolbox),
-                HarborPush(
-                    PushAction(
-                        action.toolbox.repository,
-                        action.toolbox.spec.image_tag,
-                    )
+                ConfirmChainDestination(action),
+                DeferredComponent(
+                    action,
+                    lambda _: HarborPush(
+                        PushAction(action.toolbox.repository, action.toolbox.args.tag)
+                    ),
                 ),
                 CreateRunnerRecord(action),
                 PrepareRunnerManager(action),

@@ -1,11 +1,45 @@
 # GitLab runner configuration and job tuning
 
-`gitlab_runner.py` creates, tags, assigns and deletes the runner record on GitLab and saves the one-time
+`gitlab_runner.py` creates, updates, assigns and deletes the runner record on GitLab and saves the one-time
 token; `gitlab_job.py` and `gitlab_pipeline.py` read what the runner did with a job. The runner process itself
 is driven by `config.toml` on the host, Pod or Operator that runs it, and by job variables in `.gitlab-ci.yml`.
 Each section below is one table of that file or one task, with the most important keys the runner's own
 configuration types accept, each with a trailing comment in the form `type | default | effect`. Values are
 examples. `unset` means the key has no value until you set one.
+
+## Manage a runner record
+
+Use the installed `gitlab_runner.py` command to change GitLab's runner record.
+`CI_SKILLS_ROOT` is the installed directory reported by the installer.
+The default create description and scheduling tag use `--project-name` when supplied,
+or the selected repository name. Keep the selected project and runner ID when
+changing an existing runner.
+
+```bash
+runner=(conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_runner.py")
+project=team/sample_project
+runner_id=42
+
+"${runner[@]}" create --project "$project" --runner-type project --token-out runner.token --dry-run
+"${runner[@]}" tag --project "$project" --runner-id "$runner_id" --tag extra --dry-run
+"${runner[@]}" rename-tag --project "$project" --runner-id "$runner_id" --from-tag old --to-tag new --dry-run
+"${runner[@]}" bind-project --project "$project" --runner-id "$runner_id" --dry-run
+"${runner[@]}" set-protected --project "$project" --runner-id "$runner_id" --protected true --dry-run
+"${runner[@]}" set-name --project "$project" --runner-id "$runner_id" --description sample_custom --dry-run
+```
+
+`tag` adds tags. `rename-tag` replaces the old tag and keeps the other tags.
+`bind-project` locks the runner after proving that the selected project is
+its sole assignment. When another project is assigned, the plan reports the
+observed IDs. Request a separate decision before detaching any project.
+`set-protected` takes `true` for protected refs or `false` for the native
+unprotected access level. `set-name` updates the GitLab description on the
+same runner ID.
+
+Use `--live-plan` in place of `--dry-run` for the four new controls. Then repeat
+the same inputs with `--apply --confirm-plan DIGEST_FROM_PLAN`. Apply checks
+the live state again before writing and reads the native result independently.
+A fresh live plan after a verified change can be confirmed for a `NO_OP`.
 
 ## Global section
 

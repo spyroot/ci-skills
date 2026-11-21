@@ -724,12 +724,11 @@ def test_long_repository_runner_keeps_bounded_names_and_scope_identity_through_c
         chain.repository_identity = IDENTITY.resolve_repository(
             selected.long_repository
         )
-        chain.resolved_description = IDENTITY.resolve_name(
-            None, chain.repository_identity, argument=DESCRIPTION_ARGUMENT
-        )
-        chain.args.runner_description = chain.resolved_description.value
-        chain.args.runner_label = list(selected.labels)
+        chain.args.project_name = None
+        chain.explicit_description = None
+        chain.explicit_tags = tuple(selected.labels)
         chain.args.namespace = None
+        chain._select_names()
         chain._prepare_scope()
         scope = chain.manager_scope
         planned_name = chain.plan(chain.args.node)[FIELD_RUNNER][FIELD_NAME]
