@@ -32,13 +32,13 @@ from lib.python.core.json_types import (
 )
 from lib.python.core.kubernetes.resources import ResourceSet
 from lib.python.core.kubernetes.run_scope import resource_identity
-from lib.python.core.kubernetes.runner import REGISTRY_SECRET_SUFFIX
 from lib.python.core.kubernetes.scc_access import role_binding_document
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.runner import (
     REGISTRATION_SECRET_SUFFIX,
     RUNTIME_ROOT,
     RunnerRuntime,
+    runner_runtime_identities,
 )
 from lib.python.core.runner_identity import NameSource, ResolvedName
 from lib.python.core.runner_options import parse_protected
@@ -450,19 +450,8 @@ def retain_manager_resources(
     if scope.owns_namespace:
         retained.add(resource_identity("Namespace", scope.namespace, ""))
     retained.update(
-        {
-            resource_identity("Deployment", runner.name, scope.namespace),
-            resource_identity(
-                "Secret",
-                runner.name + REGISTRATION_SECRET_SUFFIX,
-                scope.namespace,
-            ),
-            resource_identity(
-                "Secret",
-                runner.name + REGISTRY_SECRET_SUFFIX,
-                scope.namespace,
-            ),
-        }
+        resource_identity(kind, name, scope.namespace)
+        for kind, name in runner_runtime_identities(runner.name)
     )
     binding = role_binding_document(workflow.scc_access(), scope)
     metadata = json_object(binding["metadata"])

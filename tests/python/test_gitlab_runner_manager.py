@@ -32,10 +32,12 @@ from lib.python.core.endpoints import (
 )
 from test_tool_pod import MemoryCluster
 
+ABSTRACT_CALLBACK = import_script_module("lib.python.core.abstract.callback")
 ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
 CALLBACKS = import_script_module("lib.python.core.gitlab.runner_manager.callbacks")
 K8S_RUNNER = import_script_module("lib.python.core.kubernetes.runner")
 RESOURCES = import_script_module("lib.python.core.kubernetes.resources")
+RUNNER_RUNTIME = import_script_module("lib.python.core.runner")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
 SCC_ACCESS = import_script_module("lib.python.core.kubernetes.scc_access")
 TARGET = import_script_module("lib.python.core.target")
@@ -73,6 +75,13 @@ DELETE_ACTION: Final = "delete"
 BORROWED_NAMESPACE_UID: Final = "caller-namespace-uid"
 NAMESPACE_KEY: Final = ("namespace", "", NAMESPACE)
 ABSENCE_READ_FAILURE: Final = "unit_absence_read_failed"
+ABSENCE_REPLACEMENT_UID: Final = "concurrent-manager-uid"
+SECRET_METADATA_COLUMNS: Final = (
+    "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,UID:.metadata.uid"
+)
+RUNTIME_DEPLOYMENT_KIND: Final = "Deployment"
+RUNTIME_SECRET_KIND: Final = "Secret"
+RuntimeIdentity = tuple[str, str, str]
 BORROWED_NAMESPACE_SNAPSHOT: Final = json.dumps(
     {
         "apiVersion": "v1",
@@ -737,6 +746,7 @@ def test_delete_targets_only_run_owned_manager_identities() -> None:
     """
     action = _action("delete", apply=True)
     state = _bind_gitlab(action)
+    state.found_scopes = (state.run_scope,)
     runner = action.workload().runner(state.run_scope)
     names = (
         ("Deployment", runner.name),
@@ -998,8 +1008,8 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
                 "ConfirmWorkflow",
                 "DeleteManagerRunner",
                 "VerifyGitLabRunnerPreserved",
-                "RemoveSCCAccess",
-                "RemoveScope",
+                "DeferredCallback",
+                "DeferredCallback",
                 "ObserveManagerNamespace",
             ),
         ),
@@ -1035,6 +1045,7 @@ def test_workflow_confirms_exact_plan_before_any_mutation(
         "GitLabRunnerRuntime",
         "DeployManagerRunner",
         "DeleteManagerRunner",
+        "DeferredCallback",
         "RemoveSCCAccess",
         "RemoveScope",
     }
@@ -1049,6 +1060,22 @@ def test_workflow_confirms_exact_plan_before_any_mutation(
             if isinstance(callback, CALLBACKS.VerifyGitLabRunnerPreserved)
         )
         assert verify.workflow is action
+        deferred = tuple(
+            callback
+            for callback in executor.callbacks
+            if type(callback) is ABSTRACT_CALLBACK.DeferredCallback
+        )
+        scope = RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)
+        present = replace(action.context, found_scopes=(scope,))
+        absent = replace(action.context, found_scopes=())
+        assert tuple(type(wrapper.factory(present)) for wrapper in deferred) == (
+            SCC_ACCESS.RemoveSCCAccess,
+            RUN_SCOPE.RemoveScope,
+        )
+        assert tuple(type(wrapper.factory(absent)) for wrapper in deferred) == (
+            ABSTRACT_CALLBACK.LocalCallback,
+            ABSTRACT_CALLBACK.LocalCallback,
+        )
 
 
 class ManagerCluster(MemoryCluster):
@@ -1088,7 +1115,32 @@ class ManagerCluster(MemoryCluster):
         if kind.casefold() == "deployment":
             self.runner_online = False
 
-    def command(self, *args: str, openshift: bool = False) -> RUNTIME.CommandResult:
+    def command(
+        self, *args: str, openshift: bool = False, timeout: Optional[float] = None
+    ) -> RUNTIME.CommandResult:
+        if args[:2] == ("get", "secrets"):
+            assert args[2:4] == ("--all-namespaces", "-l")
+            assert args[5:] == ("-o", SECRET_METADATA_COLUMNS, "--no-headers")
+            selector = dict(item.split("=", 1) for item in args[4].split(","))
+            assert set(selector) == {
+                RESOURCES.MANAGER_LABEL,
+                RESOURCES.OPERATION_LABEL,
+                RUN_SCOPE.RUN_ID_LABEL,
+            }
+            assert selector[RESOURCES.MANAGER_LABEL] == RESOURCES.MANAGER_VALUE
+            assert (
+                selector[RESOURCES.OPERATION_LABEL] == selector[RUN_SCOPE.RUN_ID_LABEL]
+            )
+            rows = [
+                f"{namespace} {name} {document['metadata']['uid']}\n"
+                for (kind, namespace, name), document in self.objects.items()
+                if kind == "secret"
+                and all(
+                    document["metadata"].get("labels", {}).get(key) == value
+                    for key, value in selector.items()
+                )
+            ]
+            return RUNTIME.CommandResult(args, 0, "".join(rows), "")
         assert args == ("get", "--raw=/apis/security.openshift.io/v1")
         return RUNTIME.CommandResult(args, 1, "", "404 Not Found")
 
@@ -1810,3 +1862,141 @@ def test_manager_main_absent_delete_confirmation_rejects_conflicts(
     assert cluster.applied == cluster.deleted == []
     assert baseline == protected
     assert not cluster.guard_held
+
+
+def _absent_manager_runtime(
+    cluster: ManagerCluster,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    borrowed: bool,
+) -> Mapping[RuntimeIdentity, str]:
+    """Snapshot the exact former native runtime and verify its ordinary removal."""
+    if borrowed:
+        cluster.caller_namespace = NAMESPACE
+        cluster.objects[NAMESPACE_KEY] = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+    protected = deepcopy(cluster.objects)
+    code, _ = _confirmed_manager(cluster, capsys, run_id=RUN_ID)
+    assert code == STATUS.exit_code(STATUS.PASS)
+    runtime = MappingProxyType(
+        {
+            key: json.dumps(value, sort_keys=True)
+            for key, value in cluster.objects.items()
+        }
+    )
+    code, deleted = _confirmed_manager(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, deleted[FIELD_STATUS]) == (STATUS.exit_code(STATUS.PASS), STATUS.PASS)
+    assert cluster.objects == protected
+    cluster.applied.clear()
+    cluster.deleted.clear()
+    return runtime
+
+
+@pytest.mark.parametrize("borrowed", (False, True), ids=("owned", "borrowed"))
+def test_manager_confirmed_absence_refuses_concurrent_runtime_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    borrowed: bool,
+) -> None:
+    """A same-run workload arriving after the absence read survives confirmation."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    runtime = _absent_manager_runtime(cluster, capsys, borrowed=borrowed)
+    code, plan = _manager_cli_report(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, plan[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
+
+    deployment = next(identity for identity in runtime if identity[0] == "deployment")
+    replacement = json.loads(runtime[deployment])
+    replacement["metadata"]["uid"] = ABSENCE_REPLACEMENT_UID
+    concurrent = {deployment: replacement}
+    if not borrowed:
+        # A new Deployment requires its new namespace to exist on the provider.
+        namespace = next(identity for identity in runtime if identity[0] == "namespace")
+        native_namespace = json.loads(runtime[namespace])
+        native_namespace["metadata"]["uid"] = ABSENCE_REPLACEMENT_UID + "-namespace"
+        concurrent[namespace] = native_namespace
+    survivors = {**deepcopy(cluster.objects), **concurrent}
+    original_read = CALLBACKS.read_runner_record
+    injected = False
+
+    def observe_runner(*args: object, **kwargs: object) -> dict:
+        """Inject a native concurrent workload at the last provider read before confirmation."""
+        nonlocal injected
+        result = original_read(*args, **kwargs)
+        if not injected:
+            cluster.objects.update(deepcopy(concurrent))
+            injected = True
+        return result
+
+    monkeypatch.setattr(CALLBACKS, RUNNER_READ_ATTRIBUTE, observe_runner)
+    code, result = _manager_cli_report(
+        cluster,
+        capsys,
+        action=DELETE_ACTION,
+        run_id=RUN_ID,
+        flags=(APPLY_ARGUMENT, CONFIRM_ARGUMENT, plan[FIELD_PLAN_DIGEST]),
+    )
+
+    assert injected
+    assert cluster.applied == cluster.deleted == []
+    assert cluster.objects == survivors
+    assert (code, result[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    )
+    assert not cluster.guard_held
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    (K8S_RUNNER.REGISTRATION_SECRET_SUFFIX, K8S_RUNNER.REGISTRY_SECRET_SUFFIX),
+    ids=("registration", "registry"),
+)
+def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    suffix: str,
+) -> None:
+    """A single old runtime Secret blocks absence after the Deployment is gone."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    runtime = _absent_manager_runtime(cluster, capsys, borrowed=True)
+    remnant = next(
+        key for key in runtime if key[0] == "secret" and key[2].endswith(suffix)
+    )
+    cluster.objects[remnant] = json.loads(runtime[remnant])
+    cluster.caller_namespace = ""
+    survivors = deepcopy(cluster.objects)
+
+    code, result = _manager_cli_report(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+
+    assert (code, result[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    )
+    assert cluster.objects == survivors
+    assert cluster.applied == cluster.deleted == []
+    assert not cluster.guard_held
+
+
+def test_runner_runtime_identities_preserve_manager_cleanup_order() -> None:
+    """The shared runtime inventory removes the workload before its credentials."""
+    assert RUNNER_RUNTIME.runner_runtime_identities(RUNNER_DESCRIPTION) == (
+        (RUNTIME_DEPLOYMENT_KIND, RUNNER_DESCRIPTION),
+        (
+            RUNTIME_SECRET_KIND,
+            RUNNER_DESCRIPTION + RUNNER_RUNTIME.REGISTRATION_SECRET_SUFFIX,
+        ),
+        (
+            RUNTIME_SECRET_KIND,
+            RUNNER_DESCRIPTION + RUNNER_RUNTIME.REGISTRY_SECRET_SUFFIX,
+        ),
+    )

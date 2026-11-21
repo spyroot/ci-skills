@@ -9,6 +9,12 @@ from __future__ import annotations
 
 from typing import ClassVar, Final, Optional
 
+from lib.python.core.abstract.callback import (
+    AbstractCallback,
+    DeferredCallback,
+    LocalCallback,
+)
+from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.kubernetes import (
     K8SCallback,
@@ -16,20 +22,26 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesService,
 )
 from lib.python.core.kubernetes.objects import KubernetesObject
+from lib.python.core.kubernetes.resources import (
+    MANAGER_LABEL,
+    MANAGER_VALUE,
+    OPERATION_LABEL,
+)
 from lib.python.core.kubernetes.run_scope import (
+    RUN_ID_LABEL,
     OpenRunScope,
     RunScope,
     RunScopeAction,
+    validate_namespace,
 )
 from lib.python.core.kubernetes.runner import (
-    REGISTRY_SECRET_SUFFIX,
     DeleteRunner,
     DeployRunner,
     PullImage,
 )
 from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
 from lib.python.core.kubernetes.scc_access import role_binding_document
-from lib.python.core.runner import REGISTRATION_SECRET_SUFFIX, RunnerAction
+from lib.python.core.runner import RunnerAction, runner_runtime_identities
 from lib.python.core.runner_identity import NameSource, ResolvedName
 from lib.python.core.runner_scope import (
     ScopeObservation,
@@ -37,7 +49,8 @@ from lib.python.core.runner_scope import (
     ScopeSource,
     ScopeState,
 )
-from lib.python.sys.status import PASS
+from lib.python.core.runtime import error_class
+from lib.python.sys.status import NO_OP, PASS
 
 from .action import (
     MANAGER_ROLE,
@@ -47,6 +60,91 @@ from .action import (
 )
 
 MANAGER_SCOPE_NOT_UNIQUE: Final = "runner_manager_scope_not_unique"
+_SECRET_COLUMNS: Final = (
+    "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,UID:.metadata.uid"
+)
+
+
+def _run_secret_remnants(
+    service: KubernetesService, run_id: str, names: set[str]
+) -> bool:
+    selector = ",".join(
+        (
+            f"{MANAGER_LABEL}={MANAGER_VALUE}",
+            f"{OPERATION_LABEL}={run_id}",
+            f"{RUN_ID_LABEL}={run_id}",
+        )
+    )
+    result = service.command(
+        "get",
+        "secrets",
+        "--all-namespaces",
+        "-l",
+        selector,
+        "-o",
+        _SECRET_COLUMNS,
+        "--no-headers",
+    )
+    if result.returncode:
+        raise KubernetesError(error_class(result))
+    seen: set[tuple[str, str]] = set()
+    remnant = False
+    for line in result.stdout.splitlines():
+        columns = line.split()
+        if len(columns) != 3:
+            raise KubernetesError("runner_manager_secret_metadata_invalid")
+        namespace, name, uid = columns
+        key = (namespace, name)
+        try:
+            validate_namespace(namespace)
+        except ValueError:
+            raise KubernetesError("runner_manager_secret_metadata_invalid") from None
+        if (
+            key in seen
+            or name == "<none>"
+            or uid == "<none>"
+            or any(not char.isascii() or not char.isprintable() for char in name + uid)
+        ):
+            raise KubernetesError("runner_manager_secret_metadata_invalid")
+        seen.add(key)
+        remnant |= name in names
+    return remnant
+
+
+def _require_manager_resources_absent(
+    service: KubernetesService, action: ManagerWorkloadAction, scope: RunScope
+) -> None:
+    workflow = action.workflow
+    names = {scope.name(MANAGER_ROLE), action.runner(scope).name}
+    resources = {
+        identity for name in names for identity in runner_runtime_identities(name)
+    }
+    binding = KubernetesObject(role_binding_document(workflow.scc_access(), scope))
+    resources.add(("RoleBinding", binding.name))
+    for kind, name in sorted(resources):
+        if service.read(kind, name, scope.namespace) is not None:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+    secret_names = {name for kind, name in resources if kind == "Secret"}
+    if not getattr(workflow.args, "namespace", None) and _run_secret_remnants(
+        service, scope.run_id, secret_names
+    ):
+        raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+
+
+def present_manager_cleanup(
+    callback: AbstractCallback[GitLabRunnerManagerState, SkillAction],
+) -> DeferredCallback[GitLabRunnerManagerState, SkillAction]:
+    """Defer each existing shared mutation until the confirmed scope is known.
+
+    :param callback: Existing ordered SCC or namespace cleanup callback.
+    :returns: Original callback for a present scope, or an empty local callback.
+    """
+    return DeferredCallback(
+        callback.action,
+        lambda state: (
+            callback if state.found_scopes else LocalCallback(callback.action)
+        ),
+    )
 
 
 def resolve_manager_name(
@@ -239,21 +337,7 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
         namespace = self.kubernetes.read("Namespace", scope.namespace, "")
         if scope.owns_namespace and namespace is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
-        names = {scope.name(MANAGER_ROLE), self.action.runner(scope).name}
-        resources = {
-            (kind, name + suffix)
-            for name in names
-            for kind, suffix in (
-                ("Deployment", ""),
-                ("Secret", REGISTRATION_SECRET_SUFFIX),
-                ("Secret", REGISTRY_SECRET_SUFFIX),
-            )
-        }
-        binding = KubernetesObject(role_binding_document(workflow.scc_access(), scope))
-        resources.add(("RoleBinding", binding.name))
-        for kind, name in sorted(resources):
-            if self.kubernetes.read(kind, name, scope.namespace) is not None:
-                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        _require_manager_resources_absent(self.kubernetes, self.action, scope)
         if namespace is None and scope.owns_namespace:
             state.runner_scopes[scope_key(ScopePurpose.MANAGER, scope.namespace)] = (
                 ScopeObservation(
@@ -387,6 +471,13 @@ class DeleteManagerRunner(ScopedRunnerCallback):
 
     child_type = DeleteRunner
 
+    def run(self) -> JSONObject:
+        """Run shared deletion only for a scope that was present at confirmation.
+
+        :returns: Native deletion evidence, or empty evidence before absent recheck.
+        """
+        return super().run() if self.manager_state.found_scopes else {}
+
 
 def workload_action(workflow: GitLabRunnerManagerAction) -> ManagerWorkloadAction:
     """Return the one typed action shared by manager workload callbacks.
@@ -413,6 +504,13 @@ class ObserveManagerNamespace(K8SCallback[ManagerWorkloadAction]):
         previous = self.state.runner_scopes[
             scope_key(ScopePurpose.MANAGER, scope.namespace)
         ]
+        absent = not self.state.found_scopes
+        if absent:
+            if self.state.resolved_run_id != scope.run_id or RunScope.find_all(
+                self.kubernetes, scope.run_id
+            ):
+                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+            _require_manager_resources_absent(self.kubernetes, self.action, scope)
         observed = observe_namespace(
             self.state,
             self.kubernetes,
@@ -428,4 +526,9 @@ class ObserveManagerNamespace(K8SCallback[ManagerWorkloadAction]):
             and observed.state == ScopeState.PRESENT
         ):
             raise KubernetesError("runner_namespace_cleanup_not_absent")
-        return {"verified": True, "namespace": scope.namespace}
+        if absent and observed != previous:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        result: dict[str, str | bool] = {"verified": True, "namespace": scope.namespace}
+        if absent:
+            result["action"] = NO_OP
+        return result
