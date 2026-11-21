@@ -159,10 +159,42 @@ sequenceDiagram
 | T2 Kubernetes credential | `[kubernetes]` kubeconfig | Namespace, Secret, ConfigMap, Helm, Pod reads | File |
 | T3 Agent token | `POST /projects/ID/cluster_agents/AGENT_ID/tokens` | agentk connection to KAS | Secret key `token` |
 
-T3 never appears in argv, Helm values, Helm release storage, reports, receipts or logs. The result records only the
-token ID (`registration_credential_id`), the Secret name and UID (`credential_resource_name`,
-`credential_resource_uid`) and the connected Pods. GraphQL `clusterAgents.tokens.lastUsedAt` and active
-`connections` prove that agentk used T3.
+T3 never appears in argv, Helm values, Helm release storage, reports, receipts or logs. `gitlab_agent.py --help`
+lists the same path under `Credentials`, and `--describe` returns it as field `credentials`.
+
+Each result record carries `credentials`, built from this invocation's observations:
+
+| Field | Content |
+| --- | --- |
+| `gitlab.calls` | Every request sent with T1, in order: method and path without query string |
+| `kubernetes.created_objects` | Objects this invocation created with T2: kind, name, namespace, UID |
+| `agent_credential` | T3 `state` (`PLANNED`, `PRESENT`, `ABSENT`), ID, Secret `storage`, `consumers` |
+
+Repeat connect (`NO_OP`) on `hott/test`, run `efc9e7db47ff427bbc53df1978834563`:
+
+```json
+{
+  "gitlab": {"table": "gitlab_private", "calls": [
+    {"method": "GET", "endpoint": "user"},
+    {"method": "GET", "endpoint": "projects/hott%2Ftest"},
+    {"method": "GET", "endpoint": "projects/123"},
+    {"method": "GET", "endpoint": "metadata"},
+    {"method": "GET", "endpoint": "projects/123/cluster_agents/1/tokens/1"},
+    {"method": "GET", "endpoint": "projects/123/cluster_agents/1/tokens"},
+    {"method": "GET", "endpoint": "projects/123"},
+    {"method": "GET", "endpoint": "projects/123/cluster_agents/1"},
+    {"method": "POST", "endpoint": "graphql"}]},
+  "kubernetes": {"table": "kubernetes", "created_objects": []},
+  "agent_credential": {"state": "PRESENT", "id": 1, "name": "test-agent-token-64d9936f4e4c4c64", "created": false,
+    "storage": {"kind": "Secret", "namespace": "test-64d9936f4e4c4c64a9f7",
+      "name": "test-agent-token-64d9936f4e4c4c64", "uid": "af4643c3-8637-4ff3-afdb-cce10f545673", "key": "token"},
+    "consumers": [
+      {"connection_id": "5964489850388898347", "pod_name": "test-agent-64d9936f4e4c4c64-v2-fcc7b988c-tf77w",
+        "pod_uid": "47c956b5-ea02-4507-ae9f-8594edd8f1f5"},
+      {"connection_id": "4355863225129730728", "pod_name": "test-agent-64d9936f4e4c4c64-v2-fcc7b988c-b2v55",
+        "pod_uid": "436878ac-1cd3-4077-b220-65f5f6dd48c1"}]}
+}
+```
 
 Live read on 2026-11-21, project `hott/test`, run `efc9e7db47ff427bbc53df1978834563`:
 
