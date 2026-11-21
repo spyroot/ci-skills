@@ -2080,6 +2080,7 @@ def _chain_smoke_cleanup_verified(
     plan = _mapping(receipt.get("plan"))
     toolbox = _mapping(plan.get("toolbox"))
     scope = _mapping(_mapping(plan.get("runner")).get("run_scope"))
+    kubernetes = _mapping(plan.get("kubernetes"))
     records = receipt.get("records")
     if not isinstance(records, list):
         return False
@@ -2089,6 +2090,12 @@ def _chain_smoke_cleanup_verified(
     )
     access = _mapping(_mapping(receipt.get("access")).get("gitlab_runner"))
     host = receipt.get(EXECUTION_HOST_FIELD) or access.get(EXECUTION_HOST_FIELD)
+    gitlab_project = _mapping(access.get("target")).get("id")
+    authorities = {
+        "gitlab_origin": access.get("origin"),
+        "harbor_origin": toolbox.get("origin"),
+        "kubernetes_server": kubernetes.get("server"),
+    }
     namespace = receipt.get("namespace")
     scopes_list = scopes.get("scopes")
     namespace_uid = _owned_manager_namespace_uid(scopes_list, namespace)
@@ -2100,6 +2107,13 @@ def _chain_smoke_cleanup_verified(
     baseline = _mapping(cleanup.get("preflight"))
     if (
         not host
+        or any(
+            not isinstance(value, str) or not value or cleanup.get(key) != value
+            for key, value in authorities.items()
+        )
+        or type(gitlab_project) is not int
+        or gitlab_project <= 0
+        or cleanup.get("gitlab_project_id") != gitlab_project
         or not _smoke_cleanup_matches_execution(
             {**receipt, EXECUTION_HOST_FIELD: host},
             cleanup,

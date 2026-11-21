@@ -2043,6 +2043,9 @@ def copy_chain_baseline() -> str:
         retention=ScopeRetention.RETAINED,
     )
     plan = chain["plan"]
+    plan["kubernetes"] = {
+        key: chain["access"]["kubernetes"][key] for key in ("server", "context")
+    }
     plan["toolbox"].update(
         mode="copy",
         source_image=source,
@@ -2087,6 +2090,10 @@ def copy_chain_baseline() -> str:
         "tested_revision": chain["tested_revision"],
         "skill_digest": chain["skill"][DIGEST_VALUE_KEY],
         "execution_host": access["execution_host"],
+        "gitlab_origin": access["origin"],
+        "gitlab_project_id": access["target"]["id"],
+        "harbor_origin": plan["toolbox"]["origin"],
+        "kubernetes_server": plan["kubernetes"]["server"],
         "preflight": {
             "namespace": namespace,
             "namespace_absent": True,
@@ -2194,6 +2201,30 @@ def copy_chain_baseline() -> str:
             False,
             SMOKE_CLEANUP_REASON,
             id="preexisting-namespace",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "gitlab_origin"),
+            "https://other-gitlab.example.test",
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-other-gitlab",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "gitlab_project_id"),
+            999,
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-other-project",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "harbor_origin"),
+            "https://other-harbor.example.test",
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-other-harbor",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "kubernetes_server"),
+            "https://other-cluster.example.test:6443",
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-other-cluster",
         ),
         pytest.param(
             (COPY_CLEANUP_CALLBACK, "delete", "runner_id"),

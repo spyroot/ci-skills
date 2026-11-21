@@ -466,7 +466,7 @@ def test_probe_job_is_bounded_owned_and_pinned_to_selected_worker(
         "requests": {"cpu": "100m", "memory": "128Mi"},
         "limits": {"cpu": "1", "memory": "512Mi"},
     }
-    configmap = PODMAN.probe_configmap(scope)
+    configmap = PODMAN.probe_configmap(action, scope)
     assert configmap["immutable"] is True
     assert configmap["metadata"]["namespace"] == scope.namespace
     assert configmap["metadata"]["labels"] == dict(scope.labels)
