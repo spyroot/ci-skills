@@ -564,7 +564,7 @@
         "verify": {
           "mutates": false,
           "purpose": "Verify actual selected-project CI access through that Agent.",
-          "read_back": "Match native project/job/pipeline/consumer SHA and producer bytes to the installed candidate, real KAS context and selected cluster UID.",
+          "read_back": "Match native project/job/pipeline/consumer SHA and the staged .gitlab-ci.yml, ci_access_probe.py and ci_access_proof.py bytes to the installed candidate, real KAS context and selected cluster UID.",
           "required_options": [
             "--run-id",
             "--job-url"

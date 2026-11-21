@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.gitlab.cluster_agent.ci_access_proof import (
@@ -32,9 +33,22 @@ _PROOF_SCHEMA = "gitlab-agent-ci-access.schema.json"
 _GIT_SHA = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _MAX_SAFE_ID = 2**53 - 1
-_PRODUCER_KEYS = ("definition_sha256", "probe_sha256", "library_sha256")
-_DEFINITION_PATH = ".gitlab-ci.yml"
-_PORTABLE_LIBRARY = Path(__file__).with_name("ci_access_proof.py")
+# Consumer repository paths of the staged proof files; the probe reads the
+# definition at the job's working directory and imports the library beside it.
+CI_ACCESS_DEFINITION = ".gitlab-ci.yml"
+CI_ACCESS_PROBE = "ci_access_probe.py"
+CI_ACCESS_LIBRARY = "ci_access_proof.py"
+# Installed file that the consumer stages as CI_ACCESS_DEFINITION.
+CI_ACCESS_JOB_SOURCE = "ci_access_job.yml"
+CI_ACCESS_KIT = Path(__file__).parent
+_STAGED_FILES = (
+    ("definition_sha256", CI_ACCESS_DEFINITION, CI_ACCESS_JOB_SOURCE),
+    ("probe_sha256", CI_ACCESS_PROBE, CI_ACCESS_PROBE),
+    ("library_sha256", CI_ACCESS_LIBRARY, CI_ACCESS_LIBRARY),
+)
+_PRODUCER_KEYS = tuple(key for key, _, _ in _STAGED_FILES)
+_DEFINITION_PATH = CI_ACCESS_DEFINITION
+_PORTABLE_LIBRARY = CI_ACCESS_KIT / CI_ACCESS_LIBRARY
 
 
 class CiAccessError(ValueError):
@@ -138,6 +152,24 @@ class VerifiedCiAccess:
     job_url: str
     artifact_sha256: str
     proof: JSONObject
+
+
+def staged_producers(kit: Path = CI_ACCESS_KIT) -> Mapping[str, ProducerBlob]:
+    """Identify the installed proof files a consumer stages at its repository root.
+
+    :param kit: Directory holding the installed definition, probe, and library.
+    :returns: Consumer path and digest of each trusted producer, keyed as in the artifact.
+    :raises CiAccessError: An installed producer file is missing or oversized.
+    """
+    try:
+        return MappingProxyType(
+            {
+                key: ProducerBlob(consumer, _producer_hash(kit / installed))
+                for key, consumer, installed in _STAGED_FILES
+            }
+        )
+    except ProofError:
+        raise CiAccessError("agent_ci_installed_producer_unavailable") from None
 
 
 def _valid_path(path: str) -> bool:

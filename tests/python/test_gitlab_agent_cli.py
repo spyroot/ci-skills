@@ -6,7 +6,7 @@ import json
 from argparse import ArgumentParser
 from collections.abc import Mapping
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Final
 
 import pytest
@@ -21,6 +21,7 @@ BINDING = import_script_module("lib.python.core.project_binding")
 IDENTITY = import_script_module("lib.python.core.runner_identity")
 SCHEMA = import_script_module("lib.python.core.schema")
 SELECTION = import_script_module("lib.python.core.gitlab.cluster_agent.selection")
+CI_ACCESS = import_script_module("lib.python.core.gitlab.cluster_agent.ci_access")
 
 CONNECT: Final = "connect"
 VERIFY: Final = "verify"
@@ -60,6 +61,9 @@ CREDENTIALS_FIELD: Final = "credentials"
 CREDENTIALS_HEADING: Final = "Credentials:"
 DESCRIPTION_HEADING: Final = "Description:"
 EXAMPLES_HEADING: Final = "Examples:"
+PASS_STATUS: Final = "PASS"
+BLOCKED_STATUS: Final = "BLOCKED"
+UNAVAILABLE_KIT: Final = "agent_ci_installed_producer_unavailable"
 
 # Each valid invocation is immutable. Mutation cases change exactly one flag
 # on their own copy, with the same selected provider project in all cases.
@@ -374,3 +378,69 @@ def test_command_without_catalog_credentials_has_no_credentials_block() -> None:
     assert DESCRIPTION_HEADING in help_text
     assert CREDENTIALS_HEADING not in help_text
     assert CREDENTIALS_FIELD not in contract
+
+
+def test_live_verify_hands_the_installed_producers_to_the_workflow(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify trusts the installed kit, in read mode, for the selected run and job."""
+    observed: dict[str, object] = {}
+    authorities = object()
+    outcome = object()
+
+    def workflow(*args: object, **kwargs: object) -> object:
+        """Record what the command hands to the shared Agent workflow."""
+        observed.update(args=args, kwargs=kwargs)
+        return outcome
+
+    monkeypatch.setattr(
+        CLI,
+        "resolve_agent_target",
+        lambda *_args, **_kwargs: SimpleNamespace(project=PROJECT),
+    )
+    monkeypatch.setattr(CLI, "observe_authorities", lambda *_a, **_k: authorities)
+    monkeypatch.setattr(CLI, "run_agent_workflow", workflow)
+    monkeypatch.setattr(
+        CLI,
+        "agent_result",
+        lambda *args: {"kind": CLI.KIND, "status": PASS_STATUS, "inputs": len(args)},
+    )
+
+    code = CLI.main(
+        _argv(VERIFY, {PROJECT_ARG: PROJECT, RUN_ARG: RUN_ID, JOB_ARG: JOB_URL})
+        + [JSON_ARG]
+    )
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["status"] == PASS_STATUS
+    assert observed["args"][0] is authorities
+    assert observed["args"][1]["job_url"] == JOB_URL
+    assert observed["args"][2] == MODES.ActionMode.READ
+    assert dict(observed["kwargs"]["producers"]) == dict(CI_ACCESS.staged_producers())
+
+
+def test_live_verify_without_the_installed_kit_stops_before_provider_reads(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A copy missing a staged file reports one reason and opens no provider session."""
+
+    def missing() -> None:
+        """Fail the way an install without the CI access kit does."""
+        raise CI_ACCESS.CiAccessError(UNAVAILABLE_KIT)
+
+    def unreachable(*_args: object, **_kwargs: object) -> None:
+        """Fail the test if target resolution starts."""
+        raise AssertionError("provider target resolved")
+
+    monkeypatch.setattr(CLI, "staged_producers", missing)
+    monkeypatch.setattr(CLI, "resolve_agent_target", unreachable)
+
+    code = CLI.main(
+        _argv(VERIFY, {PROJECT_ARG: PROJECT, RUN_ARG: RUN_ID, JOB_ARG: JOB_URL})
+        + [JSON_ARG]
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert report["status"] == BLOCKED_STATUS
+    assert [error["reason"] for error in report["errors"]] == [UNAVAILABLE_KIT]

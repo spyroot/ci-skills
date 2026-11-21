@@ -363,8 +363,9 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "required_options": ["--run-id", "--job-url"],
                 "result_schema": "schemas/results/gitlab-agent.schema.json",
                 "mutates": False,
-                "read_back": "Match native project/job/pipeline/consumer SHA and producer bytes "
-                "to the installed candidate, real KAS context and selected cluster UID.",
+                "read_back": "Match native project/job/pipeline/consumer SHA and the staged "
+                ".gitlab-ci.yml, ci_access_probe.py and ci_access_proof.py bytes to the "
+                "installed candidate, real KAS context and selected cluster UID.",
             },
             "delete": {
                 "purpose": "Remove only exact run-owned native identities.",
@@ -400,6 +401,13 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "T3 Agent token: GitLab returns it once; the command writes it only to Secret key "
                 "token; agentk mounts that Secret and connects to KAS. T3 never appears in argv, "
                 "Helm values, reports or logs."
+            ),
+            (
+                "T4 CI job credential (verify): GitLab gives the consumer proof job a KUBECONFIG "
+                "with context <project path>:<agent name> that authenticates to KAS with a token "
+                "built from the job's CI_JOB_TOKEN. The command never reads T4; the job artifact "
+                "agent-access.json records kubeconfig_source gitlab_ci, the context and the KAS "
+                "proxy URL."
             ),
             (
                 "Flow: T1 -> GitLab creates T3 -> T2 stores T3 in the Secret -> agentk Pod -> KAS. "

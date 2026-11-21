@@ -1,4 +1,9 @@
-"""Write the selected project's Agent CI proof artifact."""
+"""Write the selected project's Agent CI proof artifact.
+
+The consumer repository holds a byte copy of this file at its root as
+``ci_access_probe.py``, beside ``ci_access_proof.py``; the staged
+``.gitlab-ci.yml`` (from ``ci_access_job.yml``) runs it.
+"""
 
 from __future__ import annotations
 

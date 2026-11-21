@@ -5,6 +5,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import Final
@@ -12,12 +15,13 @@ from unittest.mock import Mock, call, create_autospec
 from urllib.parse import quote
 
 import pytest
+import yaml
 from conftest import import_script_module
 
 CI_ACCESS = import_script_module("lib.python.core.gitlab.cluster_agent.ci_access")
-PROOF = import_script_module("lib.python.core.gitlab.cluster_agent.ci_access_proof")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
+SCHEMA = import_script_module("lib.python.core.schema")
 
 HOST: Final = "gitlab.example.test"
 PROJECT_PATH: Final = "consumer/native-repo"
@@ -40,13 +44,39 @@ BASE: Final = f"projects/{PROJECT_ID}"
 JOB_ROUTE: Final = f"{BASE}/jobs/{JOB_ID}"
 PIPELINE_ROUTE: Final = f"{BASE}/pipelines/{PIPELINE_ID}"
 ARTIFACT_ROUTE: Final = f"{JOB_ROUTE}/artifacts/{CI_ACCESS.CI_ACCESS_ARTIFACT}"
-DEFINITION: Final = ".gitlab-ci.yml"
-PROBE: Final = "probe.py"
-LIBRARY: Final = "ci_access_proof.py"
+DEFINITION: Final = CI_ACCESS.CI_ACCESS_DEFINITION
+PROBE: Final = CI_ACCESS.CI_ACCESS_PROBE
+LIBRARY: Final = CI_ACCESS.CI_ACCESS_LIBRARY
+KIT: Final = CI_ACCESS.CI_ACCESS_KIT
+# Installed file name of each staged consumer path.
+INSTALLED: Final = MappingProxyType(
+    {DEFINITION: CI_ACCESS.CI_ACCESS_JOB_SOURCE, PROBE: PROBE, LIBRARY: LIBRARY}
+)
+PRODUCER_KEYS: Final = ("definition_sha256", "probe_sha256", "library_sha256")
 PICKED_URL: Final = "selected_url"
 NATIVE: Final = "native"
 ARTIFACT: Final = "artifact"
 ENCODING: Final = "base64"
+UNAVAILABLE_KIT: Final = "agent_ci_installed_producer_unavailable"
+NO_KUBECONFIG: Final = "gitlab_kubeconfig_unavailable"
+PROOF_SCHEMA: Final = "gitlab-agent-ci-access.schema.json"
+JOB_TIMEOUT: Final = 30
+# Pipeline variables and GitLab job variables the staged job reads; KUBECONFIG is absent.
+JOB_VARIABLES: Final = MappingProxyType(
+    {
+        "CI_AGENT_ID": str(AGENT_ID),
+        "CI_AGENT_RUN_ID": RUN_ID,
+        "CI_AGENT_NAME": AGENT_NAME,
+        "CI_AGENT_NAMESPACE": NAMESPACE,
+        "CI_AGENT_EXPECTED_REVISION": SKILL_REVISION,
+        "CI_AGENT_EXPECTED_FUNCTIONAL_DIGEST": FUNCTIONAL_DIGEST,
+        "CI_PROJECT_PATH": PROJECT_PATH,
+        "CI_PROJECT_ID": str(PROJECT_ID),
+        "CI_PIPELINE_ID": str(PIPELINE_ID),
+        "CI_JOB_ID": str(JOB_ID),
+        "CI_COMMIT_SHA": CONSUMER_SHA,
+    }
+)
 
 
 def _encoded(content: bytes) -> str:
@@ -75,10 +105,9 @@ def _read_calls(session: SimpleNamespace) -> list[object]:
 @pytest.fixture(scope="module")
 def valid_wire() -> tuple[CI_ACCESS.ExpectedCiAccess, str]:
     """Supply immutable baseline replies and independently measured producer bytes."""
-    files = (
-        ("definition_sha256", DEFINITION, b"ci-agent-access: {}\n"),
-        ("probe_sha256", PROBE, b"# selected project probe\n"),
-        ("library_sha256", LIBRARY, Path(PROOF.__file__).read_bytes()),
+    files = tuple(
+        (key, path, (KIT / INSTALLED[path]).read_bytes())
+        for key, path in zip(PRODUCER_KEYS, (DEFINITION, PROBE, LIBRARY), strict=True)
     )
     producers = MappingProxyType(
         {
@@ -272,3 +301,69 @@ def test_agent_ci_access_rejects_one_native_or_artifact_mismatch(
 
     assert str(rejected.value) == reason
     assert api.mock_calls == _read_calls(session)[:reads]
+
+
+def test_staged_producers_name_consumer_paths_and_installed_bytes(
+    valid_wire: tuple[CI_ACCESS.ExpectedCiAccess, str],
+) -> None:
+    """Verify trusts the installed kit bytes at the paths the consumer stages."""
+    expected, _ = valid_wire
+
+    assert dict(CI_ACCESS.staged_producers()) == dict(expected.producers)
+
+
+@pytest.mark.parametrize("missing", tuple(INSTALLED.values()))
+def test_staged_producers_fail_closed_without_one_installed_file(
+    tmp_path: Path, missing: str
+) -> None:
+    """A copy missing any kit file reports one reason instead of a partial trust set."""
+    for name in INSTALLED.values():
+        if name != missing:
+            (tmp_path / name).write_bytes((KIT / name).read_bytes())
+
+    with pytest.raises(CI_ACCESS.CiAccessError) as rejected:
+        CI_ACCESS.staged_producers(tmp_path)
+
+    assert str(rejected.value) == UNAVAILABLE_KIT
+
+
+def test_staged_job_writes_the_artifact_verify_reads(tmp_path: Path) -> None:
+    """Run the shipped job script in a consumer layout and read its artifact.
+
+    The job has no Agent kubeconfig here, so the probe reports BLOCKED, but the
+    artifact still carries the producer digests verify compares with the kit.
+    """
+    for path, name in INSTALLED.items():
+        (tmp_path / path).write_bytes((KIT / name).read_bytes())
+    definition = yaml.safe_load((tmp_path / DEFINITION).read_text(encoding="utf-8"))
+    job = definition[CI_ACCESS.CI_ACCESS_JOB]
+    environment = {
+        "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath)),
+        **JOB_VARIABLES,
+    }
+
+    exits = [
+        subprocess.run(
+            ["/bin/sh", "-c", line],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=JOB_TIMEOUT,
+        ).returncode
+        for line in job["script"]
+    ]
+
+    assert exits == [1]
+    assert job["artifacts"]["paths"] == [CI_ACCESS.CI_ACCESS_ARTIFACT]
+    artifact = json.loads(
+        (tmp_path / CI_ACCESS.CI_ACCESS_ARTIFACT).read_text(encoding="utf-8")
+    )
+    SCHEMA.validate_specification(artifact, PROOF_SCHEMA)
+    assert artifact["status"] == "BLOCKED"
+    assert [error["code"] for error in artifact["errors"]] == [NO_KUBECONFIG]
+    assert artifact["agent_id"] == AGENT_ID
+    assert artifact["producer"] == {
+        key: blob.sha256 for key, blob in CI_ACCESS.staged_producers().items()
+    }

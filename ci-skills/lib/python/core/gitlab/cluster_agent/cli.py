@@ -25,6 +25,7 @@ from lib.python.core.gitlab.cluster_agent.authority import (
     observe_authorities,
     resolve_agent_target,
 )
+from lib.python.core.gitlab.cluster_agent.ci_access import staged_producers
 from lib.python.core.gitlab.cluster_agent.receipt import agent_result
 from lib.python.core.gitlab.cluster_agent.terms import VERIFY
 from lib.python.core.gitlab.cluster_agent.workflow import run_agent_workflow
@@ -147,8 +148,7 @@ def offline_result(args: Namespace) -> JSONObject:
 
 
 def _live_result(args: Namespace, mode: ActionMode) -> JSONObject:
-    if args.action == VERIFY:
-        raise ValueError("agent_ci_trusted_producers_missing")
+    producers = staged_producers() if args.action == VERIFY else None
     deadline = RequestDeadline(time.monotonic() + args.timeout)
     selected = deadline.call(
         resolve_agent_target,
@@ -168,6 +168,7 @@ def _live_result(args: Namespace, mode: ActionMode) -> JSONObject:
         mode,
         deadline=deadline,
         confirmation=args.confirm_plan,
+        producers=producers,
     )
     return agent_result(authorities, intent, outcome)
 

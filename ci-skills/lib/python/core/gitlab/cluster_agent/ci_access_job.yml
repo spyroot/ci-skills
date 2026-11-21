@@ -1,0 +1,12 @@
+ci-agent-access:
+  image: $CI_AGENT_PROBE_IMAGE
+  tags:
+    - $CI_AGENT_RUNNER_TAG
+  rules:
+    - if: $CI_AGENT_ID && $CI_AGENT_RUN_ID && $CI_AGENT_PROBE_IMAGE && $CI_AGENT_RUNNER_TAG
+  script:
+    - python3 ci_access_probe.py "$CI_AGENT_ID"
+  artifacts:
+    when: always
+    paths:
+      - agent-access.json

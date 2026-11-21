@@ -1,7 +1,7 @@
 # GitLab Agent for Kubernetes: connectivity and attach
 
 Use `gitlab_agent.py connect|verify|delete` to register and install an owned Agent, prove selected-project CI access,
-or remove that owned run. The [D2/D3 contract](../../docs/phases/CI14-GITLAB-CONNECTIONS.md#d2d3-resolution-for-pr-002)
+or remove that owned run. The [D2/D3 contract](../../docs/phases/CI14-GITLAB-CONNECTIONS.md#contracts-and-open-decisions)
 defines ownership and proof; the [active plan](../../docs/exec-plans/active/ci14-gitlab-connections.md) tracks qualification.
 Caller naming connects the actual consumer project to its selected cluster; it does not connect this skill's repository.
 
@@ -128,6 +128,57 @@ claimed absent. Qualification separately repeats exact original receipt IDs/UIDs
 The selected configuration project's own CI already has access; this slice adds no `--ci-access-project` or sharing
 configuration commit. Additional project sharing remains outside this command.
 
+## CI access proof job
+
+`verify` trusts three files of the installed skill, in `lib/python/core/gitlab/cluster_agent/`. We stage byte copies
+at the root of a branch in the configuration project and run one pipeline there. Verify hashes the installed files
+and requires the same bytes at the job's commit and in the job artifact.
+
+| Installed file | Path in the consumer commit | Role |
+| --- | --- | --- |
+| `ci_access_job.yml` | `.gitlab-ci.yml` | Job `ci-agent-access`; artifact `agent-access.json` |
+| `ci_access_probe.py` | `ci_access_probe.py` | Runs the proof with the Agent ID |
+| `ci_access_proof.py` | `ci_access_proof.py` | Reads the Agent context, cluster UID and namespace UID |
+
+The job definition has no environment value in it. The pipeline supplies every value as a pipeline variable; the
+job runs only when the first four are set:
+
+| Variable | Value | Source |
+| --- | --- | --- |
+| `CI_AGENT_ID` | Native Agent ID | connect result `records[0].ownership.agent_id` |
+| `CI_AGENT_RUN_ID` | Run ID | connect result `records[0].ownership.run_id` |
+| `CI_AGENT_PROBE_IMAGE` | Image with `python3` 3.11 or newer and `kubectl` | Our choice |
+| `CI_AGENT_RUNNER_TAG` | Tag of a runner that may run the job | Our choice |
+| `CI_AGENT_NAME` | Agent name | connect result `records[0].ownership.agent_name` |
+| `CI_AGENT_NAMESPACE` | Installation namespace | connect result `records[0].ownership.namespace` |
+| `CI_AGENT_EXPECTED_REVISION` | Installed revision | `skill.revision.value` in a result of the verifying copy |
+| `CI_AGENT_EXPECTED_FUNCTIONAL_DIGEST` | Installed functional digest | `skill.functional_digest` of the same result |
+
+Example, project `hott/test` (ID 123), from a clone of it, with the installed skill at `$SKILL`:
+
+```bash
+KIT="$SKILL/lib/python/core/gitlab/cluster_agent"
+git switch -c agent-ci-proof
+cp "$KIT/ci_access_job.yml" .gitlab-ci.yml
+cp "$KIT/ci_access_probe.py" "$KIT/ci_access_proof.py" .
+git add .gitlab-ci.yml ci_access_probe.py ci_access_proof.py
+git commit -m "Stage the Agent CI access proof"
+git push origin agent-ci-proof
+```
+
+The push starts no job because the variables are unset. `POST projects/123/pipeline` with `ref` `agent-ci-proof`
+and the eight variables starts it. When job `ci-agent-access` succeeds, pass its URL:
+
+```bash
+gitlab_agent.py verify --project hott/test --run-id RUN_ID \
+  --job-url https://gitlab.example/hott/test/-/jobs/JOB_ID --receipt-out agent-verify.json --json
+```
+
+Verify reads the job, its pipeline and commit, the artifact and the three files at that commit through the GitLab API,
+then compares them with the run record, the KAS proxy URL from GitLab metadata, the cluster and namespace UIDs read
+with T2, and the installed revision and functional digest. Any difference is BLOCKED with one reason code, for example
+`agent_ci_producer_blob_mismatch` when a staged file differs from the installed one.
+
 ## Runtime objects and delete
 
 After agentk connects, the Agent workload has created two objects that the chart does not list: the ReplicaSet that
@@ -172,6 +223,12 @@ sequenceDiagram
 | T1 GitLab token | `access_protocol.gitlab` ([access](access.md)) | Project, KAS, register, token, GraphQL | Source |
 | T2 Kubernetes credential | `access_protocol.kubernetes` | Namespace, Secret, ConfigMap, Helm, Pod reads | Source |
 | T3 Agent token | `POST /projects/ID/cluster_agents/AGENT_ID/tokens` | agentk connection to KAS | Secret key `token` |
+| T4 CI job credential | Job `KUBECONFIG` from GitLab, context `<project>:<agent>` | Proof job via KAS | Job only |
+
+T4 authenticates to KAS with a token built from the job's `CI_JOB_TOKEN`. Source:
+`user/clusters/agent/ci_cd_workflow`.
+The command never reads T4. The job artifact records `kubeconfig_source` `gitlab_ci`, `agent_context` and
+`kas_proxy_url`, and a verify record carries that artifact under `ci_access.proof`.
 
 T3 never appears in argv, Helm values, Helm release storage, reports, receipts or logs. `gitlab_agent.py --help`
 lists the same path under `Credentials`, and `--describe` returns it as field `credentials`.
