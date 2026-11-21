@@ -17,7 +17,14 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Final
 from urllib.parse import urlsplit
+
+# Consumer repository paths the job reads: the CI definition at the working
+# directory and this library beside the probe; the job uploads the artifact.
+CI_ACCESS_DEFINITION: Final = ".gitlab-ci.yml"
+CI_ACCESS_LIBRARY: Final = "ci_access_proof.py"
+CI_ACCESS_ARTIFACT: Final = "agent-access.json"
 
 _NAMESPACE = re.compile(r"[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?")
 _PROJECT_PATH = re.compile(r"[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)+")

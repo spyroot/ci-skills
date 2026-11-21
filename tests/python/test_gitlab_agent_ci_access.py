@@ -59,6 +59,13 @@ ARTIFACT: Final = "artifact"
 ENCODING: Final = "base64"
 UNAVAILABLE_KIT: Final = "agent_ci_installed_producer_unavailable"
 NO_KUBECONFIG: Final = "gitlab_kubeconfig_unavailable"
+CONTEXT_MISMATCH: Final = "agent_context_mismatch"
+CLUSTER_NAMESPACE: Final = "kube-system"
+KUBECTL: Final = "kubectl"
+KUBECONFIG_VARIABLE: Final = "KUBECONFIG"
+KUBECONFIG_FILE: Final = "job-kubeconfig"
+CONSUMER_DIR: Final = "consumer"
+TOOLS_DIR: Final = "bin"
 PROOF_SCHEMA: Final = "gitlab-agent-ci-access.schema.json"
 JOB_TIMEOUT: Final = 30
 # Pipeline variables and GitLab job variables the staged job reads; KUBECONFIG is absent.
@@ -327,25 +334,73 @@ def test_staged_producers_fail_closed_without_one_installed_file(
     assert str(rejected.value) == UNAVAILABLE_KIT
 
 
-def test_staged_job_writes_the_artifact_verify_reads(tmp_path: Path) -> None:
+def _fake_kubectl(directory: Path, context: str) -> None:
+    """Write a kubectl that answers the probe's three reads like the Agent proxy.
+
+    :param directory: Directory placed first on the job's PATH.
+    :param context: Context name the fake reports as current.
+    """
+    script = directory / KUBECTL
+    script.write_text(
+        "#!/bin/sh\n"
+        'case " $* " in\n'
+        f"  *' view '*) printf '%s\\n%s' '{context}' '{KAS_PROXY}' ;;\n"
+        f"  *' namespace {CLUSTER_NAMESPACE} '*) "
+        f"printf '%s\\n%s' '{CLUSTER_NAMESPACE}' '{CLUSTER_UID}' ;;\n"
+        f"  *' namespace {NAMESPACE} '*) printf '%s\\n%s' '{NAMESPACE}' '{NAMESPACE_UID}' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    ("client", "code", "status", "errors"),
+    (
+        (None, 1, "BLOCKED", [NO_KUBECONFIG]),
+        (f"{PROJECT_PATH}:{AGENT_NAME}", 0, "PASS", []),
+        (f"{PROJECT_PATH}:other-agent", 1, "BLOCKED", [CONTEXT_MISMATCH]),
+    ),
+    ids=("no-agent-kubeconfig", "agent-context", "other-context"),
+)
+def test_staged_job_writes_the_artifact_verify_reads(
+    tmp_path: Path,
+    client: str | None,
+    code: int,
+    status: str,
+    errors: list[str],
+) -> None:
     """Run the shipped job script in a consumer layout and read its artifact.
 
-    The job has no Agent kubeconfig here, so the probe reports BLOCKED, but the
-    artifact still carries the producer digests verify compares with the kit.
+    Without a kubeconfig the probe reports BLOCKED; with a kubectl answering for
+    the selected context it reports PASS with the context, proxy and UIDs. Every
+    artifact carries the producer digests verify compares with the kit.
     """
+    consumer = tmp_path / CONSUMER_DIR
+    tools = tmp_path / TOOLS_DIR
+    consumer.mkdir()
+    tools.mkdir()
     for path, name in INSTALLED.items():
-        (tmp_path / path).write_bytes((KIT / name).read_bytes())
-    definition = yaml.safe_load((tmp_path / DEFINITION).read_text(encoding="utf-8"))
+        (consumer / path).write_bytes((KIT / name).read_bytes())
+    definition = yaml.safe_load((consumer / DEFINITION).read_text(encoding="utf-8"))
     job = definition[CI_ACCESS.CI_ACCESS_JOB]
     environment = {
-        "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath)),
+        "PATH": os.pathsep.join(
+            (str(tools), str(Path(sys.executable).parent), os.defpath)
+        ),
         **JOB_VARIABLES,
     }
+    if client is not None:
+        _fake_kubectl(tools, client)
+        kubeconfig = tmp_path / KUBECONFIG_FILE
+        kubeconfig.write_text("", encoding="utf-8")
+        environment[KUBECONFIG_VARIABLE] = str(kubeconfig)
 
     exits = [
         subprocess.run(
             ["/bin/sh", "-c", line],
-            cwd=tmp_path,
+            cwd=consumer,
             env=environment,
             capture_output=True,
             text=True,
@@ -355,15 +410,22 @@ def test_staged_job_writes_the_artifact_verify_reads(tmp_path: Path) -> None:
         for line in job["script"]
     ]
 
-    assert exits == [1]
+    assert exits == [code]
     assert job["artifacts"]["paths"] == [CI_ACCESS.CI_ACCESS_ARTIFACT]
     artifact = json.loads(
-        (tmp_path / CI_ACCESS.CI_ACCESS_ARTIFACT).read_text(encoding="utf-8")
+        (consumer / CI_ACCESS.CI_ACCESS_ARTIFACT).read_text(encoding="utf-8")
     )
     SCHEMA.validate_specification(artifact, PROOF_SCHEMA)
-    assert artifact["status"] == "BLOCKED"
-    assert [error["code"] for error in artifact["errors"]] == [NO_KUBECONFIG]
+    assert artifact["status"] == status
+    assert [error["code"] for error in artifact["errors"]] == errors
     assert artifact["agent_id"] == AGENT_ID
     assert artifact["producer"] == {
         key: blob.sha256 for key, blob in CI_ACCESS.staged_producers().items()
     }
+    if status == "PASS":
+        assert (
+            artifact["agent_context"],
+            artifact["kas_proxy_url"],
+            artifact["cluster_uid"],
+            artifact["namespace_uid"],
+        ) == (client, KAS_PROXY, CLUSTER_UID, NAMESPACE_UID)

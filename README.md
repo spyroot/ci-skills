@@ -757,9 +757,12 @@ The GitLab Agent series is five receipts from one run of one installed copy, plu
 3. `gitlab_agent.py delete --run-id RUN_ID --agent-name AGENT_NAME` with live plan and confirmation, receipt
    `agent-delete-applied.json`, then
    `python tools/qualify_agent_cleanup.py observe --skill SKILL --connect-receipt agent-connect-applied.json
-   --out after.json`.
+   --out after.json`, with the `--binding`, `--gitlab` or `--gitlab-profile` the series used.
 4. Repeat the confirmed delete for `agent-delete-no-op.json`, observe again into `repeat.json`, then
-   `python tools/qualify_agent_cleanup.py attach --connect-receipt agent-connect-applied.json --after after.json
-   --repeat repeat.json --receipt agent-delete-no-op.json --out agent-delete-no-op-with-cleanup.json`.
-5. Commit the four receipts and the attached NO_OP receipt; `observe` refuses while the Agent, its token or any
-   run-created object still exists, and `check_agent_series` rejects the series without the record.
+   `python tools/qualify_agent_cleanup.py attach --skill SKILL --connect-receipt agent-connect-applied.json
+   --after after.json --repeat repeat.json --receipt agent-delete-no-op.json
+   --out agent-delete-no-op-with-cleanup.json`.
+5. Commit the four receipts and the attached NO_OP receipt. `observe` refuses another installed copy and refuses
+   while the Agent, its token or any run-created object in the ownership record still exists; `attach` requires the
+   `after` read before the repeat receipt and the `repeat` read after it; `check_agent_series` rejects the series
+   without the record.

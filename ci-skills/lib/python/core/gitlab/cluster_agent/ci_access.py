@@ -10,9 +10,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
+from typing import Final
 
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.gitlab.cluster_agent.ci_access_proof import (
+    CI_ACCESS_ARTIFACT,
+    CI_ACCESS_DEFINITION,
+    CI_ACCESS_LIBRARY,
     ProofError,
     _producer_hash,
 )
@@ -27,28 +31,23 @@ from lib.python.core.gitlab.job_read import gitlab_job_reference
 from lib.python.core.json_types import JSONObject, JSONValue, json_integer, json_object
 from lib.python.core.schema import validate_specification
 
-CI_ACCESS_ARTIFACT = "agent-access.json"
-CI_ACCESS_JOB = "ci-agent-access"
+CI_ACCESS_JOB: Final = "ci-agent-access"
 _PROOF_SCHEMA = "gitlab-agent-ci-access.schema.json"
 _GIT_SHA = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _MAX_SAFE_ID = 2**53 - 1
-# Consumer repository paths of the staged proof files; the probe reads the
-# definition at the job's working directory and imports the library beside it.
-CI_ACCESS_DEFINITION = ".gitlab-ci.yml"
-CI_ACCESS_PROBE = "ci_access_probe.py"
-CI_ACCESS_LIBRARY = "ci_access_proof.py"
+# Consumer repository path of the staged probe; ci_access_proof owns the others.
+CI_ACCESS_PROBE: Final = "ci_access_probe.py"
 # Installed file that the consumer stages as CI_ACCESS_DEFINITION.
-CI_ACCESS_JOB_SOURCE = "ci_access_job.yml"
-CI_ACCESS_KIT = Path(__file__).parent
-_STAGED_FILES = (
+CI_ACCESS_JOB_SOURCE: Final = "ci_access_job.yml"
+CI_ACCESS_KIT: Final = Path(__file__).parent
+_STAGED_FILES: Final = (
     ("definition_sha256", CI_ACCESS_DEFINITION, CI_ACCESS_JOB_SOURCE),
     ("probe_sha256", CI_ACCESS_PROBE, CI_ACCESS_PROBE),
     ("library_sha256", CI_ACCESS_LIBRARY, CI_ACCESS_LIBRARY),
 )
-_PRODUCER_KEYS = tuple(key for key, _, _ in _STAGED_FILES)
-_DEFINITION_PATH = CI_ACCESS_DEFINITION
-_PORTABLE_LIBRARY = CI_ACCESS_KIT / CI_ACCESS_LIBRARY
+_PRODUCER_KEYS: Final = tuple(key for key, _, _ in _STAGED_FILES)
+_PORTABLE_LIBRARY: Final = CI_ACCESS_KIT / CI_ACCESS_LIBRARY
 
 
 class CiAccessError(ValueError):
@@ -197,7 +196,7 @@ def _trusted_producers(
         raise CiAccessError("agent_ci_trusted_producers_invalid")
     if (
         len({blob.path for blob in producers.values()}) != len(_PRODUCER_KEYS)
-        or producers["definition_sha256"].path != _DEFINITION_PATH
+        or producers["definition_sha256"].path != CI_ACCESS_DEFINITION
     ):
         raise CiAccessError("agent_ci_trusted_producers_invalid")
     try:

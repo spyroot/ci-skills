@@ -14,7 +14,13 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ci_access_proof import ProofError, collect_ci_access
+from ci_access_proof import (
+    CI_ACCESS_ARTIFACT,
+    CI_ACCESS_DEFINITION,
+    CI_ACCESS_LIBRARY,
+    ProofError,
+    collect_ci_access,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -33,11 +39,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = collect_ci_access(
             os.environ,
             agent_id=args.agent_id,
-            definition=Path(".gitlab-ci.yml"),
+            definition=Path(CI_ACCESS_DEFINITION),
             probe=probe,
-            library=probe.with_name("ci_access_proof.py"),
+            library=probe.with_name(CI_ACCESS_LIBRARY),
         )
-        with Path("agent-access.json").open("x", encoding="utf-8") as output:
+        with Path(CI_ACCESS_ARTIFACT).open("x", encoding="utf-8") as output:
             json.dump(result, output, indent=2)
             output.write("\n")
     except ProofError as exc:

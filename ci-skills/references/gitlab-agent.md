@@ -148,7 +148,7 @@ job runs only when the first four are set:
 | `CI_AGENT_ID` | Native Agent ID | connect result `records[0].ownership.agent_id` |
 | `CI_AGENT_RUN_ID` | Run ID | connect result `records[0].ownership.run_id` |
 | `CI_AGENT_PROBE_IMAGE` | Image with `python3` 3.11 or newer and `kubectl` | Our choice |
-| `CI_AGENT_RUNNER_TAG` | Tag of a runner that may run the job | Our choice |
+| `CI_AGENT_RUNNER_TAG` | Tag of a Docker or Kubernetes executor runner | Our choice |
 | `CI_AGENT_NAME` | Agent name | connect result `records[0].ownership.agent_name` |
 | `CI_AGENT_NAMESPACE` | Installation namespace | connect result `records[0].ownership.namespace` |
 | `CI_AGENT_EXPECTED_REVISION` | Installed revision | `skill.revision.value` in a result of the verifying copy |
@@ -165,6 +165,10 @@ git add .gitlab-ci.yml ci_access_probe.py ci_access_proof.py
 git commit -m "Stage the Agent CI access proof"
 git push origin agent-ci-proof
 ```
+
+A shell executor ignores `image`. On `hott/test`, job 126713 on shell runner 106 failed with
+`python3: command not found`; job 126724 on Docker runner 75 ran the image and passed. Setting the variables needs
+our role at or above the project's `ci_pipeline_variables_minimum_override_role` (`developer` on `hott/test`).
 
 The push starts no job because the variables are unset. `POST projects/123/pipeline` with `ref` `agent-ci-proof`
 and the eight variables starts it. When job `ci-agent-access` succeeds, pass its URL:

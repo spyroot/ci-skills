@@ -2,12 +2,15 @@
 """Write the cleanup record of one GitLab Agent qualification series.
 
 ``observe`` runs after ``gitlab_agent.py delete --apply`` and again after the repeat
-delete. It binds the installed copy named by ``--skill`` to the target and reads the
-Agent, its token, every resource of the connect APPLIED receipt's ownership record,
-the Helm release and the run resources, and writes one stage file.
+delete. It binds the installed copy named by ``--skill`` to the same target the
+series used (``--binding``, ``--gitlab``, ``--gitlab-profile``), requires that copy
+to be the one that wrote the connect APPLIED receipt, reads the Agent, its token,
+every resource of that receipt's ownership record, the Helm release and the run
+resources, and writes one stage file.
 ``attach`` builds the ``gitlab_agent_smoke_cleanup`` record from the connect APPLIED
 receipt and the two stage files and writes the delete NO_OP receipt with it.
-`tools/skillkit/agent_cleanup.py` holds the record logic.
+`tools/skillkit/agent_cleanup.py` holds the record logic and
+`tools/skillkit/installed_copy.py` the load guard.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -20,59 +23,163 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from skillkit.agent_cleanup import (
+    AGENT_NAME_KEY,
+    CLUSTER_UID_KEY,
+    CREATED_KEY,
+    NAMESPACE_KEY,
+    ORIGIN_KEY,
+    PROJECT_ID_KEY,
+    PROJECT_PATH_KEY,
+    RELEASE_KEY,
+    RUN_ID_FIELD,
     AgentCleanupError,
+    AgentKeys,
     attach_record,
     cleanup_record,
     connect_ownership,
     observe_stage,
+    require_same_copy,
+    stage_file,
+)
+from skillkit.installed_copy import (
+    InstalledCopyError,
+    bind_skill,
+    file_module,
+    installed_module,
 )
 
 OBSERVE: Final = "observe"
 ATTACH: Final = "attach"
+SKILL_OPTION: Final = "--skill"
+BINDING_OPTION: Final = "--binding"
 DEFAULT_TIMEOUT: Final = 300
-PASS: Final = "PASS"
-BLOCKED: Final = "BLOCKED"
-BLOCKED_EXIT: Final = 2
-# Ownership keys that select the installed scope for the stage read.
-PROJECT_PATH: Final = "project_path"
-PROJECT_ID: Final = "project_id"
-CLUSTER_UID: Final = "cluster_uid"
-ORIGIN: Final = "origin"
-RUN_ID: Final = "run_id"
-NAMESPACE: Final = "namespace"
-AGENT_NAME: Final = "agent_name"
-RELEASE: Final = "release"
-CREATED: Final = "created"
+STATUS_FIELD: Final = "status"
+REASON_FIELD: Final = "reason"
+OUT_FIELD: Final = "out"
+STATUS_MODULE: Final = "lib.python.sys.status"
+# Before a copy is bound, BLOCKED and exit_code come from this repository's
+# stdlib-only status module, loaded by path so that ``lib`` stays unbound.
+REPOSITORY_STATUS_FILE: Final = (
+    Path(__file__).resolve().parents[1] / "ci-skills" / Path(*STATUS_MODULE.split("."))
+).with_suffix(".py")
+REPOSITORY_STATUS_NAME: Final = "_qualify_agent_cleanup_repository_status"
 
 
-def build_parser() -> argparse.ArgumentParser:
+@dataclass(frozen=True)
+class InstalledAgent:
+    """Modules of the installed copy that this tool calls.
+
+    .. attribute :: skill
+        :type: Path
+
+        Installed skill directory the modules load from.
+
+    .. attribute :: modules
+        :type: Mapping[str, ModuleType]
+
+        Loaded module per dotted name in ``MODULES``.
+    """
+
+    skill: Path
+    modules: Mapping[str, ModuleType]
+
+    def __getitem__(self, name: str) -> ModuleType:
+        """Return one bound module.
+
+        :param name: Dotted module name from ``MODULES``.
+        :returns: The module loaded from ``skill``.
+        """
+        return self.modules[name]
+
+    @property
+    def keys(self) -> AgentKeys:
+        """Bind the record and identity keys the installed copy owns.
+
+        :returns: Keys for `tools/skillkit/agent_cleanup.py`.
+        """
+        recovery = self[RECOVERY_MODULE]
+        return AgentKeys(
+            recovery.CREDENTIAL,
+            recovery.CREDENTIAL_ID,
+            self[PROVENANCE_MODULE].DIGEST_VALUE_KEY,
+        )
+
+
+ABSENCE_MODULE: Final = "lib.python.core.gitlab.cluster_agent.absence"
+AUTHORITY_MODULE: Final = "lib.python.core.gitlab.cluster_agent.authority"
+SELECTION_MODULE: Final = "lib.python.core.gitlab.cluster_agent.selection"
+RECOVERY_MODULE: Final = "lib.python.core.gitlab.cluster_agent.recovery"
+RUN_SCOPE_MODULE: Final = "lib.python.core.kubernetes.run_scope"
+CLI_API_MODULE: Final = "lib.python.core.cli_api"
+CLI_MODULE: Final = "lib.python.core.cli"
+TARGET_MODULE: Final = "lib.python.core.target"
+PROVENANCE_MODULE: Final = "lib.python.core.provenance"
+MODULES: Final = (
+    STATUS_MODULE,
+    ABSENCE_MODULE,
+    AUTHORITY_MODULE,
+    SELECTION_MODULE,
+    RECOVERY_MODULE,
+    RUN_SCOPE_MODULE,
+    CLI_API_MODULE,
+    CLI_MODULE,
+    TARGET_MODULE,
+    PROVENANCE_MODULE,
+)
+
+
+def bind_installed(skill: Path) -> InstalledAgent:
+    """Put ``skill`` first on ``sys.path`` and load every module this tool calls.
+
+    :param skill: Installed skill directory.
+    :returns: The loaded modules.
+    :raises InstalledCopyError: A module cannot be imported or loads elsewhere.
+    """  # noqa: DOC502 - installed_module raises for each module.
+    bind_skill(skill)
+    return InstalledAgent(
+        skill, {name: installed_module(skill, name) for name in MODULES}
+    )
+
+
+def build_parser(
+    add_selection: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+) -> argparse.ArgumentParser:
     """Declare the two subcommands and their file arguments.
 
+    :param add_selection: Installed ``add_gitlab_selection_arguments``; absent
+        before a copy is bound, for ``--help``.
     :returns: Parser for ``observe`` and ``attach``.
     """
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     commands = parser.add_subparsers(dest="command", required=True)
     observe = commands.add_parser(OBSERVE, help="read one cleanup stage")
-    observe.add_argument("--skill", required=True, help="installed skill directory")
-    observe.add_argument(
-        "--connect-receipt", required=True, help="connect APPLIED receipt"
-    )
-    observe.add_argument("--out", required=True, help="new stage file to write")
+    attach = commands.add_parser(ATTACH, help="attach the record to the repeat receipt")
+    for command in (observe, attach):
+        command.add_argument(
+            SKILL_OPTION, required=True, help="installed skill directory"
+        )
+        command.add_argument(
+            "--connect-receipt", required=True, help="connect APPLIED receipt"
+        )
+        command.add_argument("--out", required=True, help="new file to write")
     observe.add_argument(
         "--timeout", type=int, default=DEFAULT_TIMEOUT, help="read budget in seconds"
     )
-    attach = commands.add_parser(ATTACH, help="attach the record to the repeat receipt")
-    attach.add_argument(
-        "--connect-receipt", required=True, help="connect APPLIED receipt"
+    observe.add_argument(
+        BINDING_OPTION, metavar="PATH", help="project binding the series used"
     )
+    if add_selection is not None:
+        add_selection(observe)
     attach.add_argument(
         "--after", required=True, help="stage file read after the delete"
     )
@@ -80,7 +187,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--repeat", required=True, help="stage file read after the repeat"
     )
     attach.add_argument("--receipt", required=True, help="delete NO_OP receipt")
-    attach.add_argument("--out", required=True, help="new receipt file to write")
     return parser
 
 
@@ -94,87 +200,124 @@ def _write(path: str, document: Mapping[str, Any]) -> None:
         output.write("\n")
 
 
-def observe(skill: Path, connect: Mapping[str, Any], timeout: int) -> dict[str, object]:
+def observe(
+    installed: InstalledAgent, args: argparse.Namespace, connect: Mapping[str, Any]
+) -> dict[str, object]:
     """Bind the installed copy to the recorded scope and read one stage.
 
-    :param skill: Installed skill directory whose ``lib`` package is imported.
+    :param installed: Modules of the copy named by ``--skill``.
+    :param args: Parsed ``observe`` arguments with the series' target selection.
     :param connect: Connect APPLIED receipt of the series.
-    :param timeout: Budget for target resolution and every read, in seconds.
-    :returns: Stage document for ``attach``.
-    :raises AgentCleanupError: The bound project, cluster, GitLab origin or release
-        differs from the ownership record, or an object is still present.
+    :returns: Stage file document for ``attach``.
+    :raises AgentCleanupError: The copy, project, cluster, GitLab origin or release
+        differs from the series, or an object is still present.
     """  # noqa: DOC502 - observe_stage raises for a present object.
-    sys.path.insert(0, str(skill))
-    from lib.python.core.cli_api import RequestDeadline
-    from lib.python.core.gitlab.cluster_agent.absence import (
-        verify_agent_logical_absence,
-    )
-    from lib.python.core.gitlab.cluster_agent.authority import (
-        observe_authorities,
-        resolve_agent_target,
-    )
-    from lib.python.core.gitlab.cluster_agent.selection import (
-        ConnectSelection,
-        release_name,
-    )
-    from lib.python.core.kubernetes.run_scope import RunScope
-
+    keys = installed.keys
     ownership = connect_ownership(connect)
-    deadline = RequestDeadline(time.monotonic() + timeout)
-    selected = deadline.call(
-        resolve_agent_target, None, None, ownership[PROJECT_PATH], None, dry_run=False
+    deadline = installed[CLI_API_MODULE].RequestDeadline(
+        time.monotonic() + args.timeout
     )
-    authorities = observe_authorities(selected, revision=None, deadline=deadline)
+    authority = installed[AUTHORITY_MODULE]
+    selected = deadline.call(
+        authority.resolve_agent_target,
+        None,
+        args.binding,
+        ownership[PROJECT_PATH_KEY],
+        installed[TARGET_MODULE].GitLabSelection.from_args(args),
+        dry_run=False,
+    )
+    authorities = authority.observe_authorities(
+        selected, revision=None, deadline=deadline
+    )
+    session = authorities.gitlab.session
+    require_same_copy(connect, session.skill, keys)
     if (
-        authorities.project.id != ownership[PROJECT_ID]
-        or authorities.cluster_uid != ownership[CLUSTER_UID]
-        or authorities.gitlab.session.origin.rstrip("/") != ownership[ORIGIN]
+        authorities.project.id != ownership[PROJECT_ID_KEY]
+        or authorities.cluster_uid != ownership[CLUSTER_UID_KEY]
+        or session.origin.rstrip("/") != ownership[ORIGIN_KEY]
     ):
         raise AgentCleanupError("agent_cleanup_scope_mismatch")
-    scope = RunScope(
-        ownership[RUN_ID], ownership[NAMESPACE], ownership[CREATED][NAMESPACE]
+    scope = installed[RUN_SCOPE_MODULE].RunScope(
+        ownership[RUN_ID_FIELD],
+        ownership[NAMESPACE_KEY],
+        ownership[CREATED_KEY][NAMESPACE_KEY],
     )
-    agent_name = ownership[AGENT_NAME]
-    selection = ConnectSelection(
-        authorities.project, agent_name, scope, release_name(scope, agent_name)
+    agent_name = ownership[AGENT_NAME_KEY]
+    selection_module = installed[SELECTION_MODULE]
+    selection = selection_module.ConnectSelection(
+        authorities.project,
+        agent_name,
+        scope,
+        selection_module.release_name(scope, agent_name),
     )
-    if selection.release != ownership[RELEASE]:
+    if selection.release != ownership[RELEASE_KEY]:
         raise AgentCleanupError("agent_cleanup_release_mismatch")
-    return observe_stage(
+    observation = observe_stage(
         authorities.provider,
         authorities.kubernetes,
         ownership,
-        lambda: verify_agent_logical_absence(
+        lambda: installed[ABSENCE_MODULE].verify_agent_logical_absence(
             authorities.gitlab,
             authorities.kubernetes,
             selection,
             timeout=deadline.remaining(),
         ),
+        keys,
     )
+    return stage_file(ownership, observation, session.skill, datetime.now(UTC), keys)
+
+
+def _skill(argv: Sequence[str]) -> Optional[Path]:
+    known = argparse.ArgumentParser(add_help=False)
+    known.add_argument(SKILL_OPTION)
+    value = known.parse_known_args(argv)[0].skill
+    return None if value is None else Path(value).resolve()
+
+
+def _print(status: ModuleType, token: str, field: str, value: object) -> int:
+    print(json.dumps({STATUS_FIELD: token, field: value}, sort_keys=True))
+    return status.exit_code(token)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run one subcommand and print its status line as JSON.
 
     :param argv: Command arguments, or the process arguments when absent.
-    :returns: Zero after writing the output file, two when a read or check fails.
+    :returns: Installed exit code of PASS after writing the output file, or of
+        BLOCKED when binding, a read or a check fails.
     """
-    args = build_parser().parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    skill = _skill(arguments)
+    if skill is None:
+        build_parser().parse_args(arguments)
+    try:
+        installed = bind_installed(skill)
+    except InstalledCopyError as exc:
+        status = file_module(REPOSITORY_STATUS_NAME, REPOSITORY_STATUS_FILE)
+        return _print(status, status.BLOCKED, REASON_FIELD, str(exc))
+    status = installed[STATUS_MODULE]
+    args = build_parser(
+        installed[CLI_MODULE].add_gitlab_selection_arguments
+    ).parse_args(arguments)
     try:
         connect = _read(args.connect_receipt)
         if args.command == OBSERVE:
-            document = observe(Path(args.skill).resolve(), connect, args.timeout)
+            document = observe(installed, args, connect)
         else:
+            receipt = _read(args.receipt)
             record = cleanup_record(
-                connect, _read(args.after), _read(args.repeat), datetime.now(UTC)
+                connect,
+                _read(args.after),
+                _read(args.repeat),
+                receipt,
+                datetime.now(UTC),
+                installed.keys,
             )
-            document = attach_record(_read(args.receipt), record)
+            document = attach_record(receipt, record)
         _write(args.out, document)
     except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
-        print(json.dumps({"status": BLOCKED, "reason": str(exc)}))
-        return BLOCKED_EXIT
-    print(json.dumps({"status": PASS, "out": args.out}))
-    return 0
+        return _print(status, status.BLOCKED, REASON_FIELD, str(exc))
+    return _print(status, status.PASS, OUT_FIELD, args.out)
 
 
 if __name__ == "__main__":
