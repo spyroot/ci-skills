@@ -152,7 +152,8 @@ def _connected_record(
         "agent_http_status": HTTPStatus.OK.value,
         CREDENTIAL_IDS: [credential_id],
         CREDENTIAL_HTTP_STATUS: HTTPStatus.OK.value,
-        "resources": resources,
+        # The connected snapshot's rows equal ownership.resources; null says so once.
+        "resources": None,
         "connection_ids": [item["connection_id"] for item in active],
     }
     before = after
@@ -183,7 +184,6 @@ def _connected_record(
             "observed_image_ids": sorted(
                 {item.pod.image_digest for item in connected.connections}
             ),
-            "resources": resources,
         },
         connection={"state": _CONNECTED, "complete": True, "items": active},
     )
@@ -210,14 +210,14 @@ def _credentials(
     """Trace the three credentials of this invocation without any credential value.
 
     :param authorities: Selected providers; the GitLab client holds the request trace.
-    :param row: Completed record whose ownership, installation and connection are final.
+    :param row: Completed record whose ownership and connection are final.
     :returns: GitLab requests sent with the selected GitLab token, Kubernetes objects
         created with the selected kubeconfig, and the Agent token's ID, Secret and consumers.
     """
     routing = authorities.kubernetes.target.routing
     action = row["action"]
     owner = row["ownership"]
-    installation = json_object(row["installation"])
+    owned = [] if owner is None else json_objects(json_object(owner)["resources"])
     created_objects: list[JSONValue] = [
         {
             "kind": item["kind"],
@@ -225,7 +225,7 @@ def _credentials(
             "namespace": item["namespace"],
             "uid": item["uid"],
         }
-        for item in json_objects(installation["resources"])
+        for item in owned
         if action == APPLIED and item.get("created") is True
     ]
     agent: JSONObject = {
@@ -299,7 +299,6 @@ def _record_fields(
             **dict.fromkeys(_INSTALLATION_FIELDS),
             "image_reference": None,
             "observed_image_ids": [],
-            "resources": [],
         },
         "connection": {"state": UNKNOWN, "complete": False, "items": []},
         "ci_access": {

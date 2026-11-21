@@ -210,7 +210,15 @@
           "$ref": "../gitlab-agent-ownership.schema.json#/properties/release_storage_uid"
         },
         "resources": {
-          "$ref": "../gitlab-agent.schema.json#/$defs/resources"
+          "description": "Resource rows. null in a connected snapshot means the rows equal this record's ownership.resources.",
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/resources"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "connection_ids": {
           "type": "array",
@@ -240,8 +248,7 @@
         "app_version",
         "image_reference",
         "image_digest",
-        "observed_image_ids",
-        "resources"
+        "observed_image_ids"
       ],
       "properties": {
         "namespace": {
@@ -326,9 +333,6 @@
           "items": {
             "$ref": "../gitlab-agent.schema.json#/$defs/image_digest"
           }
-        },
-        "resources": {
-          "$ref": "../gitlab-agent.schema.json#/$defs/resources"
         }
       }
     },

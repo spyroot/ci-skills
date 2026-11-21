@@ -141,7 +141,15 @@ def _same_owner(first: JSONObject, second: JSONObject) -> bool:
     )
 
 
+def _resolved(snapshot: JSONObject, owner: JSONObject) -> JSONObject:
+    # A connected snapshot writes ``resources: null`` for rows equal to the owner's.
+    if snapshot.get("resources") is None:
+        return {**snapshot, "resources": owner.get("resources")}
+    return snapshot
+
+
 def _connected_snapshot(snapshot: JSONObject, owner: JSONObject) -> bool:
+    snapshot = _resolved(snapshot, owner)
     return (
         _match(snapshot, owner, _SNAPSHOT_FIELDS)
         and snapshot.get("agent_http_status") == 200
@@ -229,8 +237,7 @@ def _connection_verified(row: JSONObject, owner: JSONObject, when: datetime) -> 
     installation = _object(row, "installation")
     connection = _object(row, "connection")
     prerequisites = _object(row, "prerequisites")
-    installed = _resource_index(installation)
-    owned = _resource_identities(owner)
+    installed = _resource_index(owner)
     image = json_string(installation.get("image_reference"))
     digest = json_string(installation.get("image_digest"))
     if (
@@ -240,10 +247,6 @@ def _connection_verified(row: JSONObject, owner: JSONObject, when: datetime) -> 
         or prerequisites.get("cluster_uid") != owner.get("cluster_uid")
         or connection.get("state") != "CONNECTED"
         or connection.get("complete") is not True
-        or any(
-            owned.get(key) != _resource_identity(value)
-            for key, value in installed.items()
-        )
     ):
         return False
     ids: set[str] = set()
