@@ -236,8 +236,37 @@ assert_project_scope_outside_repo_blocked() {
   [ ! -L "$destination" ]
   backup=$(jq -r .previous_version <<<"$output")
   [ -L "$backup" ]
+  [ "$(dirname "$backup")" = "$(dirname "$destination")/.ci-skills.backups" ]
   [ "$(readlink "$backup")" = "$source_root" ]
   cmp "$source_root/ci-skills/SKILL.md" "$destination/SKILL.md"
+}
+
+@test 'antigravity-user upgrade stores backups outside top-level skill discovery' {
+  make_install_fixture
+  home="${BATS_TEST_TMPDIR}/home"
+  skills_dir="$(cd "$BATS_TEST_TMPDIR" && pwd -P)/home/.gemini/config/skills"
+  run env HOME="$home" "$tool" --scope antigravity-user --dry-run
+  [ "$status" -eq 0 ]
+  fingerprint=$(jq -r .fingerprint <<<"$output")
+  run env HOME="$home" "$tool" --scope antigravity-user --apply \
+    --timeout 10s --confirm-install "$fingerprint"
+  [ "$status" -eq 0 ]
+  printf '\n# Upgraded skill\n' >>"${source_root}/ci-skills/SKILL.md"
+  git -C "$source_root" add ci-skills/SKILL.md
+  git -C "$source_root" commit --quiet -m "upgrade skill"
+  run env HOME="$home" "$tool" --scope antigravity-user --upgrade --dry-run
+  [ "$status" -eq 0 ]
+  upgrade_fingerprint=$(jq -r .fingerprint <<<"$output")
+  run env HOME="$home" "$tool" --scope antigravity-user --upgrade --apply \
+    --timeout 10s --confirm-upgrade "$upgrade_fingerprint"
+  [ "$status" -eq 0 ]
+  backup=$(jq -r .previous_version <<<"$output")
+  [ -d "$backup" ]
+  [ "$(dirname "$backup")" = "${skills_dir}/.ci-skills.backups" ]
+  [ -f "${backup}/SKILL.md" ]
+  mapfile -t manifests < <(find "$skills_dir" -mindepth 2 -maxdepth 2 -name SKILL.md | sort)
+  [ "${#manifests[@]}" -eq 1 ]
+  [ "${manifests[0]}" = "${skills_dir}/ci-skills/SKILL.md" ]
 }
 
 @test 'apply blocks when tracked source bytes changed after planning' {

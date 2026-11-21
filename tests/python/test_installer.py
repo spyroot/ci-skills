@@ -64,6 +64,19 @@ def _source(tmp_path: Path) -> Path:
     return source
 
 
+def _top_level_manifests(skills_dir: Path) -> list[Path]:
+    """List one-level ``SKILL.md`` manifests discovered under a skills directory.
+
+    :param skills_dir: Parent skills directory scanned one level deep.
+    :returns: Sorted ``SKILL.md`` paths found in immediate child directories.
+    """
+    return sorted(
+        entry / "SKILL.md"
+        for entry in skills_dir.iterdir()
+        if entry.is_dir() and (entry / "SKILL.md").is_file()
+    )
+
+
 def test_install_copies_all_package_files_and_reads_back_digest(tmp_path: Path) -> None:
     """Copy package files and verify the installed tree digest by read-back.
 
@@ -277,9 +290,11 @@ def test_upgrade_preserves_previous_skill_and_verifies_new_copy(tmp_path: Path) 
     destination = skills_dir / installer.SKILL_NAME
     assert upgraded["status"] == "PASS"
     assert upgraded["previous_version"] == str(previous)
+    assert previous.parent == skills_dir / installer.BACKUP_DIRECTORY_NAME
     assert "# Updated" in (destination / "SKILL.md").read_text()
     assert "# Updated" not in (previous / "SKILL.md").read_text()
     assert upgraded["digest"] == installer.tree_digest(destination)["digest"]
+    assert _top_level_manifests(skills_dir) == [destination / "SKILL.md"]
 
 
 def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(
@@ -324,7 +339,11 @@ def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(
     assert result["status"] == "BLOCKED"
     assert (destination / "SKILL.md").read_bytes() == before
     assert not (skills_dir / installer.JOURNAL_NAME).exists()
-    assert not list(skills_dir.glob(f".{installer.SKILL_NAME}.previous-*"))
+    assert not list(skills_dir.glob(f"{installer.LEGACY_PREVIOUS_ENTRY_PREFIX}*"))
+    backup_dir = skills_dir / installer.BACKUP_DIRECTORY_NAME
+    assert not backup_dir.exists() or not list(
+        backup_dir.glob(f"{installer.PREVIOUS_ENTRY_PREFIX}*")
+    )
 
 
 def test_repeated_upgrade_preserves_each_immediate_previous_version(
@@ -356,6 +375,101 @@ def test_repeated_upgrade_preserves_each_immediate_previous_version(
     assert (
         skills_dir / installer.SKILL_NAME / "SKILL.md"
     ).read_text() == "version three\n"
+    assert _top_level_manifests(skills_dir) == [
+        skills_dir / installer.SKILL_NAME / "SKILL.md"
+    ]
+
+
+def test_upgrade_blocks_when_backup_directory_is_symlink(tmp_path: Path) -> None:
+    """Reject upgrade when the hidden backup directory is a symlink.
+
+    :param tmp_path: Pytest directory holding source, destination, and symlinked backup dir.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    first = installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    assert first["status"] == "PASS"
+    destination = skills_dir / installer.SKILL_NAME
+    before = (destination / "SKILL.md").read_bytes()
+    (source / "SKILL.md").write_text("new version\n", encoding="utf-8")
+    escape = tmp_path / "outside"
+    escape.mkdir()
+    (skills_dir / installer.BACKUP_DIRECTORY_NAME).symlink_to(
+        escape, target_is_directory=True
+    )
+
+    blocked = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["reason"] == "install_recovery_unsafe"
+    assert (destination / "SKILL.md").read_bytes() == before
+    assert list(escape.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("activate_new", "expected_action"),
+    [
+        pytest.param(False, "restore_previous", id="restore-previous"),
+        pytest.param(
+            True, "complete_verified_activation", id="complete-verified-activation"
+        ),
+    ],
+)
+def test_recovery_handles_backups_dir_layout(
+    tmp_path: Path, activate_new: bool, expected_action: str
+) -> None:
+    """Recover interrupted upgrades stored under the nested backup directory.
+
+    :param tmp_path: Pytest directory holding journal, backup, and destination trees.
+    :param activate_new: Whether the new destination copy is already in place.
+    :param expected_action: Recovery action expected for the interrupted state.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    destination = skills_dir / installer.SKILL_NAME
+    old_digest = installer.tree_digest(destination)["digest"]
+    (source / "SKILL.md").write_text("new\n", encoding="utf-8")
+    new_digest = installer.tree_digest(source)["digest"]
+    nonce = "c" * 32
+    backup_dir = skills_dir / installer.BACKUP_DIRECTORY_NAME
+    backup_dir.mkdir(mode=0o700)
+    previous = backup_dir / f"{installer.PREVIOUS_ENTRY_PREFIX}{nonce}"
+    installer._write_journal(
+        skills_dir,
+        {
+            "schema_version": "1.0",
+            "nonce": nonce,
+            "old_digest": old_digest,
+            "new_digest": new_digest,
+            "previous_layout": installer.PreviousLayout.BACKUPS_DIR.value,
+        },
+    )
+    destination.rename(previous)
+    if activate_new:
+        destination.mkdir()
+        (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+        (destination / "scripts").mkdir()
+        (destination / "scripts" / "check.py").write_bytes(
+            (source / "scripts" / "check.py").read_bytes()
+        )
+
+    recovered = installer.recover_install(skills_dir, dry_run=False)
+
+    assert recovered["status"] == "PASS"
+    assert recovered["action"] == expected_action
+    assert recovered["digest"] == (new_digest if activate_new else old_digest)
+    assert destination.exists()
+    assert previous.exists() is activate_new
+    assert not (skills_dir / installer.JOURNAL_NAME).exists()
 
 
 def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path: Path) -> None:
