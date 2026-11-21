@@ -17,7 +17,16 @@ from lib.python.core.gitlab.cluster_agent.evidence import (
     RESULT_SCHEMA,
 )
 from lib.python.core.gitlab.cluster_agent.plan import FreshConnectPlan
-from lib.python.core.gitlab.cluster_agent.recovery import CREDENTIAL_ID
+from lib.python.core.gitlab.cluster_agent.recovery import (
+    ABSENT,
+    CREDENTIAL,
+    CREDENTIAL_ID,
+    CREDENTIAL_NAME,
+    CREDENTIAL_RESOURCE_NAME,
+    CREDENTIAL_RESOURCE_UID,
+    PRESENT,
+    RECORDED,
+)
 from lib.python.core.gitlab.cluster_agent.secret import TOKEN_KEY
 from lib.python.core.gitlab.cluster_agent.selection import IMAGE_TAG, ConnectSelection
 from lib.python.core.gitlab.cluster_agent.workflow import AgentOutcome
@@ -52,8 +61,6 @@ _NOT_CHECKED: Final = "NOT_CHECKED"
 _CONNECTED: Final = "CONNECTED"
 _RESULT_MISMATCH: Final = "agent_receipt_native_observation_mismatch"
 _REPORT_KIND: Final = "GitLabAgent"
-_PRESENT: Final = "PRESENT"
-_ABSENT: Final = "ABSENT"
 
 
 def _snapshot(selection: ConnectSelection) -> dict[str, JSONValue]:
@@ -205,16 +212,20 @@ def _logical_record(
 
 
 def _credentials(
-    authorities: AgentAuthorities, row: dict[str, JSONValue]
+    authorities: AgentAuthorities, row: dict[str, JSONValue], operation: str
 ) -> JSONObject:
     """Trace the three credentials of this invocation without any credential value.
 
     :param authorities: Selected providers; the GitLab client holds the request trace.
     :param row: Completed record whose ownership and connection are final.
+    :param operation: ``connect``, ``verify`` or ``delete``.
     :returns: GitLab requests sent with the selected GitLab token, Kubernetes objects
-        created with the selected kubeconfig, and the Agent token's ID, Secret and consumers.
+        created with the selected kubeconfig, and the Agent token's state, ID, Secret
+        and consumers. The token state is ``PLANNED`` for a fresh connect plan,
+        ``ABSENT`` when no ownership record exists, ``PRESENT`` when this invocation
+        read an active connection, and ``RECORDED`` when only the ownership record
+        names the token.
     """
-    routing = authorities.kubernetes.target.routing
     action = row["action"]
     owner = row["ownership"]
     owned = [] if owner is None else json_objects(json_object(owner)["resources"])
@@ -229,7 +240,7 @@ def _credentials(
         if action == APPLIED and item.get("created") is True
     ]
     agent: JSONObject = {
-        "state": PLANNED if action == PLANNED else _ABSENT,
+        "state": PLANNED if operation == "connect" and action == PLANNED else ABSENT,
         "id": None,
         "name": None,
         "created": False,
@@ -238,17 +249,18 @@ def _credentials(
     }
     if owner is not None:
         record = json_object(owner)
+        connection = json_object(row["connection"])
         agent = {
-            "state": _PRESENT,
+            "state": PRESENT if connection["state"] == _CONNECTED else RECORDED,
             "id": json_integer(record[CREDENTIAL_ID]),
-            "name": json_string(record["registration_credential_name"]),
+            "name": json_string(record[CREDENTIAL_NAME]),
             "created": action == APPLIED
-            and json_object(record["created"]).get("registration_credential") is True,
+            and json_object(record["created"]).get(CREDENTIAL) is True,
             "storage": {
                 "kind": "Secret",
                 "namespace": json_string(record["namespace"]),
-                "name": json_string(record["credential_resource_name"]),
-                "uid": record["credential_resource_uid"],
+                "name": json_string(record[CREDENTIAL_RESOURCE_NAME]),
+                "uid": record[CREDENTIAL_RESOURCE_UID],
                 "key": TOKEN_KEY,
             },
             "consumers": [
@@ -257,21 +269,17 @@ def _credentials(
                     "pod_name": item["pod_name"],
                     "pod_uid": item["pod_uid"],
                 }
-                for item in json_objects(json_object(row["connection"])["items"])
+                for item in json_objects(connection["items"])
             ],
         }
     return {
         "gitlab": {
-            "table": None if routing is None else routing.gitlab,
             "calls": [
                 {"method": call.method, "endpoint": call.endpoint}
                 for call in authorities.gitlab.api.requests
             ],
         },
-        "kubernetes": {
-            "table": None if routing is None else routing.kubernetes,
-            "created_objects": created_objects,
-        },
+        "kubernetes": {"created_objects": created_objects},
         "agent_credential": agent,
     }
 
@@ -280,7 +288,7 @@ def _record(
     authorities: AgentAuthorities, outcome: AgentOutcome, operation: str
 ) -> JSONObject:
     row = dict(_record_fields(authorities, outcome, operation))
-    row["credentials"] = _credentials(authorities, row)
+    row["credentials"] = _credentials(authorities, row, operation)
     return row
 
 

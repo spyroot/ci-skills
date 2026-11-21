@@ -44,6 +44,11 @@ CREDENTIAL_RESOURCE_NAME: Final = "credential_resource_name"
 CREDENTIAL_RESOURCE_UID: Final = "credential_resource_uid"
 CREDENTIAL: Final = "registration_credential"
 CREDENTIAL_RESOURCE: Final = "credential_resource"
+# Resource and token states written into ownership rows and result records.
+PRESENT: Final = "PRESENT"
+ABSENT: Final = "ABSENT"
+# The token is known from the ownership record only; this invocation did not read it natively.
+RECORDED: Final = "RECORDED"
 
 _NATIVE_IDS: Final = (
     "agent_id",

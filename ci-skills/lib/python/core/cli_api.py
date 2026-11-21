@@ -461,7 +461,8 @@ class APIRequest:
 
     .. attribute :: endpoint
 
-        Provider-relative path without the query string. It holds native IDs only.
+        Provider-relative path without the query string, for example ``projects/42`` or
+        ``user``. It holds no credential value.
     """
 
     method: str
@@ -510,8 +511,8 @@ class CLIAPIClient:
     def requests(self) -> tuple[APIRequest, ...]:
         """Return each validated request this client sent, in order.
 
-        :returns: One entry per request, whether it succeeded or failed. A retried GET
-            counts once.
+        :returns: One entry per request handed to the native client, whether it succeeded
+            or failed. A retried GET counts once.
         """
         return tuple(self._requests)
 
@@ -710,7 +711,6 @@ class CLIAPIClient:
         if deadline is not None:
             deadline.remaining()
         selected = validate_endpoint(endpoint)
-        self._requests.append(APIRequest(method, selected.split("?", 1)[0]))
         argv = self.argv(session.host, method, selected)
         if raw:
             argv.remove("--include")
@@ -718,6 +718,7 @@ class CLIAPIClient:
             argv.extend(self.pagination_arguments())
         with self._body_arguments(body) as arguments:
             argv.extend(arguments)
+            self._requests.append(APIRequest(method, selected.split("?", 1)[0]))
             response = self._read_response(
                 session, method, selected, argv, raw=raw, deadline=deadline
             )

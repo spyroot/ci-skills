@@ -44,8 +44,6 @@ from lib.python.core.endpoints import (
     GITHUB_AUTHORITY,
     GITLAB_AUTHORITY,
     GITLAB_DEFAULT_INSTANCE,
-    GITLAB_PRIVATE_TABLE,
-    GITLAB_PUBLIC_TABLE,
     GITLAB_ROUTING_DEFAULT_KEY,
     GITLAB_ROUTING_TABLE,
     GITLAB_SELECTORS,
@@ -389,14 +387,14 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "borrowed resources. Connection alone never proves CI access.",
         "credentials": (
             (
-                f"T1 GitLab token, from the selected [{GITLAB_PRIVATE_TABLE}] or "
-                f"[{GITLAB_PUBLIC_TABLE}] token_file: "
-                "reads the project and KAS metadata, registers the Agent, creates the Agent token, "
-                "reads connections."
+                "T1 GitLab token: the credential access_protocol.gitlab resolves for the selected "
+                "GitLab instance. It reads the project and KAS metadata, registers the Agent, creates "
+                "the Agent token and reads connections."
             ),
             (
-                "T2 Kubernetes credential, from the selected [kubernetes] kubeconfig: creates the "
-                "namespace, recovery ConfigMap and token Secret, installs the Helm release, reads Pods."
+                "T2 Kubernetes credential: the kubeconfig access_protocol.kubernetes resolves for the "
+                "selected cluster. It creates the namespace, recovery ConfigMap and token Secret, "
+                "installs the Helm release and reads Pods."
             ),
             (
                 "T3 Agent token: GitLab returns it once; the command writes it only to Secret key "

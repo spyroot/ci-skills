@@ -140,7 +140,7 @@ sequenceDiagram
     participant K as Kubernetes API
     participant A as agentk Pods
     participant S as KAS
-    Note over C: T1 = [gitlab_private].token_file, T2 = [kubernetes] kubeconfig
+    Note over C: T1 = selected GitLab credential, T2 = selected kubeconfig
     C->>G: T1: GET project, GET metadata (KAS address, version)
     C->>K: T2: create namespace, recovery ConfigMap (PENDING)
     C->>G: T1: POST cluster_agents (agent ID)
@@ -155,8 +155,8 @@ sequenceDiagram
 
 | Token | Source | Used for | Stored |
 | --- | --- | --- | --- |
-| T1 GitLab token | `[gitlab_private]`/`[gitlab_public]` `token_file` | Project, KAS, register, token, GraphQL | File |
-| T2 Kubernetes credential | `[kubernetes]` kubeconfig | Namespace, Secret, ConfigMap, Helm, Pod reads | File |
+| T1 GitLab token | `access_protocol.gitlab` ([access](access.md)) | Project, KAS, register, token, GraphQL | Source |
+| T2 Kubernetes credential | `access_protocol.kubernetes` | Namespace, Secret, ConfigMap, Helm, Pod reads | Source |
 | T3 Agent token | `POST /projects/ID/cluster_agents/AGENT_ID/tokens` | agentk connection to KAS | Secret key `token` |
 
 T3 never appears in argv, Helm values, Helm release storage, reports, receipts or logs. `gitlab_agent.py --help`
@@ -168,13 +168,16 @@ Each result record carries `credentials`, built from this invocation's observati
 | --- | --- |
 | `gitlab.calls` | Every request sent with T1, in order: method and path without query string |
 | `kubernetes.created_objects` | Objects this invocation created with T2: kind, name, namespace, UID |
-| `agent_credential` | T3 `state` (`PLANNED`, `PRESENT`, `ABSENT`), ID, Secret `storage`, `consumers` |
+| `agent_credential` | T3 `state`, ID, Secret `storage`, `consumers` |
+
+`state` is `PLANNED` for a fresh connect plan, `ABSENT` without an ownership record, `PRESENT` when the command
+read an active connection, and `RECORDED` when only the ownership record names the token.
 
 Repeat connect (`NO_OP`) on `hott/test`, run `efc9e7db47ff427bbc53df1978834563`:
 
 ```json
 {
-  "gitlab": {"table": "gitlab_private", "calls": [
+  "gitlab": {"calls": [
     {"method": "GET", "endpoint": "user"},
     {"method": "GET", "endpoint": "projects/hott%2Ftest"},
     {"method": "GET", "endpoint": "projects/123"},
@@ -184,7 +187,7 @@ Repeat connect (`NO_OP`) on `hott/test`, run `efc9e7db47ff427bbc53df1978834563`:
     {"method": "GET", "endpoint": "projects/123"},
     {"method": "GET", "endpoint": "projects/123/cluster_agents/1"},
     {"method": "POST", "endpoint": "graphql"}]},
-  "kubernetes": {"table": "kubernetes", "created_objects": []},
+  "kubernetes": {"created_objects": []},
   "agent_credential": {"state": "PRESENT", "id": 1, "name": "test-agent-token-64d9936f4e4c4c64", "created": false,
     "storage": {"kind": "Secret", "namespace": "test-64d9936f4e4c4c64a9f7",
       "name": "test-agent-token-64d9936f4e4c4c64", "uid": "af4643c3-8637-4ff3-afdb-cce10f545673", "key": "token"},

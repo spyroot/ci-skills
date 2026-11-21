@@ -830,7 +830,8 @@
         "connection",
         "ci_access",
         "absence",
-        "prerequisites"
+        "prerequisites",
+        "credentials"
       ],
       "properties": {
         "callback": {
@@ -1118,16 +1119,9 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "table",
             "calls"
           ],
           "properties": {
-            "table": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "calls": {
               "type": "array",
               "items": {
@@ -1161,16 +1155,9 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "table",
             "created_objects"
           ],
           "properties": {
-            "table": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "created_objects": {
               "type": "array",
               "items": {
@@ -1222,8 +1209,10 @@
               "enum": [
                 "PLANNED",
                 "PRESENT",
-                "ABSENT"
-              ]
+                "ABSENT",
+                "RECORDED"
+              ],
+              "description": "PLANNED: fresh connect plan. ABSENT: no ownership record. PRESENT: this invocation read an active connection. RECORDED: only the ownership record names the token."
             },
             "id": {
               "type": [
