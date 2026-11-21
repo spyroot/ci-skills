@@ -23,6 +23,19 @@ REGISTRY_SECRET_SUFFIX: Final = "-registry"
 PULL_JOB_SUFFIX: Final = "-pull"
 
 
+def runner_runtime_identities(name: str) -> tuple[tuple[str, str], ...]:
+    """Identify the manager workload and its two private runtime Secrets.
+
+    :param name: Exact shared runner Deployment name.
+    :returns: Deployment followed by registration and registry Secret identities.
+    """
+    return (
+        ("Deployment", name),
+        ("Secret", name + REGISTRATION_SECRET_SUFFIX),
+        ("Secret", name + REGISTRY_SECRET_SUFFIX),
+    )
+
+
 @dataclass(frozen=True)
 class RunnerRuntime:
     """Retain provider bootstrap commands and private registration material.

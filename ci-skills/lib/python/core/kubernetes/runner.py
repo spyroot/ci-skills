@@ -31,6 +31,7 @@ from lib.python.core.runner import (
     RUNTIME_ROOT,
     RunnerAction,
     RunnerRuntime,
+    runner_runtime_identities,
 )
 from lib.python.core.toolbox import DOCTOR_PATH
 from lib.python.sys.status import APPLIED, NO_OP, VERIFIED
@@ -231,9 +232,9 @@ class DeleteRunner(K8SCallback[RunnerAction]):
         """  # noqa: DOC502 - ResourceSet.delete propagates ownership and target failures.
         action = self.action
         resources = ResourceSet(self.kubernetes, action.namespace, action.operation)
-        changed = resources.delete("Deployment", action.name)
-        for suffix in (REGISTRATION_SECRET_SUFFIX, REGISTRY_SECRET_SUFFIX):
-            changed = resources.delete("Secret", action.name + suffix) or changed
+        changed = False
+        for kind, name in runner_runtime_identities(action.name):
+            changed = resources.delete(kind, name) or changed
         return {
             "action": APPLIED if changed else NO_OP,
             "verified": True,

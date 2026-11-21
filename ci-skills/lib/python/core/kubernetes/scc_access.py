@@ -201,7 +201,7 @@ def resolve_role_binding_name(
     :returns: Existing owned name, or the preferred name when none exists.
     :raises KubernetesError: Native reads fail or several owned identities match.
     :raises ValueError: The preferred naming base cannot produce a valid name.
-    """  # noqa: DOC502 - Shared discovery and naming propagate failures.
+    """  # noqa: DOC503 - The shared name builder can raise ValueError.
     observed = _owned_binding_names(action, scope, service)
     if len(observed) > 1:
         raise KubernetesError("scc_role_binding_ambiguous")
