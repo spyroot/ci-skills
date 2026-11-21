@@ -71,6 +71,17 @@ GITLAB_ROUTED_AUTHORITIES: Final = (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY)
 # and how the instance was selected (ROUTING_SELECTED_BY_* or the caller's option).
 ROUTING_RESULT_KEY: Final = "routing"
 ROUTING_SELECTED_BY_KEY: Final = "selected_by"
+# Result fields that name the target a command read. In `Target.selection_report`,
+# which `access_check` and `ci-api` use: the file; the source that selected it
+# (`env:CI_SKILLS_TARGET`, `project`, `user`, `argv:--target` or `binding`); and the
+# selection string with any `--gitlab` option appended. GitLab action and mirror
+# results append options to `target_source` itself. CREDENTIAL_SOURCES_KEY maps each
+# provider to the `file:`, `env:` or native-store reference of its token.
+TARGET_FILE_KEY: Final = "target_file"
+TARGET_SOURCE_KEY: Final = "target_source"
+TARGET_SELECTION_KEY: Final = "target_selection"
+TARGET_REPORT_KEYS: Final = (TARGET_FILE_KEY, TARGET_SOURCE_KEY, TARGET_SELECTION_KEY)
+CREDENTIAL_SOURCES_KEY: Final = "credential_sources"
 ROUTING_SELECTED_BY_DEFAULT: Final = "default"
 ROUTING_SELECTED_BY_LEGACY: Final = "legacy"
 ROUTING_ARGV_PREFIX: Final = "argv:"
