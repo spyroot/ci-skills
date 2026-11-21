@@ -10,8 +10,9 @@ from types import MappingProxyType
 from typing import Final
 
 import pytest
-from conftest import REPO_ROOT, import_script_module, parse_json_output, run_script
+from conftest import import_script_module, parse_json_output, run_script
 from jsonschema import Draft202012Validator
+from test_propositions import COMMAND_CONTRACT_SCHEMA
 
 CLI = import_script_module("lib.python.core.gitlab.cluster_agent.cli")
 CATALOG = import_script_module("lib.python.core.catalog")
@@ -59,7 +60,6 @@ CREDENTIALS_FIELD: Final = "credentials"
 CREDENTIALS_HEADING: Final = "Credentials:"
 DESCRIPTION_HEADING: Final = "Description:"
 EXAMPLES_HEADING: Final = "Examples:"
-COMMAND_CONTRACT_SCHEMA: Final = REPO_ROOT / "schemas" / "command-contract.schema.json"
 
 # Each valid invocation is immutable. Mutation cases change exactly one flag
 # on their own copy, with the same selected provider project in all cases.
@@ -351,8 +351,7 @@ def test_agent_help_and_describe_carry_the_catalog_credential_lines() -> None:
 
     help_text, contract = _help_and_contract(CLI.COMMAND)
 
-    schema = json.loads(COMMAND_CONTRACT_SCHEMA.read_text(encoding="utf-8"))
-    Draft202012Validator(schema).validate(contract)
+    Draft202012Validator(COMMAND_CONTRACT_SCHEMA).validate(contract)
     assert contract[CREDENTIALS_FIELD] == declared
     assert help_text.count(CREDENTIALS_HEADING) == 1
     positions = [

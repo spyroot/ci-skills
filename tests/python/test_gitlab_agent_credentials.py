@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from typing import Any, Final, Union
 
 import pytest
+import test_gitlab_agent_cli as CLI_TEST
+import test_gitlab_agent_connection as CONNECTION_TEST
 from conftest import FIXTURE_GITLAB, import_script_module
 from jsonschema import Draft202012Validator
 
@@ -25,6 +27,7 @@ RECEIPT = import_script_module("lib.python.core.gitlab.cluster_agent.receipt")
 RECOVERY = import_script_module("lib.python.core.gitlab.cluster_agent.recovery")
 TERMS = import_script_module("lib.python.core.gitlab.cluster_agent.terms")
 REPORT = import_script_module("lib.python.core.report")
+RUNNER_SCOPE = import_script_module("lib.python.core.kubernetes.runner_scope")
 RUNTIME = import_script_module("lib.python.core.runtime")
 SCHEMA = import_script_module("lib.python.core.schema")
 SECRET = import_script_module("lib.python.core.gitlab.cluster_agent.secret")
@@ -32,22 +35,22 @@ SELECTION = import_script_module("lib.python.core.gitlab.cluster_agent.selection
 STATUS = import_script_module("lib.python.sys.status")
 WORKFLOW = import_script_module("lib.python.core.gitlab.cluster_agent.workflow")
 
-CONNECT: Final = "connect"
-VERIFY: Final = "verify"
-DELETE: Final = "delete"
+CONNECT: Final = TERMS.CONNECT
+VERIFY: Final = TERMS.VERIFY
+DELETE: Final = TERMS.DELETE
 GET: Final = "GET"
 POST: Final = "POST"
 PROJECT_ID: Final = 42
-PROJECT_PATH: Final = "consumer/project"
+PROJECT_PATH: Final = CLI_TEST.PROJECT
 PROJECT_ROUTE: Final = f"projects/{PROJECT_ID}"
 AGENTS_ROUTE: Final = f"{PROJECT_ROUTE}/cluster_agents"
 TOKENS_ROUTE: Final = f"{AGENTS_ROUTE}/17/tokens"
 GRAPHQL_ROUTE: Final = "graphql"
 ROUTE_QUERY: Final = "?page=1"
 ROUTE_FRAGMENT: Final = "#notes"
-AGENT_NAME: Final = "consumer-agent"
-RUN_ID: Final = "run-001"
-DIGEST: Final = "a" * 64
+AGENT_NAME: Final = CLI_TEST.AGENT_NAME
+RUN_ID: Final = CLI_TEST.RUN_ID
+DIGEST: Final = CLI_TEST.CONFIRMATION
 TOKEN_ID: Final = 29
 TOKEN_NAME: Final = "consumer-agent-gitlab-token"
 NAMESPACE: Final = "consumer-0a1b2c"
@@ -66,19 +69,19 @@ KAS_ADDRESS: Final = "wss://kas.gitlab.example.test"
 TOKEN_PLAINTEXT: Final = "unit-agent-token-plaintext"
 # Input field that holds TOKEN_PLAINTEXT; the trace must never copy it.
 PLANTED_FIELD: Final = "agent_token"
-CONNECTED: Final = "CONNECTED"
-NAMESPACE_KIND: Final = "Namespace"
-SECRET_KIND: Final = "Secret"
-DEPLOYMENT_KIND: Final = "Deployment"
+CONNECTED: Final = CONNECTION_TEST.CONNECTED
+NAMESPACE_KIND: Final = RUNNER_SCOPE.NAMESPACE_KIND
+SECRET_KIND: Final = RUNNER_SCOPE.SECRET_KIND
+DEPLOYMENT_KIND: Final = RUNNER_SCOPE.DEPLOYMENT_KIND
 OTHER_SECRET_KEY: Final = "ca.crt"
 UNKNOWN_FIELD: Final = "value"
 TABLE_FIELD: Final = "table"
-CREDENTIALS_FIELD: Final = "credentials"
+CREDENTIALS_FIELD: Final = CLI_TEST.CREDENTIALS_FIELD
 RECORD_DEFINITION: Final = "record"
 INSTALLATION_FIELD: Final = "installation"
 RESOURCES_FIELD: Final = "resources"
 UNKNOWN_PROPERTY: Final = "additionalProperties"
-RECEIPT_FILE: Final = "agent-receipt.json"
+RECEIPT_FILE: Final = CLI_TEST.RECEIPT
 JSON_MODE: Final = "json"
 
 CALLS: Final = (
@@ -318,6 +321,18 @@ def _logical_absence(selection: SELECTION.ConnectSelection) -> object:
             False,
             (),
             id="tracked-delete-plan",
+        ),
+        # A confirmed delete removes the objects the ownership rows mark created;
+        # it creates none, so those markers must not reach the trace.
+        pytest.param(
+            DELETE,
+            STATUS.APPLIED,
+            True,
+            False,
+            TERMS.RECORDED,
+            False,
+            (),
+            id="tracked-delete-apply",
         ),
         pytest.param(
             DELETE,

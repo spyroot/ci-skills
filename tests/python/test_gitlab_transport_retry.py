@@ -32,6 +32,8 @@ PAGE_QUERY: Final = "?per_page=100&page=1"
 RAW_TEXT: Final = "plain response text\n"
 JSON_OK: Final = 'HTTP/2 200 OK\r\n\r\n{"id":42}'
 INCLUDE_FLAG: Final = "--include"
+UNPARSEABLE_ENDPOINT: Final = "https://["
+QUERY_ONLY_ENDPOINT: Final = "?x"
 
 
 if TYPE_CHECKING:
@@ -65,8 +67,22 @@ def _result(code: int, stdout: str = "", stderr: str = "") -> RUNTIME.CommandRes
     return RUNTIME.CommandResult(("glab",), code, stdout, stderr)
 
 
-def test_malformed_absolute_endpoint_is_classified_before_native_command() -> None:
-    """Reject endpoints whose URL parser fails before running ``glab``.
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        pytest.param(UNPARSEABLE_ENDPOINT, id="url-parser-fails"),
+        pytest.param(QUERY_ONLY_ENDPOINT, id="query-without-path"),
+    ),
+)
+def test_malformed_endpoint_is_classified_before_native_command(
+    endpoint: str,
+) -> None:
+    """Reject endpoints whose URL parser fails or whose path is empty before ``glab``.
+
+    A query-only endpoint has an empty path; before the empty-path rule it was
+    sent and recorded as a GET of an empty endpoint.
+
+    :param endpoint: Malformed caller-selected endpoint.
     :returns: None; assertions in the body validate the regression.
     """
     calls: MutableSequence[Sequence[str]] = []
@@ -87,7 +103,7 @@ def test_malformed_absolute_endpoint_is_classified_before_native_command() -> No
 
     client = API.GlabAPIClient(command=command)
     with pytest.raises(API.GitLabAPIError, match="invalid_relative_endpoint"):
-        client.get_json(_session(), "https://[")
+        client.get_json(_session(), endpoint)
 
     assert calls == []
     assert client.requests == ()
