@@ -330,6 +330,8 @@ def test_agent_entrypoint_emits_schema_valid_offline_json(
     assert result["records"] == result["errors"] == result["cleanup"]["failures"] == []
     assert result["filters"]["project"] == PROJECT
     assert result["filters"]["project_name"] == PROJECT_NAME
+    assert result["target_source"] == f"env:{BINDING.TARGET_ENV}"
+    assert str(target_file) not in json.dumps(result)
 
 
 def _help_and_contract(command: str) -> tuple[str, Mapping[str, object]]:

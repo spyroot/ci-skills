@@ -23,6 +23,7 @@ from lib.python.core.cli import _failure, parser
 from lib.python.core.cli_api import APIError, RequestDeadline
 from lib.python.core.gitlab.cluster_agent.authority import (
     observe_authorities,
+    reported_target_source,
     resolve_agent_target,
 )
 from lib.python.core.gitlab.cluster_agent.ci_access import staged_producers
@@ -135,7 +136,7 @@ def offline_result(args: Namespace) -> JSONObject:
     result.update(
         schema_version=ROUTED_RESULT_SCHEMA_VERSION,
         status=DRY_RUN,
-        target_source=target.target_reference,
+        target_source=reported_target_source(target),
         operation=args.action,
         plan_digest=None,
         mutated=False,

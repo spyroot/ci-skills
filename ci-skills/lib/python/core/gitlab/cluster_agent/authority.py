@@ -50,6 +50,22 @@ class AgentTarget:
     project: str
 
 
+def reported_target_source(target: Target) -> str:
+    """Report how the target was selected, without its file path.
+
+    The gitlab_mirror.py command reports the same value: the source kind, such as
+    ``env:CI_SKILLS_TARGET`` or ``user``, with ``;argv:--gitlab=...`` appended
+    when the caller passed a GitLab selector.
+
+    :param target: Resolved target.
+    :returns: Source kind and caller selection for the result ``target_source``.
+    :raises TargetError: Source resolution has not classified the target.
+    """
+    if target.source_kind is None:
+        raise TargetError("agent_target_unresolved")
+    return target.selection_source(target.source_kind)
+
+
 def resolve_agent_target(
     target_path: str | None,
     binding: str | None,
@@ -150,7 +166,7 @@ def observe_authorities(
         GitLabOperationTarget(target.require_gitlab(), target.source_file),
         target_kind="project",
         target_reference=selected.project,
-        target_source=target.target_reference,
+        target_source=reported_target_source(target),
         revision=revision,
     )
     if session.skill["revision"]["verified"] is not True:
