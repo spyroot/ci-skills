@@ -25,9 +25,15 @@ from lib.python.core.cli import output_mode, parser
 from lib.python.core.endpoints import ROUTING_RESULT_KEY
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
-from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    copy_json,
+    is_json_value,
+    json_object,
+)
 from lib.python.core.logging import log_event
-from lib.python.core.portable import write_portable_receipt
+from lib.python.core.portable import portable, write_portable_receipt
 from lib.python.core.report import emit, plan_digest
 from lib.python.core.runner_identity import validate_project_name
 from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
@@ -43,6 +49,45 @@ RUNNER_CONTROLS: Final = MappingProxyType(
         "set-name": "description",
     }
 )
+
+
+def runner_control_plan_digest(target: JSONObject, intent: JSONObject) -> str:
+    """Fingerprint canonical runner control inputs that receipts can reproduce.
+
+    :param target: Resolved authority metadata or a receipt containing it.
+    :param intent: Runner control inputs or a public plan containing them.
+    :returns: SHA-256 digest of the same inputs in native and portable receipts.
+    """
+    fields: JSONObject = {
+        key: target.get(key)
+        for key in (
+            "origin",
+            "target_file",
+            "target_source",
+            "tested_revision",
+            ROUTING_RESULT_KEY,
+        )
+    }
+    return plan_digest(
+        json_object(
+            portable(
+                {
+                    **fields,
+                    **{
+                        key: intent.get(key)
+                        for key in (
+                            "operation",
+                            "target_kind",
+                            "target_reference",
+                            "resource_id",
+                            "body_sha256",
+                            "runner_control",
+                        )
+                    },
+                }
+            )
+        )
+    )
 
 
 class ActionError(ValueError):
@@ -206,6 +251,26 @@ class ActionPlan(SkillAction):
         :raises ValueError: If canonical JSON encoding rejects the plan's structure.
         :raises RecursionError: If supplied containers are cyclic or excessively nested.
         """  # noqa: DOC502 - Shared canonical plan serialization propagates failures.
+        if self.kind == "gitlab_runner" and self.operation in RUNNER_CONTROLS:
+            return runner_control_plan_digest(
+                {
+                    "origin": self.origin,
+                    "target_file": self.target_file,
+                    "target_source": self.target_source,
+                    "tested_revision": self.revision,
+                    ROUTING_RESULT_KEY: self.routing.as_dict()
+                    if self.routing
+                    else None,
+                },
+                {
+                    "operation": self.operation,
+                    "target_kind": self.target_kind,
+                    "target_reference": self.target_reference,
+                    "resource_id": self.resource_id,
+                    "body_sha256": self.request_digest,
+                    "runner_control": self.runner_snapshot,
+                },
+            )
         data = {
             "schema_version": "1.0",
             "kind": self.kind,
@@ -223,13 +288,21 @@ class ActionPlan(SkillAction):
         }
         if self.project_name is not None:
             data["project_name"] = validate_project_name(self.project_name)
-        if self.kind == "gitlab_runner" and (
-            self.operation == "delete" or self.operation in RUNNER_CONTROLS
-        ):
+        if self.kind == "gitlab_runner" and self.operation == "delete":
             data["runner_snapshot"] = self.runner_snapshot
         if self.routing is not None:
             data[ROUTING_RESULT_KEY] = self.routing.as_dict()
         return plan_digest(data)
+
+    @property
+    def request_digest(self) -> str:
+        """Fingerprint intent without exposing the underlying request body.
+
+        :returns: SHA-256 digest of the body and any runner control name override.
+        """
+        if self.operation in RUNNER_CONTROLS and self.project_name is not None:
+            return plan_digest({"body": self.body, "project_name": self.project_name})
+        return plan_digest(self.body)
 
     def verified_target_id(
         self, session: BoundGitLabSession, access: JSONObject
@@ -292,7 +365,7 @@ class ActionPlan(SkillAction):
                 )
             ),
             "fields": sorted(self.body),
-            "body_sha256": plan_digest(self.body),
+            "body_sha256": self.request_digest,
             "plan_digest": self.digest,
             "one_time_sink_required": self.operation == "create"
             and self.kind == "gitlab_runner",

@@ -42,6 +42,18 @@ blocks apply. For later changes to a runner record, use the
 ## Plan and apply
 
 `CI_SKILLS_ROOT` is the installed skill directory reported by the installer.
+Run from the consumer repository root. Without an explicit `--binding`, the
+[target resolver](access.md#where-the-target-file-comes-from) uses
+`CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
+`~/.ci-skills/target.toml`. The selected GitLab route identifies the
+Kubernetes and Harbor tables. Those tables provide the Kubernetes context,
+API server, kubeconfig selection, and prepared Harbor toolbox. Relative
+credential paths resolve beside the selected target file.
+
+`image_build_readiness.py --describe --json` gives the chain inputs and
+result schema. `reference.py image_build_readiness.py --json` lists the
+chain's related tools and references.
+
 A project path is enough to select a project runner. A group runner takes
 `--group` and `--project-name`.
 

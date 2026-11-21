@@ -29,10 +29,11 @@ from lib.python.core.gitlab.runner_manager import (
 )
 from lib.python.core.gitlab.runner_manager.action import MANAGER_ROLE
 from lib.python.core.harbor.registry_mirror import is_registry_digest
-from lib.python.core.json_types import JSONObject, copy_json
+from lib.python.core.json_types import JSONObject, copy_json, json_object
 from lib.python.core.kubernetes.podman_probe import PROBE_KIND, ProbeMode
 from lib.python.core.kubernetes.run_scope import RUN_ID_LIMIT, RunScope
 from lib.python.core.kubernetes.runner_scope import scope_key
+from lib.python.core.portable import portable
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import plan_digest
 from lib.python.core.runner_identity import (
@@ -50,6 +51,7 @@ from lib.python.core.runner_options import (
     runner_tags,
 )
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
+from lib.python.core.runtime import redact_tree
 from lib.python.core.target import (
     GitLabOperationTarget,
     GitLabSelection,
@@ -614,12 +616,13 @@ class ImageBuildChainAction(SkillAction):
         """Render one stable three-step delivery plan.
 
         :param selected_node: Exact worker selected for the runner workload.
-        :returns: Stable toolbox publication, naming, and runner inputs.
+        :returns: Stable, portable toolbox publication, naming, and runner inputs.
+        :raises ValueError: A live plan contains inputs that would be redacted.
         """
         spec = self.toolbox_spec
         harbor = self.target.harbor
         kubernetes = self.target.kubernetes
-        return {
+        document: JSONObject = {
             "kind": PROBE_KIND,
             "operation": CHAIN_OPERATION,
             "target_file": str(self.target.source_file),
@@ -680,9 +683,12 @@ class ImageBuildChainAction(SkillAction):
                 "repository_source": self.repository_identity.source,
                 "description_source": self.resolved_description.source,
                 "protected": parse_protected(getattr(self.args, "protected", None)),
-                "token_sink": "ephemeral",
             },
         }
+        public_plan = redact_tree(document)
+        if self.mode != ProbeMode.DRY_RUN and public_plan != document:
+            raise ValueError("chain_plan_contains_sensitive_values")
+        return json_object(portable(public_plan))
 
     def fingerprint(self, selected_node: str) -> str:
         """Hash the stable delivery plan used by live plan and apply.

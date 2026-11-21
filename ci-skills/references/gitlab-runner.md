@@ -11,6 +11,18 @@ examples. `unset` means the key has no value until you set one.
 
 Use the installed `gitlab_runner.py` command to change GitLab's runner record.
 `CI_SKILLS_ROOT` is the installed directory reported by the installer.
+Run from the consumer repository root. Target selection uses
+`CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
+`~/.ci-skills/target.toml`. The selected GitLab table's `token_file` resolves
+relative to that file. An explicit `--binding` takes precedence. See the
+[access reference](access.md#where-the-target-file-comes-from) for the route
+and credential rules.
+
+`gitlab_runner.py --describe --json` gives the command and result schemas.
+`reference.py gitlab_runner.py --json` lists related tools and references.
+Read this section directly with
+`reference.py get gitlab-runner manage-a-runner-record --json`.
+
 The default create description and scheduling tag use `--project-name` when supplied,
 or the selected repository name. Keep the selected project and runner ID when
 changing an existing runner.
@@ -39,6 +51,7 @@ same runner ID.
 Use `--live-plan` in place of `--dry-run` for the four new controls. Then repeat
 the same inputs with `--apply --confirm-plan DIGEST_FROM_PLAN`. Apply checks
 the live state again before writing and reads the native result independently.
+For create and additive tag, confirm the digest from the dry run shown above.
 A fresh live plan after a verified change can be confirmed for a `NO_OP`.
 Skill invocations sharing the runner lock directory serialize assignment and
 control writes. Coordinate external runner updates during a confirmed change.

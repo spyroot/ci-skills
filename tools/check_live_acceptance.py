@@ -55,7 +55,10 @@ from lib.python.core.cli_api import response_decoder
 from lib.python.core.endpoints import GITLAB_AUTHORITY, KUBERNETES_AUTHORITY
 from lib.python.core.git.mirroring import MirrorField
 from lib.python.core.git.remote import GIT_EXECUTABLE
-from lib.python.core.gitlab.gitlab_actions import RUNNER_CONTROLS
+from lib.python.core.gitlab.gitlab_actions import (
+    RUNNER_CONTROLS,
+    runner_control_plan_digest,
+)
 from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
 from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
 from lib.python.core.gitlab.mirror.constants import Field as MirrorReceiptField
@@ -64,6 +67,7 @@ from lib.python.core.gitlab.mirror.evidence import (
     check_mirror_pair,
     check_mirror_receipt,
 )
+from lib.python.core.harbor.registry_mirror import is_registry_digest
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -79,6 +83,13 @@ from lib.python.core.kubernetes.podman_evidence import (
 )
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.provenance import DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY
+from lib.python.core.report import plan_digest
+from lib.python.core.runner_scope import (
+    SCOPE_CALLBACK,
+    ScopeOwnership,
+    ScopePurpose,
+    ScopeState,
+)
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import (
     APPLIED,
@@ -1160,7 +1171,7 @@ def _runner_control_readback_verified(
         or required.get("target_kind") != "project"
         or plan.get("target_kind") != "project"
         or plan.get("operation") != operation
-        or not receipt.get("plan_digest")
+        or receipt.get("plan_digest") != runner_control_plan_digest(receipt, plan)
         or plan.get("plan_digest") != receipt["plan_digest"]
         or plan.get("confirmation_ready") is not True
         or receipt.get("records") != [observed]
@@ -2001,7 +2012,7 @@ def _chain_copy_image_verified(
     """
     if (
         receipt.get("confirmable") is not True
-        or not receipt.get("plan_digest")
+        or receipt.get("plan_digest") != plan_digest(_mapping(receipt.get("plan")))
         or receipt["plan_digest"] != confirmation.get("plan_digest")
     ):
         return False
@@ -2021,8 +2032,7 @@ def _chain_copy_image_verified(
     source_repository, separator, digest = source.rpartition("@")
     try:
         authority = urlsplit(origin)
-        valid_digest = digest == f"sha256:{normalized_digest(digest)}"
-    except (KubernetesError, ValueError):
+    except ValueError:
         return False
     prefix = f"{authority.netloc}/{project}/"
     expected_image = f"{prefix}{repository}@{digest}"
@@ -2033,7 +2043,7 @@ def _chain_copy_image_verified(
         and bool(authority.netloc)
         and source_repository.startswith(prefix)
         and len(source_repository) > len(prefix)
-        and valid_digest
+        and is_registry_digest(digest)
         and publish.get("digest") == digest
         and publish.get("image") == expected_image
         and isinstance(pods, list)
@@ -2056,6 +2066,126 @@ def _running_pod_has_digest(value: JSONValue, digest: str) -> bool:
         return False
     _, scheme, reference = image_id.partition("://")
     return (reference if scheme else image_id).rpartition("@")[2] == digest
+
+
+def _chain_smoke_cleanup_verified(
+    receipt: JSONObject, review: AcceptanceReview
+) -> bool:
+    """Verify independent removal and repeat absence of the chain's smoke resources.
+
+    :param receipt: Copy delivery report with an appended cleanup observation.
+    :param review: Candidate validation identity and receipt freshness bounds.
+    :returns: Whether the observations prove cleanup of the owned native identities.
+    """
+    plan = _mapping(receipt.get("plan"))
+    toolbox = _mapping(plan.get("toolbox"))
+    scope = _mapping(_mapping(plan.get("runner")).get("run_scope"))
+    records = receipt.get("records")
+    if not isinstance(records, list):
+        return False
+    cleanup, created, published, scopes = (
+        _mapping(_callback_record(records, callback))
+        for callback in ("SmokeCleanup", "CreateRunner", "HarborPush", SCOPE_CALLBACK)
+    )
+    access = _mapping(_mapping(receipt.get("access")).get("gitlab_runner"))
+    host = receipt.get(EXECUTION_HOST_FIELD) or access.get(EXECUTION_HOST_FIELD)
+    namespace = receipt.get("namespace")
+    scopes_list = scopes.get("scopes")
+    namespace_uid = _owned_manager_namespace_uid(scopes_list, namespace)
+    runner_id = created.get("id")
+    project = toolbox.get("project")
+    repository = toolbox.get("repository")
+    before = _mapping(cleanup.get(BEFORE_FIELD))
+    repository_id = before.get("repository_id")
+    baseline = _mapping(cleanup.get("preflight"))
+    if (
+        not host
+        or not _smoke_cleanup_matches_execution(
+            {**receipt, EXECUTION_HOST_FIELD: host},
+            cleanup,
+            review.now,
+            review.max_age_days,
+        )
+        or created.get("action") != APPLIED
+        or created.get(MUTATED_FIELD) is not True
+        or type(runner_id) is not int
+        or runner_id <= 0
+        or scopes.get("verified") is not True
+        or scope.get("owns_namespace") is not True
+        or scope.get("namespace") != namespace
+        or namespace_uid is None
+        or published.get("action") != APPLIED
+        or "destination_digest" not in toolbox
+        or toolbox["destination_digest"] is not None
+        or type(repository_id) is not int
+        or repository_id <= 0
+        or baseline.get("namespace_absent") is not True
+        or baseline.get("repository_absent") is not True
+        or baseline.get("namespace") != namespace
+        or baseline.get("repository") != f"{project}/{repository}"
+    ):
+        return False
+    identity = {
+        "runner_id": runner_id,
+        "namespace": namespace,
+        "namespace_uid": namespace_uid,
+        "repository": f"{project}/{repository}",
+        "repository_id": repository_id,
+        "digest": published.get("digest"),
+    }
+    deletion = _mapping(cleanup.get(DELETE_FIELD))
+    after = _mapping(cleanup.get(AFTER_FIELD))
+    repeat = _mapping(cleanup.get(REPEAT_FIELD))
+    return (
+        all(
+            all(row.get(key) == value for key, value in identity.items())
+            for row in (before, deletion, after, repeat)
+        )
+        and deletion.get(MUTATED_FIELD) is True
+        and repeat.get(MUTATED_FIELD) is False
+        and all(
+            row.get("runner_http_status") == HTTPStatus.NOT_FOUND
+            and row.get("namespace_absent") is True
+            and row.get("repository_absent") is True
+            and row.get("source_digest") == identity["digest"]
+            for row in (after, repeat)
+        )
+    )
+
+
+def _owned_manager_namespace_uid(
+    observations: JSONValue, namespace: JSONValue
+) -> Optional[str]:
+    """Select the observed UID of the single run-owned manager namespace.
+
+    :param observations: Shared runner-scope observations in the delivery report.
+    :param namespace: Exact manager namespace retained in the delivery receipt.
+    :returns: Native UID if ownership and presence were verified.
+    """
+    if (
+        not isinstance(observations, list)
+        or not isinstance(namespace, str)
+        or not namespace
+    ):
+        return None
+    managers = [
+        item
+        for item in observations
+        if isinstance(item, dict) and item.get("purpose") == ScopePurpose.MANAGER
+    ]
+    if len(managers) != 1:
+        return None
+    manager = managers[0]
+    uid = manager.get("uid")
+    if (
+        manager.get("namespace") == namespace
+        and manager.get("ownership") == ScopeOwnership.OPERATION_OWNED
+        and manager.get("state") == ScopeState.PRESENT
+        and isinstance(uid, str)
+        and uid
+    ):
+        return uid
+    return None
 
 
 def _check_targeted_receipt(
@@ -2095,6 +2225,11 @@ def _check_targeted_receipt(
             cleanup = _mapping(receipt.get("cleanup"))
             if cleanup.get("status") != PASS or cleanup.get("failures") != []:
                 problems.append(f"{name}:cleanup_unproven")
+            toolbox = _mapping(_mapping(receipt.get("plan")).get("toolbox"))
+            if toolbox.get("mode") == "copy" and not _chain_smoke_cleanup_verified(
+                receipt, review
+            ):
+                problems.append(f"{name}:smoke_cleanup_unverified")
             problems.extend(_check_chain_runner_readback(name, receipt, review))
         elif kind == MIRROR_KIND and operation == MIRROR_OPERATION:
             problems.extend(

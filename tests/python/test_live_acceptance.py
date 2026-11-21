@@ -38,6 +38,17 @@ from lib.python.core.endpoints import (
 )
 from lib.python.core.git.remote import GIT_EXECUTABLE
 from lib.python.core.provenance import DIGEST_VALUE_KEY, FUNCTIONAL_DIGEST_KEY
+from lib.python.core.report import plan_digest
+from lib.python.core.runner_identity import resolve_repository
+from lib.python.core.runner_scope import (
+    ScopeObservation,
+    ScopeOwnership,
+    ScopePurpose,
+    ScopeRetention,
+    ScopeSource,
+    ScopeState,
+    scope_record,
+)
 from test_gitlab_actions import _plan, _tag_output
 from test_gitlab_mirror import (
     MIRROR_APPLIED_FILE,
@@ -62,7 +73,11 @@ MIRROR_REQUIRED_OPERATIONS: Final = (
     ("gitlab_mirror", "sync", STATUS.NO_OP),
 )
 MIRROR_PAIR_PREFIX: Final[str] = "gitlab_mirror:sync:"
-MIRROR_CLEANUP_REASON: Final[str] = "smoke_cleanup_unverified"
+SMOKE_CLEANUP_REASON: Final = "smoke_cleanup_unverified"
+COPY_CLEANUP_CALLBACK: Final = "SmokeCleanup"
+COPY_IMAGE_REASON: Final = "delivery_image_mismatch"
+WRONG_PLAN_DIGEST: Final = "b" * 64
+WRONG_IMAGE_DIGEST: Final = f"sha256:{WRONG_PLAN_DIGEST}"
 # Committed runner creation receipt in one of the policy's receipt directories.
 RUNNER_CREATE_RECEIPT: Final[str] = "runner-create-applied.json"
 
@@ -2005,7 +2020,7 @@ def test_targeted_chain_requires_matching_independent_runner_read(failure: str) 
 
 @pytest.fixture(scope="module")
 def copy_chain_baseline() -> str:
-    """Store complete copy delivery and independent runner proof as immutable JSON.
+    """Store complete copy delivery, independent runner read, and owned cleanup proof.
 
     :returns: Serialized receipts retaining the historical native deployment.
     """
@@ -2013,65 +2028,263 @@ def copy_chain_baseline() -> str:
     chain = receipts["toolbox-runner.json"]
     records = chain["records"]
     publish = next(row for row in records if row["callback"] == "HarborPush")
+    created = next(row for row in records if row["callback"] == "CreateRunner")
     host, project, repository = publish["image"].split("@", 1)[0].split("/", 2)
-    source = f"{host}/{project}/reference-toolbox@{publish['digest']}"
-    chain["plan"]["toolbox"].update(
+    digest = publish["digest"]
+    source = f"{host}/{project}/reference-toolbox@{digest}"
+    namespace = chain["namespace"]
+    scope = ScopeObservation(
+        ScopePurpose.MANAGER,
+        namespace,
+        ScopeSource.OPERATION_CREATED,
+        uid="copy-smoke-namespace-uid",
+        ownership=ScopeOwnership.OPERATION_OWNED,
+        state=ScopeState.PRESENT,
+        retention=ScopeRetention.RETAINED,
+    )
+    plan = chain["plan"]
+    plan["toolbox"].update(
         mode="copy",
         source_image=source,
         origin=f"https://{host}",
         project=project,
         repository=repository,
+        destination_digest=None,
     )
+    plan["runner"]["run_scope"] = {
+        "run_id": chain["run_id"],
+        "namespace": namespace,
+        "owns_namespace": True,
+    }
     next(row for row in records if row["callback"] == "ConfirmWorkflow")["image"] = (
         source
     )
-    chain["records"] = [row for row in records if row["callback"] != "HarborBuild"]
+    confirmation = next(row for row in records if row["callback"] == "ResolveChainPlan")
+    chain["plan_digest"] = confirmation["plan_digest"] = plan_digest(plan)
+
+    access = chain["access"]["gitlab_runner"]
+    repository_path = f"{project}/{repository}"
+    identity = {
+        "runner_id": created["id"],
+        "namespace": namespace,
+        "namespace_uid": scope.uid,
+        "repository": repository_path,
+        "repository_id": 312,
+        "digest": digest,
+    }
+    absent = {
+        **identity,
+        "runner_http_status": HTTPStatus.NOT_FOUND,
+        "namespace_absent": True,
+        "repository_absent": True,
+        "source_digest": digest,
+    }
+    cleanup = {
+        "callback": COPY_CLEANUP_CALLBACK,
+        "verified": True,
+        "status": STATUS.PASS,
+        "captured_at": NOW.isoformat(),
+        "tested_revision": chain["tested_revision"],
+        "skill_digest": chain["skill"][DIGEST_VALUE_KEY],
+        "execution_host": access["execution_host"],
+        "preflight": {
+            "namespace": namespace,
+            "namespace_absent": True,
+            "repository": repository_path,
+            "repository_absent": True,
+        },
+        "before": identity,
+        "delete": {**identity, "mutated": True},
+        "after": absent,
+        "repeat": {**absent, "mutated": False},
+    }
+    scopes = scope_record(
+        resolve_repository(access["target"]["full_path"]), None, None, (scope,)
+    )
+    chain["records"] = [
+        *(row for row in records if row["callback"] != "HarborBuild"),
+        scopes,
+        cleanup,
+    ]
     chain["summary"]["record_count"] = len(chain["records"])
     return json.dumps(receipts)
 
 
 @pytest.mark.parametrize(
-    ("callback", "field", "replacement"),
+    ("path", "replacement", "reason"),
     (
-        (None, "", ""),
-        ("plan", "source_image", "harbor.example.test/hott/reference:latest"),
-        ("ConfirmWorkflow", "image", "harbor.example.test/hott/other:latest"),
-        ("ResolveChainPlan", "plan_digest", "b" * 64),
-        ("HarborPush", "digest", "sha256:" + "b" * 64),
-        ("DeployManagerRunner", "image_id", "containerd://sha256:" + "b" * 64),
-        ("DeployManagerRunner", "pods", []),
+        pytest.param((), None, None, id="complete-proof"),
+        pytest.param(
+            ("ResolveChainPlan", "plan_digest"),
+            WRONG_PLAN_DIGEST,
+            COPY_IMAGE_REASON,
+            id="callback-digest",
+        ),
+        pytest.param(
+            ("receipt", "plan_digest"),
+            WRONG_PLAN_DIGEST,
+            COPY_IMAGE_REASON,
+            id="outer-digest",
+        ),
+        pytest.param(
+            ("plan", "toolbox", "tag"),
+            "other-destination-tag",
+            COPY_IMAGE_REASON,
+            id="edited-plan-tag",
+        ),
+        pytest.param(
+            ("plan", "toolbox", "source_image"),
+            "harbor.example.test/hott/reference:latest",
+            COPY_IMAGE_REASON,
+            id="mutable-source",
+        ),
+        pytest.param(
+            ("ConfirmWorkflow", "image"),
+            "harbor.example.test/hott/other:latest",
+            COPY_IMAGE_REASON,
+            id="source-readback",
+        ),
+        pytest.param(
+            ("HarborPush", "digest"),
+            WRONG_IMAGE_DIGEST,
+            COPY_IMAGE_REASON,
+            id="publication-digest",
+        ),
+        pytest.param(
+            ("DeployManagerRunner", "pods", 0, "image_id"),
+            f"containerd://{WRONG_IMAGE_DIGEST}",
+            COPY_IMAGE_REASON,
+            id="pod-image-id",
+        ),
+        pytest.param(
+            ("DeployManagerRunner", "pods"), [], COPY_IMAGE_REASON, id="no-pods"
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "callback"),
+            "UnrelatedCleanup",
+            SMOKE_CLEANUP_REASON,
+            id="missing-independent-cleanup",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "execution_host"),
+            "other.example.test",
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-host",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "tested_revision"),
+            OTHER_OID,
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-revision",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "captured_at"),
+            (NOW - timedelta(days=2)).isoformat(),
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-precedes-delivery",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "preflight", "repository_absent"),
+            False,
+            SMOKE_CLEANUP_REASON,
+            id="preexisting-repository",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "preflight", "namespace_absent"),
+            False,
+            SMOKE_CLEANUP_REASON,
+            id="preexisting-namespace",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "delete", "runner_id"),
+            999,
+            SMOKE_CLEANUP_REASON,
+            id="other-runner-deleted",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "delete", "namespace_uid"),
+            "different-namespace-uid",
+            SMOKE_CLEANUP_REASON,
+            id="other-namespace-deleted",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "delete", "repository_id"),
+            999,
+            SMOKE_CLEANUP_REASON,
+            id="other-repository-deleted",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "delete", "mutated"),
+            False,
+            SMOKE_CLEANUP_REASON,
+            id="deletion-unproven",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "after", "runner_http_status"),
+            HTTPStatus.OK,
+            SMOKE_CLEANUP_REASON,
+            id="runner-still-present",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "after", "namespace_absent"),
+            False,
+            SMOKE_CLEANUP_REASON,
+            id="namespace-still-present",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "after", "repository_absent"),
+            False,
+            SMOKE_CLEANUP_REASON,
+            id="repository-still-present",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "repeat", "mutated"),
+            True,
+            SMOKE_CLEANUP_REASON,
+            id="cleanup-repeat-mutated",
+        ),
+        pytest.param(
+            (COPY_CLEANUP_CALLBACK, "repeat", "source_digest"),
+            WRONG_IMAGE_DIGEST,
+            SMOKE_CLEANUP_REASON,
+            id="source-image-changed",
+        ),
     ),
 )
 def test_targeted_copy_chain_requires_native_digest_continuity(
     copy_chain_baseline: str,
-    callback: str | None,
-    field: str,
+    path: tuple[str | int, ...],
     replacement: JSONValue,
+    reason: str | None,
 ) -> None:
-    """Accept a copy and reject one broken link at a time.
+    """Accept complete copy evidence and reject one independently broken link.
 
     :param copy_chain_baseline: Immutable verified-chain fixture decoded per case.
-    :param callback: Source of the one observation under test.
-    :param field: Receipt field supplied by that observation.
-    :param replacement: Deliberately wrong or missing observation value.
+    :param path: Location of the sole changed receipt field, if any.
+    :param replacement: Deliberately wrong observation supplied at that location.
+    :param reason: Expected refusal diagnostic for a changed receipt.
     """
     receipts = json.loads(copy_chain_baseline)
     chain = receipts["toolbox-runner.json"]
-    if callback == "plan":
-        chain["plan"]["toolbox"][field] = replacement
-    elif callback is not None:
-        row = next(item for item in chain["records"] if item["callback"] == callback)
-        target = row["pods"][0] if field == "image_id" else row
-        target[field] = replacement
+    if path:
+        target = {
+            "receipt": chain,
+            "plan": chain["plan"],
+            **{row["callback"]: row for row in chain["records"]},
+        }
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = replacement
     result = ACCEPTANCE.evaluate(
         {}, receipts, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
-    if callback is None:
+    if reason is None:
         assert result["status"] == STATUS.PASS, result["problems"]
         assert set(result["accepted"]) == set(receipts)
     else:
         assert result["status"] == STATUS.BLOCKED
-        assert "toolbox-runner.json:delivery_image_mismatch" in result["problems"]
+        assert "toolbox-runner.json" not in result["accepted"]
+        assert f"toolbox-runner.json:{reason}" in result["problems"]
 
 
 @pytest.fixture(scope="module", params=tuple(ACCEPTANCE.RUNNER_CONTROLS))
@@ -2117,6 +2330,8 @@ def runner_control_pair_baseline(request: pytest.FixtureRequest) -> str:
             _plan("gitlab_runner", operation, body, resource_id=107),
             origin=access["origin"],
             target_reference=project["full_path"],
+            target_source=access["target_source"],
+            revision=access["skill"]["revision"]["value"],
             runner_snapshot=snapshot,
         )
         record = {
@@ -2132,7 +2347,6 @@ def runner_control_pair_baseline(request: pytest.FixtureRequest) -> str:
             "execution_host",
             "credential_source",
             "credential_digest",
-            "target_source",
         ):
             receipt[key] = access[key]
         receipt["identity"] = {
@@ -2163,8 +2377,10 @@ def runner_control_pair_baseline(request: pytest.FixtureRequest) -> str:
         ("mutated", "runner_control_readback_unproven"),
         ("observed", "runner_control_readback_unproven"),
         ("missing-repeat", "repeat_readback_missing"),
-        ("changed-repeat-intent", "repeat_readback_mismatch"),
-        ("same-confirmation", "repeat_readback_mismatch"),
+        ("target-source", "runner_control_readback_unproven"),
+        ("changed-repeat-intent", "runner_control_readback_unproven"),
+        ("same-confirmation", "runner_control_readback_unproven"),
+        ("same-capture-time", "repeat_readback_mismatch"),
     ),
 )
 def test_targeted_runner_controls_require_exact_readback_and_repeat(
@@ -2198,10 +2414,14 @@ def test_targeted_runner_controls_require_exact_readback_and_repeat(
             readback["observed"]["description"] = "unexpected"
     elif failure == "missing-repeat":
         del pair["NO_OP.json"]
+    elif failure == "target-source":
+        applied["target_source"] = "other-runtime-target"
     elif failure == "changed-repeat-intent":
-        noop["plan"]["body_sha256"] = "b" * 64
+        noop["plan"]["body_sha256"] = WRONG_PLAN_DIGEST
     elif failure == "same-confirmation":
         noop["plan_digest"] = noop["plan"]["plan_digest"] = applied["plan_digest"]
+    elif failure == "same-capture-time":
+        noop["captured_at"] = applied["captured_at"]
     result = ACCEPTANCE.evaluate(
         {}, pair, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
     )
@@ -2496,14 +2716,14 @@ def test_mirror_pair_satisfies_required_behavior_in_both_acceptance_modes(
         ("missing-applied", "repeat_readback_missing", MIRROR_APPLIED_FILE),
         ("missing-noop", "repeat_readback_missing", MIRROR_NO_OP_FILE),
         ("creation-not-proven", "create_if_absent_unproven", None),
-        ("missing-cleanup", MIRROR_CLEANUP_REASON, None),
-        ("cleanup-wrong-id", MIRROR_CLEANUP_REASON, None),
-        ("cleanup-delete-failed", MIRROR_CLEANUP_REASON, None),
-        ("cleanup-source-changed", MIRROR_CLEANUP_REASON, None),
-        ("cleanup-repeat-mutated", MIRROR_CLEANUP_REASON, None),
-        ("cleanup-wrong-revision", MIRROR_CLEANUP_REASON, None),
-        ("cleanup-before-noop", MIRROR_CLEANUP_REASON, None),
-        ("cleanup-future", MIRROR_CLEANUP_REASON, None),
+        ("missing-cleanup", SMOKE_CLEANUP_REASON, None),
+        ("cleanup-wrong-id", SMOKE_CLEANUP_REASON, None),
+        ("cleanup-delete-failed", SMOKE_CLEANUP_REASON, None),
+        ("cleanup-source-changed", SMOKE_CLEANUP_REASON, None),
+        ("cleanup-repeat-mutated", SMOKE_CLEANUP_REASON, None),
+        ("cleanup-wrong-revision", SMOKE_CLEANUP_REASON, None),
+        ("cleanup-before-noop", SMOKE_CLEANUP_REASON, None),
+        ("cleanup-future", SMOKE_CLEANUP_REASON, None),
         ("wrong-action", "repeat_readback_missing", None),
         ("native-id", "mirror_pair_identity_mismatch", None),
         ("before-refs", "mirror_pair_continuity_unverified", None),
