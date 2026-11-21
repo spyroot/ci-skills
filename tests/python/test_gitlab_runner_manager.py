@@ -1905,19 +1905,27 @@ def test_manager_confirmed_absence_refuses_concurrent_runtime_without_mutation(
     (K8S_RUNNER.REGISTRATION_SECRET_SUFFIX, K8S_RUNNER.REGISTRY_SECRET_SUFFIX),
     ids=("registration", "registry"),
 )
+@pytest.mark.parametrize("previous_name", (None, "earlier-consumer"))
 def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     suffix: str,
+    previous_name: Optional[str],
 ) -> None:
-    """A single old runtime Secret blocks absence after the Deployment is gone."""
+    """A run-owned runtime Secret blocks absence regardless of its name prefix."""
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
     runtime = _absent_manager_runtime(cluster, capsys, borrowed=True)
     remnant = next(
         key for key in runtime if key[0] == "secret" and key[2].endswith(suffix)
     )
-    cluster.objects[remnant] = json.loads(runtime[remnant])
+    document = json.loads(runtime[remnant])
+    if previous_name is not None:
+        kind, namespace, _ = remnant
+        name = f"{previous_name}{suffix}"
+        document["metadata"]["name"] = name
+        remnant = (kind, namespace, name)
+    cluster.objects[remnant] = document
     cluster.caller_namespace = ""
     survivors = deepcopy(cluster.objects)
 
