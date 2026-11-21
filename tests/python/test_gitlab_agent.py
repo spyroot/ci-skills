@@ -29,8 +29,6 @@ TOKENS_ROUTE: Final = f"{AGENT_ROUTE}/tokens"
 TOKEN_ROUTE: Final = f"{TOKENS_ROUTE}/{TOKEN_ID}"
 TOKEN_LIST_ROUTE: Final = f"{TOKENS_ROUTE}?per_page=100&page=1"
 GRAPHQL_ROUTE: Final = "graphql"
-HTTP_GET: Final = "GET"
-HTTP_POST: Final = "POST"
 NOT_FOUND: Final = "provider_404"
 INVALID_SHAPE: Final = "invalid_shape"
 PROJECT_MISMATCH: Final = "agent_project_identity_mismatch"
@@ -269,38 +267,6 @@ def test_provider_creates_registration_and_one_time_token_separately(
     ]
     api.get_json.assert_not_called()
     api.request_no_content.assert_not_called()
-
-
-def test_provider_traces_each_gitlab_request_in_order_without_values(
-    native: tuple[AGENT.AgentProvider, Mock, SimpleNamespace],
-) -> None:
-    """Record method and endpoint of every request, including one that fails."""
-    provider, api, _ = native
-    wire = json.loads(WIRE_BASELINE)
-    api.get_json.side_effect = [
-        wire[Operation.PROJECT],
-        API.GitLabAPIError(NOT_FOUND),
-    ]
-    api.post_json.side_effect = [
-        wire[Operation.DELETE_AGENT],
-        wire[Operation.DELETE_TOKEN],
-        wire[Operation.CONNECT],
-    ]
-
-    provider.project()
-    provider.create_agent(AGENT_NAME)
-    provider.create_token(AGENT_ID, TOKEN_NAME).take_secret()
-    provider.connections(PROJECT, REGISTRATION)
-    assert provider.read_token(AGENT_ID, TOKEN_ID) is None
-
-    assert [(item.method, item.endpoint) for item in provider.calls] == [
-        (HTTP_GET, PROJECT_ROUTE),
-        (HTTP_POST, AGENTS_ROUTE),
-        (HTTP_POST, TOKENS_ROUTE),
-        (HTTP_POST, GRAPHQL_ROUTE),
-        (HTTP_GET, TOKEN_ROUTE),
-    ]
-    assert TOKEN_SECRET not in repr(provider.calls)
 
 
 def test_provider_retains_created_token_identity_without_plaintext(

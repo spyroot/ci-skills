@@ -11,7 +11,7 @@ import pytest
 from conftest import SKILL_ROOT, import_script_module
 from jsonschema import Draft202012Validator
 
-PROVIDER = import_script_module("lib.python.core.gitlab.cluster_agent.provider")
+CLI_API = import_script_module("lib.python.core.cli_api")
 RECEIPT = import_script_module("lib.python.core.gitlab.cluster_agent.receipt")
 RECOVERY = import_script_module("lib.python.core.gitlab.cluster_agent.recovery")
 SECRET = import_script_module("lib.python.core.gitlab.cluster_agent.secret")
@@ -43,11 +43,11 @@ PRESENT: Final = "PRESENT"
 ABSENT: Final = "ABSENT"
 
 CALLS: Final = (
-    PROVIDER.ProviderCall(GET, PROJECT_ROUTE),
-    PROVIDER.ProviderCall(GET, "metadata"),
-    PROVIDER.ProviderCall(POST, AGENTS_ROUTE),
-    PROVIDER.ProviderCall(POST, TOKENS_ROUTE),
-    PROVIDER.ProviderCall(POST, GRAPHQL_ROUTE),
+    CLI_API.APIRequest(GET, PROJECT_ROUTE),
+    CLI_API.APIRequest(GET, "metadata"),
+    CLI_API.APIRequest(POST, AGENTS_ROUTE),
+    CLI_API.APIRequest(POST, TOKENS_ROUTE),
+    CLI_API.APIRequest(POST, GRAPHQL_ROUTE),
 )
 
 # Each case copies this record; a case changes only the fields it names.
@@ -103,12 +103,12 @@ RECORD_BASELINE: Final = json.dumps(
 def _authorities() -> SimpleNamespace:
     """Build the two selected providers the trace reads.
 
-    :returns: Authorities whose GitLab provider sent ``CALLS`` and whose target
+    :returns: Authorities whose GitLab client sent ``CALLS`` and whose target
         selected the private GitLab table and the Kubernetes table.
     """
     routing = SimpleNamespace(gitlab=GITLAB_TABLE, kubernetes=KUBERNETES_TABLE)
     return SimpleNamespace(
-        provider=SimpleNamespace(calls=CALLS),
+        gitlab=SimpleNamespace(api=SimpleNamespace(requests=CALLS)),
         kubernetes=SimpleNamespace(target=SimpleNamespace(routing=routing)),
     )
 

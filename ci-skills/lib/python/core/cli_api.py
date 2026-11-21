@@ -451,6 +451,23 @@ def read_retry_delay(
     return _delay(headers, endpoint, attempt, maximum)
 
 
+@dataclass(frozen=True)
+class APIRequest:
+    """One provider request that a client sent with its selected credential.
+
+    .. attribute :: method
+
+        HTTP method of the request.
+
+    .. attribute :: endpoint
+
+        Provider-relative path without the query string. It holds native IDs only.
+    """
+
+    method: str
+    endpoint: str
+
+
 class CLIAPIClient:
     """Call provider using one bound session and an injectable command runner.
 
@@ -487,6 +504,16 @@ class CLIAPIClient:
         self.max_response_bytes = max_response_bytes
         self.max_retry_after = max_retry_after
         self.deadline = deadline
+        self._requests: list[APIRequest] = []
+
+    @property
+    def requests(self) -> tuple[APIRequest, ...]:
+        """Return each validated request this client sent, in order.
+
+        :returns: One entry per request, whether it succeeded or failed. A retried GET
+            counts once.
+        """
+        return tuple(self._requests)
 
     def get_text(
         self, session: APISession, endpoint: str, *, paginate: bool = False
@@ -683,6 +710,7 @@ class CLIAPIClient:
         if deadline is not None:
             deadline.remaining()
         selected = validate_endpoint(endpoint)
+        self._requests.append(APIRequest(method, selected.split("?", 1)[0]))
         argv = self.argv(session.host, method, selected)
         if raw:
             argv.remove("--include")

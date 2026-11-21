@@ -209,7 +209,7 @@ def _credentials(
 ) -> JSONObject:
     """Trace the three credentials of this invocation without any credential value.
 
-    :param authorities: Selected providers; the GitLab provider holds the request trace.
+    :param authorities: Selected providers; the GitLab client holds the request trace.
     :param row: Completed record whose ownership, installation and connection are final.
     :returns: GitLab requests sent with the selected GitLab token, Kubernetes objects
         created with the selected kubeconfig, and the Agent token's ID, Secret and consumers.
@@ -265,7 +265,7 @@ def _credentials(
             "table": None if routing is None else routing.gitlab,
             "calls": [
                 {"method": call.method, "endpoint": call.endpoint}
-                for call in authorities.provider.calls
+                for call in authorities.gitlab.api.requests
             ],
         },
         "kubernetes": {

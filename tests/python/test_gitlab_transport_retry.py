@@ -520,3 +520,46 @@ def test_post_body_file_is_removed_after_timeout() -> None:
         )
     assert len(captured) == 1
     assert not captured[0].exists()
+
+
+def test_client_records_each_request_method_and_path_in_order() -> None:
+    """Record method and query-free path of every sent request, including a failure.
+
+    :returns: None; assertions in the body validate the request trace.
+    """
+    replies = iter(
+        (
+            _result(0, 'HTTP/2 200 OK\r\n\r\n{"id":42}'),
+            _result(0, 'HTTP/2 201 Created\r\n\r\n{"id":17}'),
+            _result(0, "HTTP/2 204 No Content\r\ncontent-length: 0\r\n\r\n"),
+            _result(1, "HTTP/2 404 Not Found\r\n\r\n{}"),
+        )
+    )
+
+    def command(
+        argv: Sequence[str], *, timeout: int, env: Optional[Mapping[str, Optional[str]]]
+    ) -> RUNTIME.CommandResult:
+        """Answer the four requests in order.
+
+        :param argv: glab command vector accepted by the double.
+        :param timeout: Bounded request timeout accepted by the double.
+        :param env: Selected child environment accepted by the double.
+        :returns: The next scripted native result.
+        """
+        return next(replies)
+
+    client = API.GlabAPIClient(command=command)
+    session = _session()
+    client.get_json(session, "projects/42?per_page=100&page=1")
+    client.post_json(session, "projects/42/cluster_agents", {"name": "one"})
+    client.request_no_content(session, "DELETE", "projects/42/cluster_agents/17")
+    with pytest.raises(API.GitLabAPIError):
+        client.get_json(session, "projects/42/cluster_agents/17")
+
+    assert [(item.method, item.endpoint) for item in client.requests] == [
+        ("GET", "projects/42"),
+        ("POST", "projects/42/cluster_agents"),
+        ("DELETE", "projects/42/cluster_agents/17"),
+        ("GET", "projects/42/cluster_agents/17"),
+    ]
+    assert session.environment["GITLAB_TOKEN"] not in repr(client.requests)
