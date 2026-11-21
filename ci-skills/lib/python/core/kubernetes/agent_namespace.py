@@ -25,6 +25,10 @@ _DEPRECATED_DEPLOYMENT_CONFIG: Final = re.compile(
     r"v[0-9]+\.[0-9]+\+, unavailable in v[0-9]+\.[0-9]+\+"
 )
 _DEPLOYMENT_CONFIG_TYPE: Final = "deploymentconfigs.apps.openshift.io"
+# Namespace deletion can destroy only objects of types that support delete. Read-only
+# projections such as packagemanifests.packages.operators.coreos.com (the whole operator
+# catalog, listed in every namespace) and pods.metrics.k8s.io have no delete verb.
+_INVENTORY_VERBS: Final = "--verbs=list,delete"
 _FOREIGN_OBJECT: Final = "agent_namespace_foreign_object"
 _KUBE_CONTROLLER: Final = "kube-controller-manager"
 _SERVICE_CA_OPERATOR: Final = "service-ca-operator"
@@ -73,7 +77,7 @@ def _discovered_types(
     result = service.command(
         "api-resources",
         "--namespaced=true",
-        "--verbs=list",
+        _INVENTORY_VERBS,
         "--cached=false",
         "-o",
         "name",

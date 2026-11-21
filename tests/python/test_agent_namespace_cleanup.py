@@ -106,7 +106,7 @@ def test_agent_namespace_guard_reads_exact_metadata_without_mutation() -> None:
     assert discovery.args == (
         "api-resources",
         "--namespaced=true",
-        "--verbs=list",
+        "--verbs=list,delete",
         "--cached=false",
         "-o",
         "name",
