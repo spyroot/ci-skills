@@ -22,16 +22,11 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesService,
 )
 from lib.python.core.kubernetes.objects import KubernetesObject
-from lib.python.core.kubernetes.resources import (
-    MANAGER_LABEL,
-    MANAGER_VALUE,
-    OPERATION_LABEL,
-)
 from lib.python.core.kubernetes.run_scope import (
-    RUN_ID_LABEL,
     OpenRunScope,
     RunScope,
     RunScopeAction,
+    run_ownership_selector,
     validate_namespace,
 )
 from lib.python.core.kubernetes.runner import (
@@ -68,19 +63,12 @@ _SECRET_COLUMNS: Final = (
 def _run_secret_remnants(
     service: KubernetesService, run_id: str, names: set[str]
 ) -> bool:
-    selector = ",".join(
-        (
-            f"{MANAGER_LABEL}={MANAGER_VALUE}",
-            f"{OPERATION_LABEL}={run_id}",
-            f"{RUN_ID_LABEL}={run_id}",
-        )
-    )
     result = service.command(
         "get",
         "secrets",
         "--all-namespaces",
         "-l",
-        selector,
+        run_ownership_selector(run_id),
         "-o",
         _SECRET_COLUMNS,
         "--no-headers",
@@ -125,9 +113,7 @@ def _require_manager_resources_absent(
         if service.read(kind, name, scope.namespace) is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
     secret_names = {name for kind, name in resources if kind == "Secret"}
-    if not getattr(workflow.args, "namespace", None) and _run_secret_remnants(
-        service, scope.run_id, secret_names
-    ):
+    if _run_secret_remnants(service, scope.run_id, secret_names):
         raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
 
 
