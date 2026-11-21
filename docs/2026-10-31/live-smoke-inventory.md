@@ -141,10 +141,10 @@ names, at the team's request for shared use: repository `1447753892`, private, c
 `main` and tag `smoke-seed` at `aafe5d50bbe4a1884b7b4f86668651e9ddbd5222` pushed from GitLab `261`. Both refs were
 read back at `02:43:56Z`. The access receipt in `tests/acceptance/candidate/access.json` was captured with it present.
 
-Open conflict for the next renewal: the restored `spyroot/test-mirror-push` (now `1447898875`) makes the next bounded
-qualification stop with `destination_present`. This inventory says "The disposable mirror destination is expected
-absent only after its recorded cleanup"; the team answer is "READ RESTORE SO ALL AGNET CAN USE YOU DELETE REPO", so
-the repository stays present for shared use. The conflict stays open until the team decides.
+The restored `spyroot/test-mirror-push` (`1447898875`) blocked the next qualification with `destination_present`.
+The operator resolved this conflict on 2026-11-11: retire that exact ID and keep the same-name GitHub destination
+disposable. The retained GitHub access fixture is `spyroot/test-self-runner` (`1344617680`). Preserve GitLab source
+`261`; the mirror destination stays absent after recorded cleanup, with no restoration or automatic rerun.
 
 ### Mirror qualification read-back — 2026-11-06, PR #142 head `fa7063c`
 
@@ -206,3 +206,13 @@ The retained support namespace UID is `7ae80f69-fa57-4cc4-8be7-c80ac05ccbec`; it
 `sha256:567b6f13bb9d658bf8a917b395f728515c428c1d799a39a84900dc2c4a6c34b1`.
 The namespace was allocated by this smoke run for retention across phases. Reuse this image digest; the initial
 image lacked libicu and is not qualified. The one corrected build passed after exact-image dependency reproduction.
+
+### Mirror qualification read-back — 2026-11-11, cleanup-repeat candidate `8230363`
+
+After fresh identity/ref read-back, the operator-authorized retirement removed repository `1447898875`; independent
+name/ID absence and a delayed repeat passed. One installed-candidate qualification then created repository
+`1453643750` and GitLab mirror `20`, verified both seed refs, rejected a wrong confirmation and returned NO_OP on
+repeat. Exact-owned cleanup removed both new IDs, independently proved absence and repeated without another delete.
+GitLab source `261`, its refs and disabled CI were preserved. No consumer Actions job or GitLab pipeline ran.
+The selected access receipt uses retained `spyroot/test-self-runner`; prior candidate receipts are preserved under
+`tests/acceptance/historical/pre-ci15-cleanup-repeat/`.

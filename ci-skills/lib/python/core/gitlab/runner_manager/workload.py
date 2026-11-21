@@ -7,24 +7,50 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from typing import ClassVar, Optional
+from typing import ClassVar, Final, Optional
 
+from lib.python.core.abstract.callback import (
+    AbstractCallback,
+    DeferredCallback,
+    LocalCallback,
+)
+from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.kubernetes import (
     K8SCallback,
     KubernetesError,
     KubernetesService,
 )
+from lib.python.core.kubernetes.objects import KubernetesObject
+from lib.python.core.kubernetes.resources import (
+    MANAGER_LABEL,
+    MANAGER_VALUE,
+    OPERATION_LABEL,
+)
 from lib.python.core.kubernetes.run_scope import (
+    RUN_ID_LABEL,
     OpenRunScope,
     RunScope,
     RunScopeAction,
+    validate_namespace,
 )
-from lib.python.core.kubernetes.runner import DeleteRunner, DeployRunner, PullImage
+from lib.python.core.kubernetes.runner import (
+    DeleteRunner,
+    DeployRunner,
+    PullImage,
+)
 from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
-from lib.python.core.runner import RunnerAction
+from lib.python.core.kubernetes.scc_access import role_binding_document
+from lib.python.core.runner import RunnerAction, runner_runtime_identities
 from lib.python.core.runner_identity import NameSource, ResolvedName
-from lib.python.core.runner_scope import ScopePurpose, ScopeSource, ScopeState
+from lib.python.core.runner_scope import (
+    ScopeObservation,
+    ScopePurpose,
+    ScopeSource,
+    ScopeState,
+)
+from lib.python.core.runtime import error_class
+from lib.python.sys.status import NO_OP, PASS
 
 from .action import (
     MANAGER_ROLE,
@@ -32,6 +58,98 @@ from .action import (
     GitLabRunnerManagerState,
     ManagerWorkloadAction,
 )
+
+MANAGER_SCOPE_NOT_UNIQUE: Final = "runner_manager_scope_not_unique"
+_SECRET_COLUMNS: Final = (
+    "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,UID:.metadata.uid"
+)
+
+
+def _run_secret_remnants(
+    service: KubernetesService, run_id: str, names: set[str]
+) -> bool:
+    selector = ",".join(
+        (
+            f"{MANAGER_LABEL}={MANAGER_VALUE}",
+            f"{OPERATION_LABEL}={run_id}",
+            f"{RUN_ID_LABEL}={run_id}",
+        )
+    )
+    result = service.command(
+        "get",
+        "secrets",
+        "--all-namespaces",
+        "-l",
+        selector,
+        "-o",
+        _SECRET_COLUMNS,
+        "--no-headers",
+    )
+    if result.returncode:
+        raise KubernetesError(error_class(result))
+    seen: set[tuple[str, str]] = set()
+    remnant = False
+    for line in result.stdout.splitlines():
+        columns = line.split()
+        if len(columns) != 3:
+            raise KubernetesError("runner_manager_secret_metadata_invalid")
+        namespace, name, uid = columns
+        key = (namespace, name)
+        try:
+            validate_namespace(namespace)
+        except ValueError:
+            raise KubernetesError("runner_manager_secret_metadata_invalid") from None
+        if (
+            key in seen
+            or name == "<none>"
+            or uid == "<none>"
+            or any(not char.isascii() or not char.isprintable() for char in name + uid)
+        ):
+            raise KubernetesError("runner_manager_secret_metadata_invalid")
+        seen.add(key)
+        remnant |= name in names
+    return remnant
+
+
+def _require_manager_resources_absent(
+    service: KubernetesService, action: ManagerWorkloadAction, scope: RunScope
+) -> None:
+    workflow = action.workflow
+    names = {scope.name(MANAGER_ROLE), action.runner(scope).name}
+    resources = {
+        identity for name in names for identity in runner_runtime_identities(name)
+    }
+    binding = KubernetesObject(role_binding_document(workflow.scc_access(), scope))
+    resources.add(("RoleBinding", binding.name))
+    for kind, name in sorted(resources):
+        if service.read(kind, name, scope.namespace) is not None:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+    secret_names = {name for kind, name in resources if kind == "Secret"}
+    if not getattr(workflow.args, "namespace", None) and _run_secret_remnants(
+        service, scope.run_id, secret_names
+    ):
+        raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+
+
+def _confirmed_absent_manager_delete(state: GitLabRunnerManagerState) -> bool:
+    args = getattr(state, "args", None)
+    return getattr(args, "action", None) == "delete" and not state.found_scopes
+
+
+def present_manager_cleanup(
+    callback: AbstractCallback[GitLabRunnerManagerState, SkillAction],
+) -> DeferredCallback[GitLabRunnerManagerState, SkillAction]:
+    """Defer each existing shared mutation until the confirmed scope is known.
+
+    :param callback: Existing ordered SCC or namespace cleanup callback.
+    :returns: Original callback for a present scope, or an empty local callback.
+    """
+    return DeferredCallback(
+        callback.action,
+        lambda state: (
+            callback if state.found_scopes else LocalCallback(callback.action)
+        ),
+    )
 
 
 def resolve_manager_name(
@@ -98,7 +216,7 @@ class SelectManagerPlanScope(K8SCallback[ManagerWorkloadAction]):
             raise TypeError("gitlab_runner_manager_state_required")
         scopes = tuple(state.found_scopes)
         if len(scopes) > 1:
-            raise KubernetesError("runner_manager_scope_not_unique")
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
         candidate = self.action.workflow.candidate_scope
         if candidate is None:
             raise KubernetesError("runner_manager_scope_not_prepared")
@@ -205,23 +323,54 @@ class OpenManagerRunScope(K8SCallback[ManagerWorkloadAction]):
 
 
 class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
-    """Select one unique live scope before deleting its manager resources."""
+    """Select one live manager scope or independently verify its absence."""
+
+    def _absent_scope(self, state: GitLabRunnerManagerState) -> RunScope:
+        """Verify selected namespace and both supported workload identities are absent.
+
+        :param state: Shared state receiving actual namespace absence evidence.
+        :returns: Input-derived candidate after independent native absence reads.
+        :raises KubernetesError: The generated namespace or any manager resource exists.
+        :raises ValueError: The selected namespace or operation identity is invalid.
+        """  # noqa: DOC502 - Shared native readers propagate access failures.
+        workflow = self.action.workflow
+        scope = RunScope.new(
+            namespace=getattr(workflow.args, "namespace", None),
+            run_id=workflow.scope_id,
+            namespace_prefix=workflow.repository_identity.name,
+        )
+        namespace = self.kubernetes.read("Namespace", scope.namespace, "")
+        if scope.owns_namespace and namespace is not None:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        _require_manager_resources_absent(self.kubernetes, self.action, scope)
+        if namespace is None and scope.owns_namespace:
+            state.runner_scopes[scope_key(ScopePurpose.MANAGER, scope.namespace)] = (
+                ScopeObservation(
+                    ScopePurpose.MANAGER,
+                    scope.namespace,
+                    ScopeSource.EXISTING_RUN_SCOPE,
+                    state=ScopeState.ABSENT,
+                    cleanup_status=PASS,
+                )
+            )
+        return scope
 
     def run(self) -> JSONObject:
-        """Retain the one exact scope found by the preceding shared lookup.
+        """Bind one observed scope or the independently verified absent identity.
 
         :returns: Verified concrete scope identity.
         :raises TypeError: Workflow state does not retain run scopes.
-        :raises KubernetesError: Scope lookup is absent, ambiguous, or conflicts
-            with an optional caller-selected namespace.
-        """
+        :raises KubernetesError: Scope lookup is ambiguous, absence is unproven,
+            or the scope conflicts with a caller-selected namespace.
+        :raises ValueError: The selected namespace or operation identity is invalid.
+        """  # noqa: DOC502,DOC503 - Shared scope and absence readers propagate errors.
         state = self.state
         if not isinstance(state, GitLabRunnerManagerState):
             raise TypeError("gitlab_runner_manager_state_required")
         scopes = tuple(state.found_scopes)
-        if len(scopes) != 1:
-            raise KubernetesError("runner_manager_scope_not_unique")
-        scope = scopes[0]
+        if len(scopes) > 1:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        scope = scopes[0] if scopes else self._absent_scope(state)
         requested = getattr(self.action.workflow.args, "namespace", "")
         if requested and requested != scope.namespace:
             raise KubernetesError("runner_manager_namespace_mismatch")
@@ -234,7 +383,7 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
             purpose=ScopePurpose.MANAGER,
             source=ScopeSource.EXISTING_RUN_SCOPE,
             operation=scope.run_id,
-            required=True,
+            required=bool(scopes) or not scope.owns_namespace,
         )
         return {"verified": True, **scope.as_dict()}
 
@@ -327,6 +476,15 @@ class DeleteManagerRunner(ScopedRunnerCallback):
 
     child_type = DeleteRunner
 
+    def run(self) -> JSONObject:
+        """Skip deletion for a confirmed absent standalone delete scope.
+
+        :returns: Native deletion evidence, or empty evidence before absent recheck.
+        """
+        if _confirmed_absent_manager_delete(self.manager_state):
+            return {}
+        return super().run()
+
 
 def workload_action(workflow: GitLabRunnerManagerAction) -> ManagerWorkloadAction:
     """Return the one typed action shared by manager workload callbacks.
@@ -353,6 +511,13 @@ class ObserveManagerNamespace(K8SCallback[ManagerWorkloadAction]):
         previous = self.state.runner_scopes[
             scope_key(ScopePurpose.MANAGER, scope.namespace)
         ]
+        absent = _confirmed_absent_manager_delete(self.state)
+        if absent:
+            if self.state.resolved_run_id != scope.run_id or RunScope.find_all(
+                self.kubernetes, scope.run_id
+            ):
+                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+            _require_manager_resources_absent(self.kubernetes, self.action, scope)
         observed = observe_namespace(
             self.state,
             self.kubernetes,
@@ -368,4 +533,9 @@ class ObserveManagerNamespace(K8SCallback[ManagerWorkloadAction]):
             and observed.state == ScopeState.PRESENT
         ):
             raise KubernetesError("runner_namespace_cleanup_not_absent")
-        return {"verified": True, "namespace": scope.namespace}
+        if absent and observed != previous:
+            raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        result: dict[str, str | bool] = {"verified": True, "namespace": scope.namespace}
+        if absent:
+            result["action"] = NO_OP
+        return result
