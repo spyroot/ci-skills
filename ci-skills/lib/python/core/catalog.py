@@ -65,6 +65,10 @@ SCHEMA_VERSION = "1.0"
 ROUTED_RESULT_SCHEMA_VERSION: Final = "1.1"
 SKILL_NAME = "ci-skills"
 GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
+# Reference names that commands list in `references` and that key PROPOSITION_REFERENCES.
+GITHUB_ARC_REFERENCE: Final = "GitHub Actions Runner Controller"
+GITLAB_RUNNER_HELM_REFERENCE: Final = "GitLab Runner Helm chart"
+OPENSHIFT_SCC_REFERENCE: Final = "OpenShift SCC access"
 # `--gitlab private|public` selects one GitLab instance table. The deprecated
 # `--gitlab-profile NAME` selects a legacy [gitlab.NAME] table (TD-11).
 GITLAB_TARGET_HELP: Final = (
@@ -397,6 +401,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("toolbox.py", "harbor_push.py", "harbor_pull.py"),
+        "references": (GITHUB_ARC_REFERENCE, OPENSHIFT_SCC_REFERENCE),
         "required_tools": ("gh", "kubectl", "oc", "skopeo"),
         "returns": "Versioned operation plan or independently verified callback results, with "
         "cleanup evidence.",
@@ -756,7 +761,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "references": (
             "Nested Podman readiness",
             "Image build chain",
-            "OpenShift SCC access",
+            OPENSHIFT_SCC_REFERENCE,
             "Podman inside a Pod",
             "Harbor API shapes",
         ),
@@ -1329,8 +1334,9 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         ),
         "references": (
             "GitLab runner manager",
-            "OpenShift SCC access",
+            OPENSHIFT_SCC_REFERENCE,
             "GitLab runner",
+            GITLAB_RUNNER_HELM_REFERENCE,
             "GitLab Agent connectivity",
         ),
         "required_tools": ("glab", "kubectl", "oc on OpenShift"),
@@ -1600,6 +1606,14 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "OpenShift Runner spec.env, spec.config, ConfigMap examples and versioned properties.",
             "pointer": "references/gitlab-runner-operator.md",
         },
+        GITLAB_RUNNER_HELM_REFERENCE: {
+            "summary": "Chart version from the GitLab version, token Secret, RBAC rules and OpenShift UBI images.",
+            "pointer": "references/gitlab-runner-helm.md",
+        },
+        GITHUB_ARC_REFERENCE: {
+            "summary": "ARC controller and scale-set charts, matching versions, values and runner image.",
+            "pointer": "references/github-arc.md",
+        },
         "GitLab milestone dates": {
             "summary": "Milestone dates, state changes and distinct tag or label identities.",
             "pointer": "references/gitlab-milestones.md",
@@ -1644,7 +1658,7 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Build and publish a toolbox, then start a runner using its immutable image.",
             "pointer": "references/image-build-chain.md",
         },
-        "OpenShift SCC access": {
+        OPENSHIFT_SCC_REFERENCE: {
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
             "pointer": "references/openshift-scc.md",
         },

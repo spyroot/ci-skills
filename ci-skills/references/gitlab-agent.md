@@ -136,3 +136,49 @@ cluster and a registry for a GitLab depends on where the work runs:
 
 Whether the cluster reaches KAS is an infrastructure fact. The planned command checks it live before any
 registration and returns BLOCKED naming the missing egress.
+
+## Token path
+
+Three credentials take part in connect. Only the Agent token is new, and its plaintext exists in exactly one place:
+the owned Secret key `token`.
+
+```mermaid
+sequenceDiagram
+    participant C as gitlab_agent.py connect
+    participant G as GitLab REST and GraphQL
+    participant K as Kubernetes API
+    participant A as agentk Pods
+    participant S as KAS
+    Note over C: T1 = [gitlab_private].token_file, T2 = [kubernetes] kubeconfig
+    C->>G: T1: GET project, GET metadata (KAS address, version)
+    C->>K: T2: create namespace, recovery ConfigMap (PENDING)
+    C->>G: T1: POST cluster_agents (agent ID)
+    C->>G: T1: POST cluster_agents/ID/tokens (token ID, plaintext T3 once)
+    C->>K: T2: create Secret key token = T3 (UID recorded)
+    C->>K: T2: helm install, values config.secretName (no T3)
+    K->>A: mount Secret as secret-volume
+    A->>S: T3: open connection (wss)
+    C->>G: T1: GraphQL connections (Pod name, namespace, version)
+    C->>K: T2: read Pods, match UID and image digest
+```
+
+| Token | Source | Used for | Stored |
+| --- | --- | --- | --- |
+| T1 GitLab token | `[gitlab_private]`/`[gitlab_public]` `token_file` | Project, KAS, register, token, GraphQL | File |
+| T2 Kubernetes credential | `[kubernetes]` kubeconfig | Namespace, Secret, ConfigMap, Helm, Pod reads | File |
+| T3 Agent token | `POST /projects/ID/cluster_agents/AGENT_ID/tokens` | agentk connection to KAS | Secret key `token` |
+
+T3 never appears in argv, Helm values, Helm release storage, reports, receipts or logs. The result records only the
+token ID (`registration_credential_id`), the Secret name and UID (`credential_resource_name`,
+`credential_resource_uid`) and the connected Pods. GraphQL `clusterAgents.tokens.lastUsedAt` and active
+`connections` prove that agentk used T3.
+
+Live read on 2026-11-21, project `hott/test`, run `efc9e7db47ff427bbc53df1978834563`:
+
+| Item | Value |
+| --- | --- |
+| Agent | `test`, ID `1`; token ID `1`, `ACTIVE`, last used `2026-11-21T11:49:37Z` |
+| Secret | `test-agent-token-64d9936f4e4c4c64`, UID `af4643c3-8637-4ff3-afdb-cce10f545673`, key `token` |
+| Helm values | `config.kasAddress`, `config.secretName`, `fullnameOverride`, `image.tag`; `glagent-` count `0` |
+| Connection `4355863225129730728` | Pod `…-v2-fcc7b988c-b2v55`, UID `436878ac-1cd3-4077-b220-65f5f6dd48c1` |
+| Connection `5964489850388898347` | Pod `…-v2-fcc7b988c-tf77w`, UID `47c956b5-ea02-4507-ae9f-8594edd8f1f5` |
