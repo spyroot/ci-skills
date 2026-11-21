@@ -173,7 +173,7 @@ def resolve_manager_name(
     :param preferred: Planned repository-derived name and source.
     :returns: Unique existing identity, otherwise the uncreated planned name.
     :raises KubernetesError: Both legacy and preferred names identify owned workloads.
-    """
+    """  # noqa: DOC502 - Shared ownership lookup raises on ambiguity.
     candidates = (scope.name(MANAGER_ROLE), preferred.value)
     observed = scope.resources(service).resolve_owned_name(
         "Deployment", candidates, ambiguous_reason="runner_manager_workload_ambiguous"
