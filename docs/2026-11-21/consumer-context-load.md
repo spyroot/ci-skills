@@ -78,12 +78,17 @@ Growth by step, in tokens (the bytes are the tool result that step returned):
 | Run | Learn the skill | Learn the command | Run and read back |
 | --- | --- | --- | --- |
 | A | `SKILL.md` 21,563 B: +12,326 | `list --describe` 7,901 B: +3,328 | list result 6,695 B: +3,277 |
-| B | `SKILL.md` 23,049 B: +13,133 | `--describe` 5,706 B, `target.toml`: +3,385 | plan, apply, read: +3,843 |
+| B | `SKILL.md` 23,049 B: +13,133 | `--describe` 5,706 B, `target.toml`: +3,385 | 3 calls: +3,843; last turn: +272 |
 | C | `SKILL.md` 23,049 B: +13,885 | `ci-api --describe` 5,843 B, `target.toml`: +3,245 | 4 reads: +2,068 |
 | D | `SKILL.md` twice, 43,827 B: +20,987 | `get --describe` cut to 4,000 B: +2,813 | 2 reads: +3,756 |
 | A2 | index 3,706 B: +5,844 | 3 wrong names: +1,370; card 2,072 B: +1,224 | list result 4,905 B: +2,656 |
 | D2 | index 3,706 B: +5,866 | 7 wrong names: +2,213; 3 cards 4,263 B: +2,588 | 3 reads: +3,994 |
 | A3 | index 3,706 B: +5,853 | card 2,061 B: +1,113 | list result 4,894 B: +2,622 |
+
+Each row sums to its Growth. Run B's per-turn growth is +13,133, +3,385, +1,266, +1,920, +657 and +272. The
+three calls are plan, apply and read. The last turn follows an end-of-run call to the agent host that the host
+refused (245 B result); it is not a ci-skills call.
+Correction after review: the first version of this table left those 272 tokens out of row B.
 
 Three estimates, inferred from differences between runs, not measured directly:
 
@@ -184,7 +189,7 @@ Each finding names the observation it rests on.
 | P2 | Kept previous copies do not carry a `SKILL.md` an agent host can list | 12 | 4 stale entries removed |
 | P3 | One launcher: index, card, run; it finds its own interpreter | 4, 9, 11 | measured in A2: −2,104 (card) |
 | P4 | Options declared per verb in the catalogue | 5 | card and contract scoped to one verb |
-| P5 | `VERB --describe` returns that verb only; keys ordered by use | 5, 6 | expected 7.9 KB → about 1.5 KB |
+| P5 | A verb view of the contract, in the form D3 selects; keys ordered by use | 5, 6 | expected about 1.5 KB |
 | P6 | Help layout: per-verb usage, own options, one example per verb | 7 | expected median 3.9 KB → about 2 KB |
 | P7 | One-line JSON when stdout is not a terminal | 8 | measured in A2: −621; −27% bytes |
 | P8 | The index header names the configured authorities | 10 | one 906 B file read removed |
@@ -264,6 +269,35 @@ write verbs: run once to get plan_digest (nothing changes), then add --apply --c
 exit: 0 = PASS, DRY_RUN or PLANNED; 2 = BLOCKED or PARTIAL (read errors[] in the result).
 ```
 
+Correction after review: both excerpts state one write sequence for every command, and it is wrong for
+`gitlab_pipeline.py start`. The third header line and the card's `write verbs:` line say the first run prints a
+digest to confirm. For `start` the offline plan carries `confirmation_ready: false`
+(`ci-skills/lib/python/core/gitlab/gitlab_pipeline_start.py:514`), and `--confirm-plan` takes the digest that
+`--live-plan` prints (`ci-skills/bin/gitlab_pipeline.py:137-146`). The prototype also drops `--live-plan` from
+the card's inputs. The sequence differs by command:
+
+| Installed commands that declare `--confirm-plan` | Count | Digest to confirm comes from |
+| --- | --- | --- |
+| also declare `--live-plan` | 6 | the live plan, for some or all write verbs |
+| do not declare `--live-plan` | 11 | the preceding or dry-run plan, as each `--confirm-plan` text says |
+
+The six are `gitlab_mirror.py`, `gitlab_pipeline.py`, `gitlab_runner.py`, `image_build_readiness.py`,
+`ocp_node_onboard.py` and `prepare_tool_pod.py`. Run B applied `gitlab_milestone.py create` with the dry-run
+digest and passed. No prototype run used a write verb, so the runs did not show the defect.
+
+Required of the launcher:
+
+- The index header states no single write sequence.
+- Each write verb's card states its own sequence and lists `--live-plan` where the command declares it.
+- The sequence comes from the catalogue. Today the catalogue holds it only as free text in the `--confirm-plan`
+  description, so the per-verb declaration of P4 needs a field that names the plan form a verb confirms.
+
+For `start` the card line would read:
+
+```text
+start: --live-plan prints plan_digest and changes nothing; then --apply --confirm-plan DIGEST.
+```
+
 Decisions this needs before any code:
 
 - **D1, the name and home.** [CI02, Open decisions](../phases/CI02-CLI.md#open-decisions) already proposes one
@@ -286,11 +320,29 @@ $ gitlab_runner.py list --describe | wc -c
 
 Proposed: `subcommands[verb]` declares its own `options`.
 [CI09, Declarations](../phases/CI09-REFERENCE.md#declarations-exactly-what-corecatalogpy-gains) specifies this
-for `gitlab_pipeline.py watch`; the installed manifest has it for no verb (finding 5). `CMD VERB --describe` then
-returns that verb's purpose, inputs with required ones first, whether it writes, one example and its result
+for `gitlab_pipeline.py watch`; the installed manifest has it for no verb (finding 5). The verb view then
+holds that verb's purpose, inputs with required ones first, whether it writes, one example and its result
 schema name. `CMD --describe` keeps today's fields, ordered `command`, `purpose`, `use_when`, `subcommands`,
-`options`, `returns`, `exit_codes`, then the protocol blocks. This is an added optional view of the
-`command-contract` record: a MINOR change under [CI07, Versions](../phases/CI07-SCHEMA.md#versions).
+`options`, `returns`, `exit_codes`, then the protocol blocks.
+
+Correction after review: the first version said `CMD VERB --describe` would return the verb view as a MINOR
+change. It is not MINOR. `CMD VERB --describe` prints the full `command-contract` record today.
+`schemas/command-contract.schema.json:7-28` closes that record and requires 19 fields, among them
+`access_protocol`, `required_tools` and `status_values`. A reduced record from the same invocation removes
+required fields, which [CI07, Versions](../phases/CI07-SCHEMA.md#versions) classifies as MAJOR.
+`tests/python/test_propositions.py:507` validates a `--describe` output against that schema.
+
+- **D3, the verb view and the contract.** Two ways keep existing readers working:
+  1. `CMD VERB --describe` keeps every required field and narrows `options`, `required_options` and
+     `subcommands` to the verb. The record still validates. The fields outside `options` and `subcommands` are
+     2,480 B for `gitlab_runner.py` and 2,619 B for `gitlab_pipeline.py`, so the 1.5 KB of P5 is not reachable.
+     Whether narrowing `options` changes that field's meaning, which CI07 also classifies as MAJOR, is part of
+     this decision.
+  2. `CMD VERB --describe` stays as it is. The verb view is a separate record with its own schema file, starting
+     at `0.<minor>` as CI07 specifies for a new shape, reached through the launcher's card (`ci CMD VERB`).
+
+  We recommend option 2: it changes no existing output, and the measured saving (−2,104 tokens in A2) came from
+  the card. The choice needs approval.
 
 ### P6: help layout
 
