@@ -293,3 +293,14 @@ reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T11:33:46Z` GitHub
 `34` returned 404, and source `261` listed no remote mirror. The access receipt was captured from the same install at
 `2026-11-22T11:29:18Z`. The issue #149 `5db056f` set it supersedes is preserved under
 `tests/acceptance/historical/pre-guarded-image-adoption-at-5db056f/`.
+
+### Mirror qualification read-back — 2026-11-22, runner cleanup confirmation candidate `77f2565`
+
+Candidate `77f2565` is the runner cleanup confirmation branch merged with `main` `df6994f` and the guarded image
+adoption head `30f11bc`. One installed-candidate qualification, run `pr148-mirror-20261122-77f2565`, created
+repository `1467496859` and GitLab mirror `35` from source `261` with `main` and `smoke-seed` at `aafe5d50`. The
+applied sync read back verified, a wrong confirmation returned BLOCKED `mirror_plan_mismatch`, and the repeat returned
+NO_OP. Cleanup reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T11:40:54Z` GitHub returned 404 by ID and
+by name, mirror `35` returned 404, and source `261` listed no remote mirror. The access receipt was captured from the
+same install at `2026-11-22T11:36:36Z`. The `e0c93c6` set it supersedes is preserved under
+`tests/acceptance/historical/pre-runner-cleanup-confirmation/`.
