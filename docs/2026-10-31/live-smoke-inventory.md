@@ -270,3 +270,15 @@ listed no remote mirror, and mirror `29` returned 404. The access receipt was ca
 `event_trace` timed out reading `events_v1`; the `a46f295` install passed at `01:01Z`, and both installs passed back to
 back at `01:04Z` and `01:06Z`, with `events.py`, `live.py` and `cli.py` unchanged between them. The receipts superseded
 here are `main`'s `e9c6608` set, preserved under `tests/acceptance/historical/pre-issue151-mr-description/`.
+
+### Mirror qualification read-back — 2026-11-22, issue #149 candidate `5db056f`
+
+Candidate `5db056f` is the issue #149 branch merged with the #158 head `2d39da3`. One installed-candidate
+qualification, run `pr157-mirror-20261122-5db056f`, created repository `1467484939` and GitLab mirror `33` from source
+`261` with `main` and `smoke-seed` at `aafe5d50`. The applied sync read back verified, a wrong confirmation returned
+BLOCKED `mirror_plan_mismatch`, and the repeat returned NO_OP. Cleanup reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`;
+at `2026-11-22T11:26:17Z` GitHub returned 404 by ID and by name, mirror `33` returned 404, and source `261` listed no
+remote mirror. The access receipt was captured from the same install at `2026-11-22T11:23:08Z`. The receipts
+superseded here are the #158 `ff5aa48` set, preserved under `tests/acceptance/historical/pre-issue149-ci-api-selection/`,
+and this branch's earlier `857070e` set (repository `1467450060`, mirror `32`), preserved under
+`tests/acceptance/historical/pre-issue149-158-integration/`.
