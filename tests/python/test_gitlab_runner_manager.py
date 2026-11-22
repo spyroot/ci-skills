@@ -2056,7 +2056,12 @@ def test_runner_runtime_identities_preserve_manager_cleanup_order() -> None:
 
 
 @pytest.mark.parametrize(
-    "drift", ("deployment-before-apply", "secret-in-other-namespace")
+    "drift",
+    (
+        "deployment-before-apply",
+        "secret-in-other-namespace",
+        "previous-name-secret-in-other-namespace",
+    ),
 )
 def test_manager_absence_confirmation_never_authorizes_writes_on_drift(
     monkeypatch: pytest.MonkeyPatch,
@@ -2064,10 +2069,15 @@ def test_manager_absence_confirmation_never_authorizes_writes_on_drift(
     capsys: pytest.CaptureFixture[str],
     drift: str,
 ) -> None:
-    """Apply a borrowed-namespace absence plan against a changed native baseline."""
+    """Apply a borrowed-namespace absence plan against a changed native baseline.
+
+    The previous-name case needs both the suffix match and the check under
+    ``--namespace``: the Secret keeps the run labels but not the current name,
+    and it is outside the selected namespace.
+    """
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
     runtime = _absent_manager_runtime(cluster, capsys, borrowed=True)
-    if drift == "secret-in-other-namespace":
+    if drift.endswith("secret-in-other-namespace"):
         alternate = f"{NAMESPACE}-alternate"
         borrowed = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
         borrowed["metadata"].update(name=alternate, uid=ABSENCE_REPLACEMENT_UID)
@@ -2086,6 +2096,18 @@ def test_manager_absence_confirmation_never_authorizes_writes_on_drift(
     replacement = json.loads(runtime[identity])
     if kind == "deployment":
         replacement["metadata"]["uid"] = ABSENCE_REPLACEMENT_UID
+    if drift == "previous-name-secret-in-other-namespace":
+        suffix = next(
+            suffix
+            for suffix in (
+                K8S_RUNNER.REGISTRATION_SECRET_SUFFIX,
+                K8S_RUNNER.REGISTRY_SECRET_SUFFIX,
+            )
+            if identity[2].endswith(suffix)
+        )
+        previous = f"earlier-consumer{suffix}"
+        replacement["metadata"]["name"] = previous
+        identity = (identity[0], identity[1], previous)
     cluster.objects[identity] = replacement
     survivors = deepcopy(cluster.objects)
 
