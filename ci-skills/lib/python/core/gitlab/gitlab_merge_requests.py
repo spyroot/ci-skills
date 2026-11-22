@@ -13,9 +13,12 @@ from urllib.parse import urlencode
 
 from lib.python.core.gitlab.gitlab_action import GitLabOperation
 from lib.python.core.gitlab.gitlab_actions import (
+    DESCRIPTION_FIELD,
+    DESCRIPTION_FILE,
     ActionError,
     ActionPlan,
     PreparedOperation,
+    _description,
     _fields,
     _id,
     _object,
@@ -38,14 +41,22 @@ from lib.python.core.json_types import JSONObject, JSONValue
 def prepare(args: Namespace) -> PreparedOperation:
     """Validate MR creation or milestone assignment without provider access.
 
-    :param args: Action, source and target branches, title, MR IID, and milestone ID.
-    :returns: Creation fields or a milestone-only update with the selected MR IID.
-    :raises ActionError: The action, required values, or action-specific fields are invalid.
+    :param args: Action, source and target branches, title, optional description
+        file, MR IID, and milestone ID.
+    :returns: Creation fields, including the description file text when one is
+        selected, or a milestone-only update with the selected MR IID.
+    :raises ActionError: The action, required values, action-specific fields, or
+        description file are invalid.
     """
     if args.action == "update":
         if any(
             value is not None
-            for value in (args.source_branch, args.target_branch, args.title)
+            for value in (
+                args.source_branch,
+                args.target_branch,
+                args.title,
+                getattr(args, DESCRIPTION_FILE),
+            )
         ):
             raise ActionError("mr_update_accepts_milestone_only")
         return PreparedOperation(
@@ -61,6 +72,9 @@ def prepare(args: Namespace) -> PreparedOperation:
         "target_branch": _required_text(args.target_branch, "target_branch"),
         "title": _required_text(args.title, "title"),
     }
+    description = _description(args)
+    if description is not None:
+        body[DESCRIPTION_FIELD] = description
     if args.milestone_id is not None:
         body["milestone_id"] = _positive(args.milestone_id, "milestone_id")
     return PreparedOperation(body)
