@@ -335,3 +335,17 @@ mirror `40`, returned NO_OP on repeat and deleted both (`PASS_INDEPENDENT_ABSENC
 from this install was BLOCKED only by `event_trace`; the rerun passed and is the receipt (`2026-11-22T16:25:56Z`). The
 `main` `3ebe9ba` set is preserved under `tests/acceptance/historical/pre-runner-cleanup-confirmation-at-3ebe9ba/` and
 this branch's `77f2565` set under `tests/acceptance/historical/pre-runner-cleanup-main-integration/`.
+
+### GitLab Agent series and mirror read-back — 2026-11-22, CI14 Agent candidate `238ab84`
+
+Candidate `238ab84` is the CI14 Agent branch with `RUN_SCOPE_KIND_INVALID` (`fae0cc9`) merged with the runner cleanup
+confirmation head `14961dd`, which carries `main` through #147. One mirror qualification, run
+`pr154-mirror-20261122-238ab84`, created repository `1467758933` and GitLab mirror `44`, returned NO_OP on repeat and
+deleted both; at `2026-11-22T16:37:12Z` GitHub returned 404 by ID and source `261` listed no remote mirror. The access
+receipt was captured at `2026-11-22T16:30:54Z`. The Agent series on `hott/test`, run `4b30ebdb503d4c90a43819b3fd983385`,
+connected Agent `12` in namespace `test-dd83de40632438857213` (APPLIED, then NO_OP after a new live plan), verified CI
+access from job `134109` in pipeline `16490` on branch `ci-agent-access-proof` (the three proof files are byte-identical
+to the install), and deleted it (APPLIED, then NO_OP with the attached cleanup record). At `2026-11-22T16:46:04Z`
+project `123` listed no cluster Agents and the namespace returned NotFound. The `ea09ff7` set is preserved under
+`tests/acceptance/historical/pre-ci14-agent-at-ea09ff7/` and the `22ce1d8` set under
+`tests/acceptance/historical/pre-ci14-agent-series-at-22ce1d8/`.
