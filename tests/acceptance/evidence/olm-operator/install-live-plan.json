@@ -1,0 +1,143 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "captured_at": "2026-11-22T13:41:08.138468+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [
+      {
+        "approval": "Automatic",
+        "callback": "ConfirmOperatorPlan",
+        "catalog_source": "certified-operators",
+        "catalog_source_namespace": "openshift-marketplace",
+        "channel": "v26.7",
+        "csv_phase": "Succeeded",
+        "enabled": true,
+        "hook": "cleanup",
+        "install_mode": "OwnNamespace",
+        "installed_csv": "nvidia-network-operator.v26.7.1",
+        "namespace": "nvidia-network-operator",
+        "package": "nvidia-network-operator",
+        "plan_digest": "2b0745a1f09919019ee0b7884dc087bf8c1991d3e4267c0046ee212fdb4388e0",
+        "starting_csv": null,
+        "verified": true
+      },
+      {
+        "approval": "Automatic",
+        "callback": "ResolveOperatorPackage",
+        "catalog_source": "certified-operators",
+        "catalog_source_namespace": "openshift-marketplace",
+        "channel": "v26.7",
+        "csv_phase": "Succeeded",
+        "enabled": true,
+        "hook": "cleanup",
+        "install_mode": "OwnNamespace",
+        "installed_csv": "nvidia-network-operator.v26.7.1",
+        "namespace": "nvidia-network-operator",
+        "package": "nvidia-network-operator",
+        "plan_digest": "2b0745a1f09919019ee0b7884dc087bf8c1991d3e4267c0046ee212fdb4388e0",
+        "starting_csv": null,
+        "verified": true
+      },
+      {
+        "approval": "Automatic",
+        "callback": "K8SAuth",
+        "catalog_source": "certified-operators",
+        "catalog_source_namespace": "openshift-marketplace",
+        "channel": "v26.7",
+        "csv_phase": "Succeeded",
+        "enabled": true,
+        "hook": "cleanup",
+        "install_mode": "OwnNamespace",
+        "installed_csv": "nvidia-network-operator.v26.7.1",
+        "namespace": "nvidia-network-operator",
+        "package": "nvidia-network-operator",
+        "plan_digest": "2b0745a1f09919019ee0b7884dc087bf8c1991d3e4267c0046ee212fdb4388e0",
+        "starting_csv": null,
+        "verified": true
+      }
+    ],
+    "status": "PASS"
+  },
+  "confirmable": true,
+  "errors": [],
+  "filters": {},
+  "kind": "olm_operator",
+  "operation": "install",
+  "plan": {
+    "approval": "Automatic",
+    "catalog_source": "certified-operators",
+    "catalog_source_namespace": "openshift-marketplace",
+    "channel": "v26.7",
+    "csv_phase": "Succeeded",
+    "enabled": true,
+    "install_mode": "OwnNamespace",
+    "installed_csv": "nvidia-network-operator.v26.7.1",
+    "namespace": "nvidia-network-operator",
+    "package": "nvidia-network-operator",
+    "starting_csv": null
+  },
+  "plan_digest": "2b0745a1f09919019ee0b7884dc087bf8c1991d3e4267c0046ee212fdb4388e0",
+  "records": [
+    {
+      "approval": "Automatic",
+      "callback": "ResolveOperatorPackage",
+      "channel": "v26.7",
+      "csv_phase": "Succeeded",
+      "enabled": true,
+      "install_mode": "OwnNamespace",
+      "installed_csv": "nvidia-network-operator.v26.7.1",
+      "namespace": "nvidia-network-operator",
+      "needs": [],
+      "package": "nvidia-network-operator",
+      "source": "certified-operators",
+      "source_namespace": "openshift-marketplace"
+    },
+    {
+      "approval": "Automatic",
+      "callback": "ConfirmOperatorPlan",
+      "catalog_source": "certified-operators",
+      "catalog_source_namespace": "openshift-marketplace",
+      "channel": "v26.7",
+      "csv_phase": "Succeeded",
+      "enabled": true,
+      "install_mode": "OwnNamespace",
+      "installed_csv": "nvidia-network-operator.v26.7.1",
+      "namespace": "nvidia-network-operator",
+      "package": "nvidia-network-operator",
+      "plan_digest": "2b0745a1f09919019ee0b7884dc087bf8c1991d3e4267c0046ee212fdb4388e0",
+      "starting_csv": null,
+      "verified": true
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "00e5c795db886aeee4b23ef80c8e31a0c43223cbe941ff3f484bf7d645adc08c",
+    "file_count": 283,
+    "functional_digest": "ff27bfb8130d5520b06dd4b4d3cdda5e6e62eafbecc927f18c3b7b5d0378450e",
+    "revision": {
+      "source": "installer_record",
+      "value": "af6ef559cd059826e7bb4b74ea58839be335b90a",
+      "verified": true
+    }
+  },
+  "status": "PLANNED",
+  "summary": {
+    "error_count": 0,
+    "record_count": 2
+  },
+  "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
+  "target_file": "/Users/spyroot/.ci-skills/target.toml",
+  "target_source": "user",
+  "tested_revision": "af6ef559cd059826e7bb4b74ea58839be335b90a"
+}

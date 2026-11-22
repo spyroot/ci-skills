@@ -53,18 +53,23 @@ On a cluster that already has the package, the first call prints this and writes
 
 - [x] (DEC-CI16-01 to DEC-CI16-21) Design decisions recorded in the Decision Log.
 - [x] (CI16-P1) This ExecPlan, the phase document and the plan index row are written.
-- [ ] (CI16-M1) Target table `[registry.<name>]`, result schema, models, the read-only resolve callbacks and
+- [x] (CI16-M1) Target table `[registry.<name>]`, result schema, models, the read-only resolve callbacks and
       `--live-plan` for `install` and `apply`; one live plan of each.
-      Code delivered on branch `ci16-olm-operator`: the `registry` target table (contract, parser, template),
+      Code on branch `ci16-olm-operator`: the `registry` target table (contract, parser, template),
       `schemas/results/olm-operator.schema.json`, `kubernetes/olm_models.py` (action/state, qualified resource
       names, Namespace/OperatorGroup/Subscription builders), `kubernetes/olm_callbacks.py`
       (`ResolveOperatorPackage`, `ConfirmOperatorPlan`, needs inference per DEC-CI16-15/16),
       `kubernetes/olm_resources.py` (`ResolveShippedResource`, `alm_examples`), `kubernetes/olm_cli.py`
       (`build_parser`, exported `install_callbacks`/`apply_callbacks`, mode policy, `OCPOperator`, `main`),
       `bin/ocp_operator.py`, catalogue/routing/README/validate wiring and unit tests. Confirmed apply is
-      rejected with `olm_apply_not_delivered_until_ci16_m2` until the writer chains land. The two live plans
-      (install against the cluster that already has the package; apply of the shipped `NicClusterPolicy`
-      document) remain open.
+      rejected with `olm_apply_not_delivered_until_ci16_m2` until the writer chains land. Live proofs
+      ([evidence](../../../tests/acceptance/evidence/olm-operator/README.md)) from the installed head: the
+      install plan reports channel `v26.7`, source `certified-operators/openshift-marketplace`, `enabled: true`
+      with installed CSV `nvidia-network-operator.v26.7.1` phase `Succeeded`; the apply plan resolves the
+      shipped `NicClusterPolicy` document `nic-cluster-policy` from the CSV `alm-examples`. Findings: the
+      PackageManifest channel entries carry no `installModes` on this cluster — modes resolve from the
+      installed CSV `spec.installModes`; the cluster-wide PackageManifest list exceeds the output bound, so
+      the resolve filters with `--field-selector metadata.name=<package>`.
 - [ ] (CI16-M2) `install` apply chain, qualified resource names in `ResourceSet`, `wait_phase` refactor, catalog
       entry, `tools.json`; live run on a cluster that already has the package (`NO_OP`).
 - [ ] (CI16-M3) `apply` chain with `--shipped-default`, `--spec`, `--wait-for` and the registry Secret callback; live
