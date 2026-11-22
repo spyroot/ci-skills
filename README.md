@@ -395,6 +395,9 @@ The result's `trace_artifact` points to that file; smoke reports link the artifa
 - [Probe nested Podman readiness](ci-skills/bin/image_build_readiness.py): run an inner container on one worker,
   verify bind-mount writes and exit propagation, and remove the temporary Job and namespace. See the
   [installed command example](ci-skills/SKILL.md#nested-podman-readiness).
+- [Enable an OLM operator](ci-skills/bin/ocp_operator.py): resolve the channel, catalog source and Subscription
+  for a package such as the NVIDIA Network Operator, apply the resource the package ships, and read back the
+  status the operator writes.
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and [ci-binary-build](ci-skills/bin/ci-binary-build) for
   exact-commit OpenShift build planning.
 

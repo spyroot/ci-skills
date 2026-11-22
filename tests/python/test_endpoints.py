@@ -44,6 +44,7 @@ from lib.python.core.endpoints import (
     GITLAB_ROUTING_TABLE,
     HARBOR_AUTHORITY,
     KUBERNETES_AUTHORITY,
+    REGISTRY_AUTHORITY,
 )
 
 ENDPOINTS = import_script_module("lib.python.core.endpoints")
@@ -256,6 +257,7 @@ def test_the_authorities_come_from_the_contract() -> None:
         GITHUB_AUTHORITY,
         GITLAB_AUTHORITY,
         HARBOR_AUTHORITY,
+        REGISTRY_AUTHORITY,
         KUBERNETES_AUTHORITY,
     )
 
