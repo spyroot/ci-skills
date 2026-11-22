@@ -77,6 +77,7 @@ BORROWED_NAMESPACE_UID: Final = "caller-namespace-uid"
 NAMESPACE_KEY: Final = ("namespace", "", NAMESPACE)
 ABSENCE_READ_FAILURE: Final = "unit_absence_read_failed"
 ABSENCE_REPLACEMENT_UID: Final = "concurrent-manager-uid"
+PREVIOUS_CONSUMER_NAME: Final = "earlier-consumer"
 SECRET_METADATA_COLUMNS: Final = (
     "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,UID:.metadata.uid"
 )
@@ -1925,7 +1926,7 @@ def test_manager_confirmed_absence_refuses_concurrent_runtime_without_mutation(
     (K8S_RUNNER.REGISTRATION_SECRET_SUFFIX, K8S_RUNNER.REGISTRY_SECRET_SUFFIX),
     ids=("registration", "registry"),
 )
-@pytest.mark.parametrize("previous_name", (None, "earlier-consumer"))
+@pytest.mark.parametrize("previous_name", (None, PREVIOUS_CONSUMER_NAME))
 def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2105,7 +2106,7 @@ def test_manager_absence_confirmation_never_authorizes_writes_on_drift(
             )
             if identity[2].endswith(suffix)
         )
-        previous = f"earlier-consumer{suffix}"
+        previous = PREVIOUS_CONSUMER_NAME + suffix
         replacement["metadata"]["name"] = previous
         identity = (identity[0], identity[1], previous)
     cluster.objects[identity] = replacement
