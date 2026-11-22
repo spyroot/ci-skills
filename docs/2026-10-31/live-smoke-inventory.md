@@ -240,4 +240,14 @@ The installed `prepare_tool_pod.py remove` command removed the run's Pod, Config
 namespace. Independent reads confirmed all three absent and the same build configuration
 retained. Repeating removal returned `NO_OP`.
 
-[CI15 G-003](../phases/CI15-RUNNER-WORKFLOWS.md#gates) still needs the consuming runner jobs.
+[CI15 G-003](../phases/CI15-RUNNER-WORKFLOWS.md#gates) consumer jobs passed on the two allocated
+fixtures. GitLab project `262`, pipeline `16199`, ran job `131789` on dedicated runner `134`.
+The job ran the verified Debian image in nested Podman and passed the environment assertions.
+Project CI returned to `disabled`; the runner, manager namespace and temporary ref were absent.
+
+[GitHub job 137189577082](https://github.com/spyroot/test-self-runner/actions/runs/45016413118/job/137189577082)
+ran on self-hosted runner `22`. Its toolbox extended the same Conda image with the Actions runner
+and GitHub CLI, yielding digest
+`sha256:2c1db33d6e8ad6814a547cf82c3aefcc09d498dc36d2dd66c37f5c4b09a6a0cd`.
+The job printed Conda 26.9.4 and `/opt/ci-skills/env/bin/python`.
+The runner, workload namespace and temporary workflow ref were removed and read back absent.
