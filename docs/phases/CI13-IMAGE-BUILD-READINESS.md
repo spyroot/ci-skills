@@ -8,7 +8,7 @@
 
 The installed `probe` and reusable SCC preparation merged in [PR81](https://github.com/spyroot/ci-skills/pull/81)
 at main `788b9e9`. The `chain` implementation is present at `ff1fdc8`; live interruption and current-chain
-consumer proof remain open in the [active ExecPlan](../exec-plans/active/ci13-image-build-readiness.md).
+consumer proof remain open in the [active ExecPlan](../exec-plans/completed/ci13-image-build-readiness.md).
 
 CI13 is the approved Podman/readiness delivery, separate from the native OCP delivery in
 [CI12](CI12-NODE-ONBOARDING.md). CI12.0 owns the reusable tool preparation and run scope; this phase consumes
@@ -22,7 +22,7 @@ This document plans from:
   live acceptance, not part of the chain;
 - the owner's directions of 2026-10-15 on run-scoped names and agent-chosen locations, and on the probe's result
   being the Pod's terminated exit code with every marker line a row, recorded with their dates in the
-  [ExecPlan's Decision Log](../exec-plans/active/ci13-image-build-readiness.md#decision-log); the catalogue does
+  [ExecPlan's Decision Log](../exec-plans/completed/ci13-image-build-readiness.md#decision-log); the catalogue does
   not yet carry the first, so the Decision Log is the cited authority for `R-CI13-005`;
 - the project motivation in [`README.md`](../../README.md#motivation): one combo instead of many hand-rolled
   calls, less context, the same result in one go;
@@ -76,7 +76,7 @@ This document plans from:
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
         evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-003
-        authority: [docs/combos.md, docs/exec-plans/active/ci13-image-build-readiness.md]
+        authority: [docs/combos.md, docs/exec-plans/completed/ci13-image-build-readiness.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
@@ -102,7 +102,7 @@ This document plans from:
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
         evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-005
-        authority: [docs/exec-plans/active/ci13-image-build-readiness.md, docs/phases/CI12-NODE-ONBOARDING.md]
+        authority: [docs/exec-plans/completed/ci13-image-build-readiness.md, docs/phases/CI12-NODE-ONBOARDING.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
@@ -622,7 +622,7 @@ authorization setup is not capability proof. A second run interrupted during the
 by the same absence read-back. Each receipt is sanitized with the portable writer and carries the functional
 checksum of the installed candidate; PR81 registered its captured receipt in the existing gate. Historical chain
 build/publication/deployment results are recorded at `92713cc` and `ffeebba`;
-the [active ExecPlan](../exec-plans/active/ci13-image-build-readiness.md#progress) distinguishes those results
+the [active ExecPlan](../exec-plans/completed/ci13-image-build-readiness.md#progress) distinguishes those results
 from current-candidate full-chain acceptance. Online/runtime proof, consumer-job execution
 and disposal of test resources are external acceptance steps.
 

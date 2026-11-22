@@ -1,0 +1,252 @@
+{
+  "captured_at": "2026-11-22T11:20:00Z",
+  "manager_deployments": [
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "annotations": {
+          "deployment.kubernetes.io/revision": "1",
+          "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\",\"metadata\":{\"annotations\":{},\"labels\":{\"app.kubernetes.io/managed-by\":\"ci-skills\",\"ci-skills.spyroot.dev/operation\":\"02c598860bbe499a4f26a0c3365fcc38\",\"ci-skills.spyroot.dev/run-id\":\"02c598860bbe499a4f26a0c3365fcc38\"},\"name\":\"ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7\",\"namespace\":\"ci13-chain-proof-ce4cc80cb0167ec72972\"},\"spec\":{\"replicas\":1,\"selector\":{\"matchLabels\":{\"app\":\"ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7\"}},\"strategy\":{\"type\":\"Recreate\"},\"template\":{\"metadata\":{\"labels\":{\"app\":\"ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7\",\"app.kubernetes.io/managed-by\":\"ci-skills\",\"ci-skills.spyroot.dev/operation\":\"02c598860bbe499a4f26a0c3365fcc38\",\"ci-skills.spyroot.dev/run-id\":\"02c598860bbe499a4f26a0c3365fcc38\"}},\"spec\":{\"automountServiceAccountToken\":false,\"containers\":[{\"command\":[\"gitlab-runner\",\"run\",\"--working-directory\",\"/ci-skills/runner\",\"--config\",\"/ci-skills/runner/config.toml\"],\"image\":\"harbor.dcloud.run/hott/ci13-chain-proof@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827\",\"imagePullPolicy\":\"IfNotPresent\",\"name\":\"runner\",\"readinessProbe\":{\"exec\":{\"command\":[\"/bin/sh\",\"-c\",\"gitlab-runner verify --config /ci-skills/runner/config.toml\"]}},\"resources\":{\"limits\":{\"cpu\":\"1\",\"memory\":\"1Gi\"},\"requests\":{\"cpu\":\"250m\",\"memory\":\"256Mi\"}},\"securityContext\":{\"privileged\":true,\"runAsNonRoot\":false,\"runAsUser\":0},\"volumeMounts\":[{\"mountPath\":\"/ci-skills/runner\",\"name\":\"runner-work\"},{\"mountPath\":\"/var/lib/containers\",\"name\":\"containers-storage\"},{\"mountPath\":\"/run/containers\",\"name\":\"containers-runroot\"}],\"workingDir\":\"/ci-skills/runner\"}],\"imagePullSecrets\":[{\"name\":\"ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7-registry\"}],\"initContainers\":[{\"command\":[\"/bin/bash\",\"-c\",\"#!/usr/bin/env bash\\n# Register one pre-created GitLab runner for the toolbox-backed shell executor.\\n# Inputs are explicit Pod environment fields; the token is an owned Secret key.\\nset -euo pipefail\\n\\n: \\\"${RUNNER_RUNTIME_ROOT:?}\\\"\\n: \\\"${RUNNER_URL:?}\\\"\\n: \\\"${RUNNER_NAME:?}\\\"\\n: \\\"${RUNNER_TOKEN:?}\\\"\\n\\ncommand -v gitlab-runner \\u003e/dev/null\\ncommand -v podman \\u003e/dev/null\\n\\nreadonly STORAGE_CONF=\\\"${RUNNER_RUNTIME_ROOT}/storage.conf\\\"\\nreadonly CONTAINERS_CONF=\\\"${RUNNER_RUNTIME_ROOT}/containers.conf\\\"\\nreadonly GRAPH_ROOT=\\\"/var/lib/containers/storage\\\"\\nreadonly RUN_ROOT=\\\"/run/containers/storage\\\"\\n\\ninstall -d -m 0700 -- \\\\\\n  \\\"${RUNNER_RUNTIME_ROOT}\\\" \\\\\\n  \\\"${GRAPH_ROOT}\\\" \\\\\\n  \\\"${RUN_ROOT}\\\"\\ncat \\u003e\\\"${STORAGE_CONF}\\\" \\u003c\\u003cEOF\\n[storage]\\ndriver = \\\"overlay\\\"\\ngraphroot = \\\"${GRAPH_ROOT}\\\"\\nrunroot = \\\"${RUN_ROOT}\\\"\\nEOF\\ncat \\u003e\\\"${CONTAINERS_CONF}\\\" \\u003c\\u003c'EOF'\\n[engine]\\ncgroup_manager = \\\"cgroupfs\\\"\\nevents_logger = \\\"file\\\"\\nEOF\\n\\ngitlab-runner register --non-interactive \\\\\\n  --url \\\"${RUNNER_URL}\\\" \\\\\\n  --token \\\"${RUNNER_TOKEN}\\\" \\\\\\n  --executor shell \\\\\\n  --name \\\"${RUNNER_NAME}\\\" \\\\\\n  --builds-dir \\\"${RUNNER_RUNTIME_ROOT}/builds\\\" \\\\\\n  --cache-dir \\\"${RUNNER_RUNTIME_ROOT}/cache\\\" \\\\\\n  --env \\\"CONTAINERS_STORAGE_CONF=${STORAGE_CONF}\\\" \\\\\\n  --env \\\"CONTAINERS_CONF=${CONTAINERS_CONF}\\\" \\\\\\n  --config \\\"${RUNNER_RUNTIME_ROOT}/config.toml\\\"\\nunset RUNNER_TOKEN\\n\"],\"env\":[{\"name\":\"RUNNER_RUNTIME_ROOT\",\"value\":\"/ci-skills/runner\"},{\"name\":\"RUNNER_URL\",\"value\":\"https://gitlab.dcloud.run\"},{\"name\":\"RUNNER_NAME\",\"value\":\"ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7\"},{\"name\":\"RUNNER_TOKEN\",\"valueFrom\":{\"secretKeyRef\":{\"key\":\"gitlab-runner-token\",\"name\":\"ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7-registration\"}}}],\"image\":\"harbor.dcloud.run/hott/ci13-chain-proof@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827\",\"imagePullPolicy\":\"IfNotPresent\",\"name\":\"register\",\"resources\":{\"limits\":{\"cpu\":\"1\",\"memory\":\"1Gi\"},\"requests\":{\"cpu\":\"250m\",\"memory\":\"256Mi\"}},\"securityContext\":{\"privileged\":true,\"runAsNonRoot\":false,\"runAsUser\":0},\"volumeMounts\":[{\"mountPath\":\"/ci-skills/runner\",\"name\":\"runner-work\"},{\"mountPath\":\"/var/lib/containers\",\"name\":\"containers-storage\"},{\"mountPath\":\"/run/containers\",\"name\":\"containers-runroot\"}],\"workingDir\":\"/ci-skills/runner\"}],\"nodeName\":\"node-1.ww-cai-cisco-live.dcloud.local\",\"serviceAccountName\":\"default\",\"volumes\":[{\"emptyDir\":{},\"name\":\"runner-work\"},{\"emptyDir\":{\"sizeLimit\":\"8Gi\"},\"name\":\"containers-storage\"},{\"emptyDir\":{},\"name\":\"containers-runroot\"}]}}}}\n"
+        },
+        "creationTimestamp": "2026-11-22T11:38:05Z",
+        "generation": 1,
+        "labels": {
+          "app.kubernetes.io/managed-by": "ci-skills",
+          "ci-skills.spyroot.dev/operation": "02c598860bbe499a4f26a0c3365fcc38",
+          "ci-skills.spyroot.dev/run-id": "02c598860bbe499a4f26a0c3365fcc38"
+        },
+        "name": "ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7",
+        "namespace": "ci13-chain-proof-ce4cc80cb0167ec72972",
+        "resourceVersion": "200386213",
+        "uid": "a43c7897-0be0-4216-979c-99c51af09c16"
+      },
+      "spec": {
+        "progressDeadlineSeconds": 600,
+        "replicas": 1,
+        "revisionHistoryLimit": 10,
+        "selector": {
+          "matchLabels": {
+            "app": "ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7"
+          }
+        },
+        "strategy": {
+          "type": "Recreate"
+        },
+        "template": {
+          "metadata": {
+            "creationTimestamp": null,
+            "labels": {
+              "app": "ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7",
+              "app.kubernetes.io/managed-by": "ci-skills",
+              "ci-skills.spyroot.dev/operation": "02c598860bbe499a4f26a0c3365fcc38",
+              "ci-skills.spyroot.dev/run-id": "02c598860bbe499a4f26a0c3365fcc38"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": false,
+            "containers": [
+              {
+                "command": [
+                  "gitlab-runner",
+                  "run",
+                  "--working-directory",
+                  "/ci-skills/runner",
+                  "--config",
+                  "/ci-skills/runner/config.toml"
+                ],
+                "image": "harbor.dcloud.run/hott/ci13-chain-proof@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+                "imagePullPolicy": "IfNotPresent",
+                "name": "runner",
+                "readinessProbe": {
+                  "exec": {
+                    "command": [
+                      "/bin/sh",
+                      "-c",
+                      "gitlab-runner verify --config /ci-skills/runner/config.toml"
+                    ]
+                  },
+                  "failureThreshold": 3,
+                  "periodSeconds": 10,
+                  "successThreshold": 1,
+                  "timeoutSeconds": 1
+                },
+                "resources": {
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "1Gi"
+                  },
+                  "requests": {
+                    "cpu": "250m",
+                    "memory": "256Mi"
+                  }
+                },
+                "securityContext": {
+                  "privileged": true,
+                  "runAsNonRoot": false,
+                  "runAsUser": 0
+                },
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "File",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/ci-skills/runner",
+                    "name": "runner-work"
+                  },
+                  {
+                    "mountPath": "/var/lib/containers",
+                    "name": "containers-storage"
+                  },
+                  {
+                    "mountPath": "/run/containers",
+                    "name": "containers-runroot"
+                  }
+                ],
+                "workingDir": "/ci-skills/runner"
+              }
+            ],
+            "dnsPolicy": "ClusterFirst",
+            "imagePullSecrets": [
+              {
+                "name": "ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7-registry"
+              }
+            ],
+            "initContainers": [
+              {
+                "command": [
+                  "/bin/bash",
+                  "-c",
+                  "#!/usr/bin/env bash\n# Register one pre-created GitLab runner for the toolbox-backed shell executor.\n# Inputs are explicit Pod environment fields; the token is an owned Secret key.\nset -euo pipefail\n\n: \"${RUNNER_RUNTIME_ROOT:?}\"\n: \"${RUNNER_URL:?}\"\n: \"${RUNNER_NAME:?}\"\n: \"${RUNNER_TOKEN:?}\"\n\ncommand -v gitlab-runner >/dev/null\ncommand -v podman >/dev/null\n\nreadonly STORAGE_CONF=\"${RUNNER_RUNTIME_ROOT}/storage.conf\"\nreadonly CONTAINERS_CONF=\"${RUNNER_RUNTIME_ROOT}/containers.conf\"\nreadonly GRAPH_ROOT=\"/var/lib/containers/storage\"\nreadonly RUN_ROOT=\"/run/containers/storage\"\n\ninstall -d -m 0700 -- \\\n  \"${RUNNER_RUNTIME_ROOT}\" \\\n  \"${GRAPH_ROOT}\" \\\n  \"${RUN_ROOT}\"\ncat >\"${STORAGE_CONF}\" <<EOF\n[storage]\ndriver = \"overlay\"\ngraphroot = \"${GRAPH_ROOT}\"\nrunroot = \"${RUN_ROOT}\"\nEOF\ncat >\"${CONTAINERS_CONF}\" <<'EOF'\n[engine]\ncgroup_manager = \"cgroupfs\"\nevents_logger = \"file\"\nEOF\n\ngitlab-runner register --non-interactive \\\n  --url \"${RUNNER_URL}\" \\\n  --token \"${RUNNER_TOKEN}\" \\\n  --executor shell \\\n  --name \"${RUNNER_NAME}\" \\\n  --builds-dir \"${RUNNER_RUNTIME_ROOT}/builds\" \\\n  --cache-dir \"${RUNNER_RUNTIME_ROOT}/cache\" \\\n  --env \"CONTAINERS_STORAGE_CONF=${STORAGE_CONF}\" \\\n  --env \"CONTAINERS_CONF=${CONTAINERS_CONF}\" \\\n  --config \"${RUNNER_RUNTIME_ROOT}/config.toml\"\nunset RUNNER_TOKEN\n"
+                ],
+                "env": [
+                  {
+                    "name": "RUNNER_RUNTIME_ROOT",
+                    "value": "/ci-skills/runner"
+                  },
+                  {
+                    "name": "RUNNER_URL",
+                    "value": "https://gitlab.dcloud.run"
+                  },
+                  {
+                    "name": "RUNNER_NAME",
+                    "value": "ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7"
+                  },
+                  {
+                    "name": "RUNNER_TOKEN",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "key": "gitlab-runner-token",
+                        "name": "ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7-registration"
+                      }
+                    }
+                  }
+                ],
+                "image": "harbor.dcloud.run/hott/ci13-chain-proof@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+                "imagePullPolicy": "IfNotPresent",
+                "name": "register",
+                "resources": {
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "1Gi"
+                  },
+                  "requests": {
+                    "cpu": "250m",
+                    "memory": "256Mi"
+                  }
+                },
+                "securityContext": {
+                  "privileged": true,
+                  "runAsNonRoot": false,
+                  "runAsUser": 0
+                },
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "File",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/ci-skills/runner",
+                    "name": "runner-work"
+                  },
+                  {
+                    "mountPath": "/var/lib/containers",
+                    "name": "containers-storage"
+                  },
+                  {
+                    "mountPath": "/run/containers",
+                    "name": "containers-runroot"
+                  }
+                ],
+                "workingDir": "/ci-skills/runner"
+              }
+            ],
+            "nodeName": "node-1.ww-cai-cisco-live.dcloud.local",
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "securityContext": {},
+            "serviceAccount": "default",
+            "serviceAccountName": "default",
+            "terminationGracePeriodSeconds": 30,
+            "volumes": [
+              {
+                "emptyDir": {},
+                "name": "runner-work"
+              },
+              {
+                "emptyDir": {
+                  "sizeLimit": "8Gi"
+                },
+                "name": "containers-storage"
+              },
+              {
+                "emptyDir": {},
+                "name": "containers-runroot"
+              }
+            ]
+          }
+        }
+      },
+      "status": {
+        "availableReplicas": 1,
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T11:38:08Z",
+            "lastUpdateTime": "2026-11-22T11:38:08Z",
+            "message": "Deployment has minimum availability.",
+            "reason": "MinimumReplicasAvailable",
+            "status": "True",
+            "type": "Available"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T11:38:05Z",
+            "lastUpdateTime": "2026-11-22T11:38:08Z",
+            "message": "ReplicaSet \"ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7-7c8787f6c8\" has successfully progressed.",
+            "reason": "NewReplicaSetAvailable",
+            "status": "True",
+            "type": "Progressing"
+          }
+        ],
+        "observedGeneration": 1,
+        "readyReplicas": 1,
+        "replicas": 1,
+        "updatedReplicas": 1
+      }
+    }
+  ],
+  "manager_namespace": "ci13-chain-proof-ce4cc80cb0167ec72972",
+  "manager_pods": [
+    "ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7-7c8787fxhs4s   1/1   Running   0     3m12s"
+  ],
+  "runner": {
+    "active": true,
+    "architecture": "amd64",
+    "contacted_at": "2026-11-22T11:41:08.708Z",
+    "description": "ci13-chain-proof",
+    "id": 135,
+    "platform": "linux",
+    "revision": "139a0ac0",
+    "status": "online",
+    "tag_list": [
+      "ci13-chain-proof"
+    ],
+    "version": "18.4.0"
+  }
+}
