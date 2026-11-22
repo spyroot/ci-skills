@@ -244,6 +244,15 @@ def test_resolve_channel_override_conflict_with_existing() -> None:
     assert any(item.need == "override_conflict" for item in needs)
 
 
+def test_resolve_channel_override_matching_existing_has_no_conflict() -> None:
+    """A --channel equal to the existing Subscription's channel is not a conflict."""
+    service = FakeService()
+    service.seed_manifest(channel="v26.7", default_channel="stable")
+    service.seed_subscription(channel="v26.7")
+    _, needs = olm_callbacks._resolve_plan(make_action(channel="v26.7"), service)
+    assert needs == []
+
+
 def test_resolve_install_mode_and_approval_checked() -> None:
     """Unsupported install mode and bad approval each produce their need."""
     service = FakeService()

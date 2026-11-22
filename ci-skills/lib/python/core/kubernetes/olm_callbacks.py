@@ -286,15 +286,18 @@ def _resolve_plan(
                     supply="pass --starting-csv with a CSV of the chosen channel",
                 )
             )
-    if existing is not None and action.overrides.channel is not None:
-        if existing_channel != channel:
-            needs.append(
-                OperatorNeed(
-                    need=NEED_OVERRIDE_CONFLICT,
-                    evidence=f"existing Subscription uses channel {existing_channel!r}",
-                    supply="remove --channel or remove the existing Subscription first",
-                )
+    if (
+        existing is not None
+        and action.overrides.channel is not None
+        and existing_channel != channel
+    ):
+        needs.append(
+            OperatorNeed(
+                need=NEED_OVERRIDE_CONFLICT,
+                evidence=f"existing Subscription uses channel {existing_channel!r}",
+                supply="remove --channel or remove the existing Subscription first",
             )
+        )
     return (
         OperatorPlan(
             package=action.package,
