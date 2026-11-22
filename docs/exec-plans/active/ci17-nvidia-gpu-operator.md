@@ -7,10 +7,12 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 ## Purpose / Big Picture
 
 [CI16][ci16-exec] delivers generic OLM operator enablement (`ocp_operator.py`) using the NVIDIA Network Operator as its
-initial consumer. OpenShift clusters running GPU workloads also require NVIDIA GPU Operator (`gpu-operator-certified`)
-lifecycle automation grounded in the official [NVIDIA GPU Operator on OpenShift documentation][nvidia-ocp-docs],
-including [Cleanup][nvidia-ocp-cleanup], and OpenShift-native semantics (`MachineSet`, `MachineConfig`,
-`MachineConfigPool`, CRI-O/CDI, cluster monitoring, Driver Toolkit, and MOK signing keys).
+initial consumer. Any OpenShift cluster running GPU workloads also requires NVIDIA GPU Operator
+(`gpu-operator-certified`) lifecycle automation grounded in the official
+[NVIDIA GPU Operator on OpenShift documentation][nvidia-ocp-docs] — including [Install][nvidia-ocp-install],
+[DRA (`GPUCluster`)][nvidia-ocp-dra], and [Cleanup][nvidia-ocp-cleanup] — and OpenShift-native semantics
+(`MachineSet`, `MachineConfig`, `MachineConfigPool`, CRI-O/CDI, cluster monitoring, Driver Toolkit, and MOK keys).
+This design is public and cluster-neutral for any OpenShift user; zero cluster-specific values are hardcoded.
 
 This plan partitions NVIDIA GPU Operator operations into **atomic, `Nvidia*`-prefixed callbacks first** — each a
 reusable `K8SCallback` owning one official NVIDIA OpenShift procedure — and then composes **chain combos** from those
@@ -18,8 +20,10 @@ callbacks plus CI16's OLM callbacks via `WorkflowExecutor`:
 
 - `NvidiaPrerequisite` — NFD check, private registry `docker-registry` image pull Secret (via `[registry.<name>]`),
   and optional NLS `licensingConfig` Secret (`licensing-config`).
-- `NvidiaClusterPolicy` — creates or patches `ClusterPolicy` (`gpu-cluster-policy`), wiring driver `repository`,
-  `image`, `version`, `imagePullSecrets`, and `licensingConfig` without hand-editing raw JSON manifests.
+- `NvidiaClusterPolicy` — creates or patches `ClusterPolicy` (`gpu-cluster-policy`, Device Plugin mode), wiring driver
+  `repository`, `image`, `version`, `imagePullSecrets`, and `licensingConfig` ([Install][nvidia-ocp-install]).
+- `NvidiaDraCluster` — creates or patches `GPUCluster` (GPU Operator `v26.7+` DRA mode, mutually exclusive with
+  `ClusterPolicy`) and verifies the `gpu.nvidia.com` `DeviceClass` and `ResourceSlice`s ([DRA][nvidia-ocp-dra]).
 - `NvidiaDriverPool` — creates or patches per-pool `NVIDIADriver` CRs when `useNvidiaDriverCRD: true`.
 - `NvidiaHealthCheck` — out-of-the-box sanity check verifying every expected GPU Operator DaemonSet, validator Pod
   (`nvidia-cuda-validator`, `nvidia-device-plugin-validator`, `nvidia-operator-validator`), `ClusterPolicy` state,
@@ -202,7 +206,19 @@ These observations come from read-only reads of the operator's OpenShift cluster
   `dcgm-exporter` ServiceMonitor read-back.
   Status: ACCEPTED
   Rationale: Grounds OpenShift cluster monitoring / Console GPU metrics in a single atomic callback.
-- Decision DEC-CI17-16: Result JSON contract (`ci-skills/schemas/results/nvidia-gpu-operator.schema.json`) and
+- Decision DEC-CI17-16: Support both Device Plugin mode (`NvidiaClusterPolicy`) and Dynamic Resource Allocation mode
+  (`NvidiaDraCluster` using `GPUCluster` + `NVIDIADriver` + `DeviceClass` `gpu.nvidia.com`, per [DRA][nvidia-ocp-dra]).
+  Enforce mutual exclusion in preflight: block `NvidiaDraCluster` if a `ClusterPolicy` exists, and block
+  `NvidiaClusterPolicy` if a `GPUCluster` exists (`need: gpu_allocation_mode_conflict`).
+  Status: ACCEPTED
+  Rationale: NVIDIA GPU Operator `v26.7+` explicitly forbids running `ClusterPolicy` and `GPUCluster` concurrently.
+- Decision DEC-CI17-17: Every `Nvidia*` callback carries a paired documentation reference in
+  `ci-skills/references/nvidia-gpu-operator.md` (registered in `reference.py`) linking directly to the official NVIDIA
+  OpenShift documentation page (`install-gpu-ocp.html`, `dra-gpu-ocp.html`, `clean-up.html`, etc.). No site-specific
+  names, registries, or node pools are hardcoded.
+  Status: ACCEPTED
+  Rationale: `ci-skills` is a public, project-neutral skill for any OpenShift operator or agent on the internet.
+- Decision DEC-CI17-18: Result JSON contract (`ci-skills/schemas/results/nvidia-gpu-operator.schema.json`) and
   `tools.json` updates are proposed and approved explicitly by the operator in `CI17-M1` before any JSON or contract
   file is written.
   Status: ACCEPTED
@@ -216,43 +232,51 @@ Code lives under `ci-skills/lib/python/core/kubernetes/nvidia_gpu/` with a thin 
 
 ## Atomic `Nvidia*` Callback Specifications
 
-All 13 atomic callbacks live in `callbacks.py` and delegate low-level reads, server-side dry-runs, confirmation, and
+All 14 atomic callbacks live in `callbacks.py` and delegate low-level reads, server-side dry-runs, confirmation, and
 waits to shared modules (`discovery.py`, `preflight.py`, `waits.py`):
 
-1. `NvidiaPrerequisite`: Checks NFD readiness; creates/verifies `docker-registry` image pull Secret (from
-   `[registry.<name>]`) and optional NLS `licensing-config` Secret in `nvidia-gpu-operator`.
-2. `NvidiaClusterPolicy`: Creates or patches `ClusterPolicy` (`gpu-cluster-policy`), wiring driver `repository`,
-   `image`, `version`, `imagePullSecrets`, `licensingConfig` (`secretName`, `nlsEnabled`), `kernelModuleType`,
-   `usePrecompiled`, and `useNvidiaDriverCRD`.
-3. `NvidiaDriverPool`: Creates or patches named `NVIDIADriver` CRs (`nodeSelector`, `repository`, `image`, `version`,
-   `imagePullSecrets`, `kernelModuleType`, `usePrecompiled`).
-4. `NvidiaHealthCheck(node="*")`: Out-of-the-box sanity check verifying `gpu-operator` controller Pod, all expected
-   DaemonSets (`DESIRED == CURRENT == READY == UP-TO-DATE == AVAILABLE`, allowing `0/0` where hardware is absent such
-   as `nvidia-mig-manager` on non-MIG GPUs), validator Pods (`nvidia-cuda-validator`, `nvidia-device-plugin-validator`
-   `Completed`; `nvidia-operator-validator` `Running`), `ClusterPolicy.status.state=ready`, `NVIDIADriver` desired vs
-   observed `driver_drift`, allocatable `nvidia.com/gpu`, and `MachineConfigPool` health.
-5. `NvidiaCudaUpgrade(node, driver)`: Cluster (`node="*"`) or node/pool CUDA/driver upgrade. Resolves `ClusterPolicy`
-   vs `NVIDIADriver`, preflights `upgrade-failed`/`skip`, dry-runs and applies patch, tracks
+1. `NvidiaPrerequisite` ([Install][nvidia-ocp-install]): Checks NFD readiness; creates/verifies `docker-registry`
+   image pull Secret (from `[registry.<name>]`) and optional NLS `licensing-config` Secret in `nvidia-gpu-operator`.
+2. `NvidiaClusterPolicy` ([Install][nvidia-ocp-install]): Creates or patches `ClusterPolicy` (`gpu-cluster-policy`,
+   blocking if `GPUCluster` exists), wiring driver `repository`, `image`, `version`, `imagePullSecrets`,
+   `licensingConfig`, `kernelModuleType`, `usePrecompiled`, and `useNvidiaDriverCRD`.
+3. `NvidiaDraCluster` ([DRA][nvidia-ocp-dra]): Creates or patches `GPUCluster` (`gpuclusters.nvidia.com`, blocking if
+   `ClusterPolicy` exists), verifies `gpu.nvidia.com` `DeviceClass` and `ResourceSlice` publication on OpenShift
+   `4.22+` / GPU Operator `v26.7+`.
+4. `NvidiaDriverPool` ([Install][nvidia-ocp-install], [DRA][nvidia-ocp-dra]): Creates or patches named `NVIDIADriver`
+   CRs (`nodeSelector`, `repository`, `image`, `version`, `imagePullSecrets`, `kernelModuleType`, `usePrecompiled`).
+5. `NvidiaHealthCheck(node="*")` ([Install][nvidia-ocp-install], [DRA][nvidia-ocp-dra]): Out-of-the-box sanity check
+   verifying `gpu-operator` controller Pod, all expected DaemonSets (`DESIRED == CURRENT == READY == UP-TO-DATE ==
+   AVAILABLE`, allowing `0/0` where hardware is absent such as `nvidia-mig-manager` on non-MIG GPUs), validator Pods
+   (`nvidia-cuda-validator`, `nvidia-device-plugin-validator` `Completed`; `nvidia-operator-validator` `Running`),
+   `ClusterPolicy` or `GPUCluster` state, `DeviceClass` (in DRA mode), `NVIDIADriver` desired vs observed
+   `driver_drift`, allocatable `nvidia.com/gpu`, and `MachineConfigPool` health.
+6. `NvidiaCudaUpgrade(node, driver)` ([Docs][nvidia-ocp-docs]): Cluster (`node="*"`) or node/pool CUDA/driver upgrade.
+   Resolves `ClusterPolicy` vs `NVIDIADriver`, preflights `upgrade-failed`/`skip`, dry-runs and applies patch, tracks
    `nvidia.com/gpu-driver-upgrade-state` through `upgrade-done`, and verifies `nvidia.com/cuda.{driver,runtime}-*`.
-6. `NvidiaContainerToolkit`: Aligns `ClusterPolicy.spec.toolkit.*`, `spec.cdi.*`, `spec.operator.runtimeClass=nvidia`,
-   `use_ocp_driver_toolkit`, `RuntimeClass/nvidia`, and worker `MachineConfigPool` state.
-7. `NvidiaEnableFeatureDiscovery`: Verifies NFD, patches `/spec/gfd/enabled` (CRD-verified), waits for GFD DaemonSet,
-   and verifies `nvidia.com/gpu.product` and `nvidia.com/cuda.*` labels.
-8. `NvidiaEnableMonitoring`: Labels `ns/<namespace> openshift.io/cluster-monitoring=true` and enables
-   `ClusterPolicy.spec.dcgmExporter.serviceMonitor.enabled: true`.
-9. `NvidiaTimeSlicing`: Creates/updates a multi-profile time-slicing `ConfigMap` (`replicas`, `renameByDefault`,
-   `failRequestsGreaterThanOne`, e.g., `small=2`, `medium=5`, `large=10`) and binds
-   `ClusterPolicy.spec.devicePlugin.config.{name,default}`.
-10. `NvidiaMachineSetLabel`: Patches `machinesets.machine.openshift.io` in `openshift-machine-api` under
-    `/spec/template/spec/metadata/labels` for validated NVIDIA labels (`nvidia.com/device-plugin.config`,
-    `nvidia.com/mig.config`, `nvidia.com/gpu.deploy.driver`, `nvidia.com/gpu-driver-upgrade.skip`, or declared
-    `NVIDIADriver` selector keys).
-11. `NvidiaMachineConfig`: Plans/verifies NVIDIA OpenShift `MachineConfig` (MOK signing key, IOMMU kernel args,
-    CRI-O/CDI) and waits for `MachineConfigPool` convergence (`Updated=True`, `Updating=False`, `Degraded=False`).
-12. `NvidiaUpgradePolicy`: Patches `upgradePolicy` (`autoUpgrade`, `maxParallelUpgrades`, `maxUnavailable`, `drain`)
-    and manages per-node `gpu-driver-upgrade.skip` and `gpu-driver-upgrade-state=upgrade-required` recovery labels.
-13. `NvidiaCleanup`: Ordered teardown per NVIDIA OpenShift `clean-up.html` (`NVIDIADriver` → `ClusterPolicy` → CI16
-    OLM remove → optional namespace → explicit `--delete-crds` opt-in) with absence read-back.
+7. `NvidiaContainerToolkit` ([Docs][nvidia-ocp-docs]): Aligns `ClusterPolicy.spec.toolkit.*`, `spec.cdi.*`,
+   `spec.operator.runtimeClass=nvidia`, `use_ocp_driver_toolkit`, `RuntimeClass/nvidia`, and worker
+   `MachineConfigPool` state.
+8. `NvidiaEnableFeatureDiscovery` ([Install][nvidia-ocp-install]): Verifies NFD, patches `/spec/gfd/enabled`
+   (CRD-verified), waits for GFD DaemonSet, and verifies `nvidia.com/gpu.product` and `nvidia.com/cuda.*` labels.
+9. `NvidiaEnableMonitoring` ([Install][nvidia-ocp-install]): Labels `ns/<namespace> openshift.io/cluster-monitoring=true`
+   and enables `ClusterPolicy.spec.dcgmExporter.serviceMonitor.enabled: true`.
+10. `NvidiaTimeSlicing` ([Docs][nvidia-ocp-docs]): Creates/updates a multi-profile time-slicing `ConfigMap`
+    (`replicas`, `renameByDefault`, `failRequestsGreaterThanOne`, e.g., `small=2`, `medium=5`, `large=10`) and binds
+    `ClusterPolicy.spec.devicePlugin.config.{name,default}`.
+11. `NvidiaMachineSetLabel` ([Docs][nvidia-ocp-docs]): Patches `machinesets.machine.openshift.io` in
+    `openshift-machine-api` under `/spec/template/spec/metadata/labels` for validated NVIDIA labels
+    (`nvidia.com/device-plugin.config`, `nvidia.com/mig.config`, `nvidia.com/gpu.deploy.driver`,
+    `nvidia.com/gpu-driver-upgrade.skip`, or declared `NVIDIADriver` selector keys).
+12. `NvidiaMachineConfig` ([Docs][nvidia-ocp-docs]): Plans/verifies NVIDIA OpenShift `MachineConfig` (MOK signing key,
+    IOMMU kernel args, CRI-O/CDI) and waits for `MachineConfigPool` convergence (`Updated=True`, `Updating=False`,
+    `Degraded=False`).
+13. `NvidiaUpgradePolicy` ([Docs][nvidia-ocp-docs]): Patches `upgradePolicy` (`autoUpgrade`, `maxParallelUpgrades`,
+    `maxUnavailable`, `drain`) and manages per-node `gpu-driver-upgrade.skip` and
+    `gpu-driver-upgrade-state=upgrade-required` recovery labels.
+14. `NvidiaCleanup` ([Cleanup][nvidia-ocp-cleanup]): Ordered teardown per NVIDIA OpenShift `clean-up.html`
+    (`NVIDIADriver` → `ClusterPolicy`/`GPUCluster` → CI16 OLM remove → optional namespace → explicit `--delete-crds`
+    opt-in) with absence read-back.
 
 ### Chain Composition (`chains.py`)
 
@@ -260,6 +284,8 @@ Chain combos compose strictly from `Nvidia*` callbacks and CI16 OLM callbacks vi
 
 - `install-gpu-operator`: `[K8SAuth, *ci16_nfd, NvidiaPrerequisite, *ci16_gpu_operator, NvidiaClusterPolicy,
   NvidiaEnableMonitoring, NvidiaContainerToolkit, NvidiaEnableFeatureDiscovery, NvidiaHealthCheck]`
+- `install-gpu-dra`: `[K8SAuth, *ci16_nfd, NvidiaPrerequisite, *ci16_gpu_operator(v26.7+), NvidiaDraCluster,
+  NvidiaDriverPool, NvidiaEnableMonitoring, NvidiaHealthCheck]`
 - `upgrade-cuda`: `[K8SAuth, NvidiaHealthCheck, *(optional NvidiaUpgradePolicy), NvidiaCudaUpgrade(node, driver),
   NvidiaHealthCheck]`
 - `enable-time-slicing`: `[K8SAuth, NvidiaHealthCheck, NvidiaTimeSlicing, *(optional NvidiaMachineSetLabel),
@@ -294,7 +320,7 @@ Planned module layout under `ci-skills/lib/python/core/kubernetes/nvidia_gpu/`:
 - `preflight.py`: Shared contract validation, `--dry-run=server` diffing, and `plan_digest` confirmation.
 - `waits.py`: Shared polling for `ClusterPolicy`/`NVIDIADriver` readiness, `gpu-driver-upgrade-state`,
   `MachineConfigPool` convergence, DaemonSet rollouts, and CUDA/validator read-back.
-- `callbacks.py`: The 13 `Nvidia*` atomic callbacks.
+- `callbacks.py`: The 14 `Nvidia*` atomic callbacks.
 - `chains.py`: Callback-list builders for standalone atomic verbs and composed chain combos.
 - `cli.py`: `build_parser`, `workflow`, `NvidiaGPUOperator`, `main`, invoked by `ci-skills/bin/nvidia_gpu_operator.py`.
 
@@ -305,4 +331,6 @@ Not yet implemented. Updated at the completion of each milestone (`CI17-M1` thro
 [phase]: ../../phases/CI17-NVIDIA-GPU-OPERATOR.md
 [ci16-exec]: ci16-olm-operator.md
 [nvidia-ocp-docs]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/index.html
+[nvidia-ocp-install]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/install-gpu-ocp.html
+[nvidia-ocp-dra]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/dra-gpu-ocp.html
 [nvidia-ocp-cleanup]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/clean-up.html

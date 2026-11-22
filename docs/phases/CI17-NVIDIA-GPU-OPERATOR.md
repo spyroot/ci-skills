@@ -8,17 +8,20 @@
 
 Main at `1ad150e` and [CI16][ci16] introduce generic OLM package management (`ocp_operator.py`) with NVIDIA Network
 Operator as the initial consumer, and have no code for NVIDIA GPU Operator lifecycle operations on OpenShift. This
-phase is grounded in the official [NVIDIA GPU Operator on OpenShift documentation][nvidia-ocp-docs] (including
-[Cleanup][nvidia-ocp-cleanup]) and live read-only inspection of `clusterpolicies.nvidia.com`,
-`nvidiadrivers.nvidia.com`, and OpenShift `MachineConfig` resources. The team requests (A1) **atomic, domain-semantic
-`Nvidia*` callbacks built first**, each modeling one NVIDIA OpenShift procedure with accurate CRD, `MachineSet`, and
-`MachineConfig`/`MachineConfigPool` semantics (`NvidiaPrerequisite`, `NvidiaClusterPolicy`, `NvidiaCudaUpgrade`,
-`NvidiaContainerToolkit`, `NvidiaEnableFeatureDiscovery`, `NvidiaEnableMonitoring`, `NvidiaTimeSlicing`,
-`NvidiaMachineSetLabel`, `NvidiaMachineConfig`, `NvidiaUpgradePolicy`, `NvidiaHealthCheck`, `NvidiaCleanup`), and
-(A2) **chain combos composed strictly from those callbacks** plus CI16's OLM callbacks with zero duplicated logic.
-[The capability model](../capability-model.md) and [the contribution guide](../contribution_guide.md) govern reusable
-Python ownership, command contracts and schemas (A3). The [ExecPlan][exec] holds the live observations, callback
-specifications, decisions, interfaces and gates.
+phase is general-purpose for any OpenShift cluster (zero site-specific assumptions) and is grounded in the official
+[NVIDIA GPU Operator on OpenShift documentation][nvidia-ocp-docs] — including [Install][nvidia-ocp-install],
+[DRA (`GPUCluster`)][nvidia-ocp-dra], and [Cleanup][nvidia-ocp-cleanup] — plus live read-only inspection of
+`clusterpolicies.nvidia.com`, `nvidiadrivers.nvidia.com`, and OpenShift `MachineConfig` resources. The team requests
+(A1) **atomic, domain-semantic `Nvidia*` callbacks built first**, each modeling one NVIDIA OpenShift doc procedure
+with accurate CRD, `MachineSet`, and `MachineConfig`/`MachineConfigPool` semantics (`NvidiaPrerequisite`,
+`NvidiaClusterPolicy`, `NvidiaDraCluster`, `NvidiaDriverPool`, `NvidiaCudaUpgrade`, `NvidiaContainerToolkit`,
+`NvidiaEnableFeatureDiscovery`, `NvidiaEnableMonitoring`, `NvidiaTimeSlicing`, `NvidiaMachineSetLabel`,
+`NvidiaMachineConfig`, `NvidiaUpgradePolicy`, `NvidiaHealthCheck`, `NvidiaCleanup`), (A2) **chain combos composed
+strictly from those callbacks** plus CI16's OLM callbacks with zero duplicated logic, and (A3) **paired skill
+references** (`ci-skills/references/nvidia-gpu-operator.md`) mapping every callback to its official NVIDIA OpenShift
+documentation page. [The capability model](../capability-model.md) and [the contribution guide](../contribution_guide.md)
+govern reusable Python ownership, command contracts and schemas (A4). The [ExecPlan][exec] holds the live observations,
+callback specifications, decisions, interfaces and gates.
 
 ## Consumer
 
@@ -70,26 +73,29 @@ flowchart LR
 Proposed `ci-skills/bin/nvidia_gpu_operator.py` backed by `ci-skills/lib/python/core/kubernetes/nvidia_gpu/`. OLM
 install/removal of `nfd` and `gpu-operator-certified` reuses CI16's `olm_callbacks` and `olm_resources` directly.
 
-| Atomic Callback | Scope / Args | Grounded NVIDIA OpenShift & CRD Semantics |
+| Atomic Callback | Scope / Args | Grounded NVIDIA OpenShift & CRD Semantics (Reference) |
 | --- | --- | --- |
-| `NvidiaPrerequisite` | registry, NLS, NFD | Verifies NFD; creates registry pull secret & NLS licensing secret |
-| `NvidiaClusterPolicy` | driver/spec fields | Creates/patches `ClusterPolicy` (repo, image, version, secrets, NLS) |
-| `NvidiaDriverPool` | `NVIDIADriver` CR | Creates/patches per-pool `NVIDIADriver` (`nodeSelector`, precompiled, tag) |
-| `NvidiaCudaUpgrade` | `node`, `driver` | Cluster (`"*"`) or node/pool driver/CUDA upgrade + upgrade-state wait |
-| `NvidiaContainerToolkit` | `enabled`, `cdi` | Aligns `spec.toolkit`/`cdi`/`runtimeClass` with OCP CRI-O & MCP |
-| `NvidiaEnableFeatureDiscovery` | `enabled`, tag | Checks NFD, patches `/spec/gfd/enabled`, checks `nvidia.com/gpu.*` |
-| `NvidiaEnableMonitoring` | namespace, DCGM | Labels `openshift.io/cluster-monitoring=true` + `dcgmExporter` monitor |
-| `NvidiaTimeSlicing` | profiles ConfigMap | Creates `small`/`medium`/`large` time-slicing ConfigMap + binds plugin |
-| `NvidiaMachineSetLabel` | `MachineSet`, label | Patches `machineset` in `openshift-machine-api` template labels |
-| `NvidiaMachineConfig` | `role`, preset | Plans/verifies NVIDIA `MachineConfig` (MOK, IOMMU, CDI) & MCP |
-| `NvidiaUpgradePolicy` | CR, `drain`, `skip` | Updates `upgradePolicy` and `skip` / `upgrade-required` recovery |
-| `NvidiaHealthCheck` | `node="*"` or pool | Out-of-the-box sanity check: all DaemonSets, validator Pods, drift, MCP |
-| `NvidiaCleanup` | `policy`..`full` | Ordered teardown per NVIDIA `clean-up.html` (`--delete-crds` opt-in) |
+| `NvidiaPrerequisite` | registry, NLS, NFD | Verifies NFD; creates registry pull & NLS secrets ([Install][nvidia-ocp-install]) |
+| `NvidiaClusterPolicy` | driver/spec fields | Creates/patches `ClusterPolicy` (Device Plugin mode; [Install][nvidia-ocp-install]) |
+| `NvidiaDraCluster` | `GPUCluster` CR | Creates/patches `GPUCluster` + `gpu.nvidia.com` `DeviceClass` ([DRA][nvidia-ocp-dra]) |
+| `NvidiaDriverPool` | `NVIDIADriver` CR | Per-pool `NVIDIADriver` (`nodeSelector`, tag; [Install][nvidia-ocp-install], [DRA][nvidia-ocp-dra]) |
+| `NvidiaCudaUpgrade` | `node`, `driver` | Cluster (`"*"`) or node/pool driver/CUDA upgrade ([Docs][nvidia-ocp-docs]) |
+| `NvidiaContainerToolkit` | `enabled`, `cdi` | Aligns `spec.toolkit`/`cdi`/`runtimeClass` with OCP CRI-O ([Docs][nvidia-ocp-docs]) |
+| `NvidiaEnableFeatureDiscovery` | `enabled`, tag | Checks NFD, patches `/spec/gfd/enabled` ([Install][nvidia-ocp-install]) |
+| `NvidiaEnableMonitoring` | namespace, DCGM | Labels `openshift.io/cluster-monitoring=true` + DCGM ([Install][nvidia-ocp-install]) |
+| `NvidiaTimeSlicing` | profiles ConfigMap | Creates `small`/`medium`/`large` ConfigMap + binds plugin ([Docs][nvidia-ocp-docs]) |
+| `NvidiaMachineSetLabel` | `MachineSet`, label | Patches `machineset` in `openshift-machine-api` ([Docs][nvidia-ocp-docs]) |
+| `NvidiaMachineConfig` | `role`, preset | Plans/verifies NVIDIA `MachineConfig` (MOK, IOMMU, CDI) ([Docs][nvidia-ocp-docs]) |
+| `NvidiaUpgradePolicy` | CR, `drain`, `skip` | Updates `upgradePolicy` and `skip` / retry recovery ([Docs][nvidia-ocp-docs]) |
+| `NvidiaHealthCheck` | `node="*"` or pool | Sanity check: Pods, DaemonSets, `DeviceClass`, drift, MCP ([Install][nvidia-ocp-install]) |
+| `NvidiaCleanup` | `policy`..`full` | Ordered teardown (`--delete-crds` opt-in; [Cleanup][nvidia-ocp-cleanup]) |
 
 Chain combos in `chains.py` compose strictly from these `Nvidia*` callbacks plus CI16 OLM callbacks:
 
 - `install-gpu-operator`: CI16 NFD → `NvidiaPrerequisite` → CI16 GPU Op → `NvidiaClusterPolicy` →
   `NvidiaEnableMonitoring` → `NvidiaContainerToolkit` → `NvidiaEnableFeatureDiscovery` → `NvidiaHealthCheck`.
+- `install-gpu-dra`: CI16 NFD → `NvidiaPrerequisite` → CI16 GPU Op (`v26.7+`) → `NvidiaDraCluster` →
+  `NvidiaDriverPool` → `NvidiaEnableMonitoring` → `NvidiaHealthCheck`.
 - `upgrade-cuda`: `NvidiaHealthCheck` → optional `NvidiaUpgradePolicy` → `NvidiaCudaUpgrade(node, driver)` →
   `NvidiaHealthCheck`.
 - `enable-time-slicing`: `NvidiaHealthCheck` → `NvidiaTimeSlicing` → optional `NvidiaMachineSetLabel` →
@@ -103,11 +109,13 @@ Chain combos in `chains.py` compose strictly from these `Nvidia*` callbacks plus
 
 No JSON contract or schema file is created in this planning PR. Before implementation begins, present and obtain
 explicit operator approval for `ci-skills/schemas/results/nvidia-gpu-operator.schema.json` and the generated
-`ci-skills/tools.json` entry registered from `core/catalog.py`.
+`ci-skills/tools.json` entry registered from `core/catalog.py`. A paired skill reference
+`ci-skills/references/nvidia-gpu-operator.md` will be registered in `reference.py` so every user and agent discovers
+both the atomic callbacks and their official NVIDIA OpenShift documentation URLs.
 
-Open until Wave 2/3 live runs: whether `GPUCluster` (shipped in `gpu-operator-certified` channel `v26.7`) needs its
-own callback alongside `NvidiaClusterPolicy` and `NvidiaDriverPool`, and whether OpenShift Console GPU dashboard
-plugin enablement sits inside `NvidiaEnableMonitoring` or a separate `NvidiaEnableConsole` callback.
+Open until Wave 2/3 live runs: whether OpenShift Console GPU dashboard plugin enablement sits inside
+`NvidiaEnableMonitoring` or a separate `NvidiaEnableConsole` callback, and which OpenShift 4.22+ cluster validates
+the live `NvidiaDraCluster` (`GPUCluster`) gate.
 
 ## PR Order
 
@@ -132,4 +140,6 @@ tests per `Nvidia*` callback, `G-CI17-02` live read-only `NvidiaHealthCheck`, `G
 [exec]: ../exec-plans/active/ci17-nvidia-gpu-operator.md
 [exec-gates]: ../exec-plans/active/ci17-nvidia-gpu-operator.md#verification-gates
 [nvidia-ocp-docs]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/index.html
+[nvidia-ocp-install]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/install-gpu-ocp.html
+[nvidia-ocp-dra]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/dra-gpu-ocp.html
 [nvidia-ocp-cleanup]: https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/clean-up.html
