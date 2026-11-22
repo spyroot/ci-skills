@@ -216,3 +216,28 @@ repeat. Exact-owned cleanup removed both new IDs, independently proved absence a
 GitLab source `261`, its refs and disabled CI were preserved. No consumer Actions job or GitLab pipeline ran.
 The selected access receipt uses retained `spyroot/test-self-runner`; prior candidate receipts are preserved under
 `tests/acceptance/historical/pre-ci15-cleanup-repeat/`.
+
+## CI15 Debian Conda toolbox read-back — 2026-11-22
+
+Installed revision `96602b5` built `ci15-conda-debian` from the immutable
+`debian:bookworm-slim` base (digest
+`sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc`).
+The [ToolboxSpec](../../ci-skills/schemas/toolbox.schema.json) declared Miniforge `26.9.4-2`
+as a checksum-verified `dependencies[].linux` installer that runs when `conda` is absent.
+Its `spec.conda` selected a Python 3.11 environment at `/opt/ci-skills/env`.
+
+The installed `toolbox.py create` command built and read back Harbor digest
+`sha256:d74ec415ece4d314e91e7fec4ff8b0117207b895efa53ba5b9ad57aceebcb01d`.
+The installed `prepare_tool_pod.py prepare` command ran that exact digest and read back
+Debian 12, UID 1001, Conda 26.9.4, and Python 3.11.18 at `/opt/ci-skills/env/bin/python`.
+An independent native read matched the Pod image digest and verified the temporary Build
+and build Secret were absent. The build namespace, BuildConfig and immutable image are retained
+for the CI15 consumer tests. The retained namespace UID is
+`5d56573b-148e-44e1-99fe-8369683a0819`, and the BuildConfig UID is
+`20063746-ff5b-4a44-becd-8b3e559020d9`.
+
+The installed `prepare_tool_pod.py remove` command removed the run's Pod, ConfigMap and
+namespace. Independent reads confirmed all three absent and the same build configuration
+retained. Repeating removal returned `NO_OP`.
+
+[CI15 G-003](../phases/CI15-RUNNER-WORKFLOWS.md#gates) still needs the consuming runner jobs.
