@@ -321,7 +321,14 @@ relative endpoint; host and token references resolve from the selected
 `check --provider PROVIDER` reads authenticated identity. For `get`, use
 `--field` for a dotted JSON field, `--decode-base64` for encoded file content,
 `--lines START:END` for a bounded text slice, and `--paginate` for array pages.
-Its output is the selected provider value, not an access-receipt envelope.
+`get` writes the selected provider value to stdout unchanged. `check` JSON or
+YAML and every `--dry-run` plan add `target_file`, `target_source`,
+`target_selection` and `credential_sources`, the fields `access_check.py`
+reports; a dry run names the credential source without reading the token. Once
+the host is selected, the stderr `result` event carries the same four fields, so
+read it for `get`; `--log-level warning` omits the PASS and DRY_RUN event. Target
+fields are null when `--host` names a host other than the target's or no target
+file exists.
 
 `reference.py gitlab_runner_manager.py` offers the focused runner-manager and
 SCC references. Use `--help` for arguments; read the focused reference when the

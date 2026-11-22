@@ -1179,6 +1179,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--source-branch": "existing source branch for create",
             "--target-branch": "existing target branch for create",
             "--title": "MR title for create",
+            "--description-file": "file containing the requested MR description for create",
             "--mr-iid": "project-local MR number for update, not its global ID",
             "--milestone-id": "global milestone ID, not its project-local IID",
             "--apply": "perform the confirmed MR change",
@@ -1194,7 +1195,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "required_options": ["--source-branch", "--target-branch", "--title"],
                 "result_schema": GITLAB_ACTION_SCHEMA,
                 "mutates": True,
-                "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+                "read_back": "Read the exact MR IID, branches, title, requested description and milestone.",
             },
             "update": {
                 "required_options": ["--mr-iid", "--milestone-id"],
@@ -1206,7 +1207,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "examples": [
             {
                 "description": "Plan an MR",
-                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example"',
+                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example" --description-file description.md',
             },
             {
                 "description": "Plan its milestone assignment",
@@ -1661,7 +1662,7 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
                 "required_options": ["--provider", "--endpoint"],
             },
         },
-        "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads.",
+        "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads. Once the host is selected, the stderr result event (PASS, DRY_RUN or BLOCKED) carries target_file, target_source, target_selection and credential_sources; target fields are null when no target table supplied the host.",
         "examples": [
             {
                 "description": "Read the configured GitLab identity",
@@ -1673,12 +1674,12 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
             },
         ],
         "output_modes": {
-            "json": "native JSON or selected content; default",
-            "yaml": "the same selected value as YAML",
-            "text": "raw endpoint text or one selected scalar",
+            "json": "native JSON or selected content; check adds the target and credential fields; default",
+            "yaml": "the same value as YAML",
+            "text": "raw endpoint text, one selected scalar, or the check identity name",
         },
         "usage": "Choose check or get and one provider. Target resolution is automatic; CI_SKILLS_TARGET and ci-skills-smoke support tests and live smoke.",
-        "returns": "Bounded JSON, YAML or selected text; dry-run returns a request plan.",
+        "returns": "get: the bounded provider value, unchanged. check: provider, host, authenticated, user and id plus target_file, target_source, target_selection and credential_sources. Dry-run: a request plan with the same four fields; credential_sources names the selected source without reading the token.",
         "read_only": True,
         "side_effects": "none",
         "execution_surface": "installed Python command and one caller-selected provider API",

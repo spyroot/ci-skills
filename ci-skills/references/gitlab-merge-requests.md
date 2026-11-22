@@ -11,6 +11,7 @@ GitLab's other MR capabilities remain available through its native API.
 | `--source-branch` | `source_branch` | Existing branch containing the requested changes. |
 | `--target-branch` | `target_branch` | Existing destination branch. |
 | `--title` | `title` | Requested MR title. |
+| `--description-file` | `description` | UTF-8 file, at most 1 MiB, whose text becomes the MR description on create. |
 | `--mr-iid` | `merge_request_iid` | Project-local MR number shown as `!N`. |
 | `--milestone-id` | `milestone_id` | Global milestone `id`, not its project-local `iid`. |
 
@@ -24,13 +25,20 @@ The caller supplies `PROJECT`, existing `SOURCE` and `TARGET` branches:
 ```bash
 gitlab_mr.py create --project "$PROJECT" \
   --source-branch "$SOURCE" --target-branch "$TARGET" \
-  --title "Consumer example" --json
+  --title "Consumer example" --description-file description.md --json
 ```
 
 Add `--milestone-id "$MILESTONE_ID"` to attach it during creation. Apply by
 repeating the planned invocation with `--apply --confirm-plan DIGEST`, using
-the returned digest. The response includes verified MR `id`, `iid` and
-`milestone_id`. An exact existing open MR is reused.
+the returned digest. The plan reports `description` in `fields` and binds the
+file text into `body_sha256` and `plan_digest`, so editing the file after the
+plan refuses the apply. The response includes verified MR `id`, `iid` and
+`milestone_id`; `verified: true` also means the read-back description equals
+the file text, ignoring trailing line breaks. An existing open MR for the same
+branches is reused only when its title, and any requested description or
+milestone, match; otherwise the command returns `existing_mr_differs_use_update`.
+`update` does not change a description; edit it through GitLab's native
+`PUT /projects/:id/merge_requests/:merge_request_iid` with `description`.
 
 ## Attach an existing MR to a milestone
 

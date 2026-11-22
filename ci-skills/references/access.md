@@ -14,7 +14,8 @@ and trace reads.
 ## Where the target file comes from
 
 Without a project binding, three declared places are checked in order, and the winner is reported back in
-every report as `target_file` and `target_source`:
+every report as `target_file` and `target_source`. `ci-api get` keeps the provider value on stdout and reports
+them on its stderr `result` event, as described below:
 
 | # | Scope | Where | Source name |
 | --- | --- | --- | --- |
@@ -35,8 +36,12 @@ setup: the installed commands run against real systems with exactly such a
 user-written target. `core.catalog.TARGET_PROTOCOL`
 defines target selection, also published in the installed `tools.json`.
 
-`ci-api` uses these three tiers. `ci-binary-build` validates explicit local inputs without selecting a
-target. For smoke testing, `env ci-skills-smoke=1 <command>` changes only the
+`ci-api` uses these three tiers. Its `check` JSON or YAML output, every `--dry-run` plan, and, once the host is
+selected, the stderr `result` event carry `target_file`, `target_source`, `target_selection` and
+`credential_sources`, the fields `access_check.py` reports; `get` stdout stays the provider value. With an
+ambient `GITLAB_TOKEN` and a `token_file`, `credential_sources.gitlab` is `file:<path>`, the token that was sent.
+`ci-binary-build` validates
+explicit local inputs without selecting a target. For smoke testing, `env ci-skills-smoke=1 <command>` changes only the
 basename in the project and user tiers to `ci-skills-smoke.toml`. Directory
 precedence and relative credential resolution stay unchanged; those tiers do
 not fall back to their ordinary `target.toml` while the switch is set.
@@ -146,10 +151,11 @@ Routing: gitlab=gitlab_public kubernetes=none harbor=none (argv:--gitlab=public)
 `routing.gitlab` names the table read, for example `gitlab_public`, or `gitlab` and `gitlab.com` in the legacy
 shape. `selected_by` is `default`, `legacy`, `argv:--gitlab=private`, `argv:--gitlab=public`, or
 `argv:--gitlab-profile="NAME"`. `GitLabRoute.selection_source` appends `;argv:--gitlab=NAME` or
-`;argv:--gitlab-profile="NAME"` to `target_source` when the caller passes either option, so a plan confirmed for one
-instance does not apply to the other even when both share a host and project. `ci-api --provider gitlab` accepts
-`--gitlab`, takes the host and token file from the selected instance, and rejects a conflicting `--host`; its output
-format is unchanged. `ci-api` rejects `--gitlab` or `--gitlab-profile` with `--provider github`
+`;argv:--gitlab-profile="NAME"` when the caller passes either option: to `target_source` in GitLab action and mirror
+results, and to `target_selection` in `access_check.py` and `ci-api` results. A plan confirmed for one instance
+therefore does not apply to the other even when both share a host and project. `ci-api --provider gitlab` accepts
+`--gitlab`, takes the host and token file from the selected instance, and rejects a conflicting `--host`. `ci-api`
+rejects `--gitlab` or `--gitlab-profile` with `--provider github`
 (`gitlab_profile_requires_gitlab_provider`). A command that does not select GitLab, such as
 `image_build_readiness.py probe`, blocks with `gitlab_profile_requires_gitlab_authority` when it gets either option.
 

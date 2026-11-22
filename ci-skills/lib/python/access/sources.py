@@ -137,6 +137,54 @@ def read_token_file(path: Union[str, PathLike[str]]) -> str:
     return value
 
 
+@dataclass(frozen=True)
+class TokenSelection:
+    """The token source a provider call uses, chosen without reading the token.
+
+    ``_token_source`` reads the token from this choice. A dry run reports
+    ``reference`` without reading the file or checking the variable's value.
+
+    :param reference: ``file:<absolute path>``, ``env:<NAME>``, or the native
+        store identifier.
+    :param variable: Variable that receives the token in the child environment,
+        or ``None`` when the native store supplies it.
+
+    .. attribute :: reference
+        :type: str
+
+        ``file:<absolute path>``, ``env:<NAME>``, or the native store identifier.
+
+    .. attribute :: variable
+        :type: Optional[str]
+
+        Variable that receives the token in the child environment, or ``None``
+        when the native store supplies it.
+    """
+
+    reference: str
+    variable: Optional[str]
+
+    @classmethod
+    def choose(
+        cls, path: Optional[Path], names: Sequence[str], store: str
+    ) -> TokenSelection:
+        """Choose the token file, else the first set variable, else the store.
+
+        :param path: Token file; ``None`` selects a variable or the native store.
+        :param names: Nonempty ordered sequence of accepted credential variable names.
+        :param store: Store identifier reported when no file or variable is selected.
+        :returns: Reference and receiving variable of the chosen source.
+        :raises IndexError: If a token file is selected without any accepted
+            variable names.
+        """  # noqa: DOC503 - Selecting the first variable can raise IndexError.
+        if path is not None:
+            return cls(f"file:{path.resolve()}", names[0])
+        for name in names:
+            if name in os.environ:
+                return cls(f"env:{name}", name)
+        return cls(store, None)
+
+
 def _token_source(
     path: Optional[Path],
     names: Sequence[str],
@@ -156,29 +204,18 @@ def _token_source(
         variable is empty; no fallback is attempted after that failure.
     :raises IndexError: If a token file is selected without any accepted variable names.
     """  # noqa: DOC503 - Selecting the first variable can raise IndexError.
-    selected: Optional[str] = None
-    value: Optional[str] = None
-    if path is not None:
-        selected = names[0]
-        value = read_token_file(path)
-        reference = f"file:{path.resolve()}"
-    else:
-        for name in names:
-            if name in os.environ:
-                selected = name
-                value = os.environ[name]
-                if not value:
-                    raise TargetError(f"{name} is empty")
-                reference = f"env:{name}"
-                break
-        else:
-            reference = store
+    value = read_token_file(path) if path is not None else None
+    selection = TokenSelection.choose(path, names, store)
+    if path is None and selection.variable is not None:
+        value = os.environ[selection.variable]
+        if not value:
+            raise TargetError(f"{selection.variable} is empty")
     overrides: MutableMapping[str, Optional[str]] = {
         name: None for name in (clear_names if clear_names is not None else names)
     }
-    if selected is not None:
-        overrides[selected] = value
-    return CredentialSource(reference, overrides)
+    if selection.variable is not None:
+        overrides[selection.variable] = value
+    return CredentialSource(selection.reference, overrides)
 
 
 def resolve_skill_identity(explicit: Optional[str]) -> SkillIdentity:

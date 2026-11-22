@@ -162,7 +162,7 @@
       "requires_authorities": [
         "one caller-selected GitHub or GitLab host"
       ],
-      "returns": "Bounded JSON, YAML or selected text; dry-run returns a request plan.",
+      "returns": "get: the bounded provider value, unchanged. check: provider, host, authenticated, user and id plus target_file, target_source, target_selection and credential_sources. Dry-run: a request plan with the same four fields; credential_sources names the selected source without reading the token.",
       "side_effects": "none",
       "subcommands": {
         "check": {
@@ -740,6 +740,7 @@
         "--binding",
         "--confirm-plan",
         "--describe",
+        "--description-file",
         "--dry-run",
         "--gitlab",
         "--gitlab-profile",
@@ -776,7 +777,7 @@
       "subcommands": {
         "create": {
           "mutates": true,
-          "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+          "read_back": "Read the exact MR IID, branches, title, requested description and milestone.",
           "required_options": [
             "--source-branch",
             "--target-branch",
