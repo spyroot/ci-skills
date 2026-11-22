@@ -684,7 +684,7 @@ def test_registry_copy_uses_digest_only_native_references_with_registry_ports(
         """Record native registry argv and return the matching success fixture.
 
         :param argv: Complete native command vector built by the registry service.
-        :param _kwargs: Bounded transport options accepted by the fake.
+        :param **_kwargs: Bounded transport options accepted by the fake.
         :returns: Successful inspect output or successful copy completion.
         """
         command = tuple(argv)
@@ -913,6 +913,8 @@ def test_plan_callback_stops_before_a_dependent_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Construct only auth and confirmation callbacks for an unconfirmed plan.
+
+    :param monkeypatch: Isolate the workflow executor at its callback boundary.
     :returns: None; assertions in the body validate the regression.
     """
     module = load_module("workflow_plan_toolbox", SCRIPT_ROOT / "toolbox.py")
@@ -1084,3 +1086,22 @@ def test_workflow_parser_repeats_only_declared_options(
     parsed = WORKFLOWS.workflow_parser(kind).parse_args(argv)
 
     assert getattr(parsed, destination) == expected
+
+
+@pytest.mark.parametrize(
+    "digest",
+    (
+        "sha256:" + "a" * 64,
+        "sha256:" + "A" + "a" * 63,
+        "sha256:" + "a" * 63,
+        "sha256:" + "g" + "a" * 63,
+        "sha512:" + "a" * 64,
+    ),
+)
+def test_registry_digest_has_one_exact_sha256_shape(digest: str) -> None:
+    """Accept an exact lowercase digest and reject one encoding drift at a time.
+
+    :param digest: Candidate differing from the immutable valid baseline in one field.
+    """
+    baseline = "sha256:" + "a" * 64
+    assert REGISTRY.is_registry_digest(digest) is (digest == baseline)

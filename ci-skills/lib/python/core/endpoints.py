@@ -452,7 +452,7 @@ TARGET_CONTRACT = TargetContract(
         ),
         Table(
             HARBOR_AUTHORITY,
-            Field.of(Role.ENDPOINT, "url", "project")
+            Field.of(Role.ENDPOINT, "url", "project", "reference_toolbox")
             + Field.of(
                 Role.ACCESS, "credential_file", "username_file", "password_file"
             ),

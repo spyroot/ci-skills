@@ -44,6 +44,7 @@ class NameSource(StrEnum):
     """Supported sources of a resolved caller-facing name."""
 
     EXPLICIT = "explicit"
+    PROJECT_NAME = "project_name"
     REPOSITORY = "repository"
     PROVIDER = "provider"
     UNKNOWN = "unknown"
@@ -170,26 +171,45 @@ def resolve_repository(
     )
 
 
+def validate_project_name(value: str | None) -> str | None:
+    """Normalize an optional consumer naming base before applying any defaults.
+
+    :param value: Optional caller-selected consumer name.
+    :returns: Trimmed nonempty input, or absence when no override was supplied.
+    :raises ValueError: A supplied override is not a nonempty string.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(IDENTITY_REQUIRED + "--project-name")
+    return value.strip()
+
+
 def resolve_name(
     explicit: str | None,
     repository: RepositoryIdentity,
     *,
     argument: str,
+    project_name: str | None = None,
     pending: bool = False,
 ) -> ResolvedName:
-    """Select an explicit name or the known repository name.
+    """Select an explicit name, consumer override, or known repository name.
 
     :param explicit: Caller-supplied name override.
     :param repository: Repository identity already resolved by the boundary.
     :param argument: Existing CLI argument to supply when identity is unknown.
+    :param project_name: Optional consumer naming base, separate from provider identity.
     :param pending: Permit an unresolved offline intent awaiting provider authentication.
     :returns: Exact name and explicit/repository provenance, or explicit unknown intent.
     :raises ValueError: Explicit input is blank, or neither input resolves a name.
     """
+    selected_project = validate_project_name(project_name)
     if explicit is not None:
         if not explicit.strip():
             raise ValueError(IDENTITY_REQUIRED + argument)
         return ResolvedName(explicit.strip(), NameSource.EXPLICIT)
+    if selected_project is not None:
+        return ResolvedName(selected_project, NameSource.PROJECT_NAME)
     if repository.name:
         return ResolvedName(repository.name, NameSource.REPOSITORY)
     if pending:

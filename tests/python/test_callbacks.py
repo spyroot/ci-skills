@@ -14,7 +14,14 @@ import signal
 import subprocess
 import sys
 from argparse import Namespace
-from collections.abc import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import (
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+)
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +37,7 @@ from lib.python.core.endpoints import (
     GITLAB_AUTHORITY,
     TARGET_REPORT_KEYS,
 )
+from test_tool_pod import MemoryCluster
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 CALLBACKS = import_script_module("lib.python.core.abstract.callback")
@@ -1128,7 +1136,11 @@ def test_harbor_push_failure_cleanup_restores_prior_tag_or_removes_new_tag(
             self.current = existing_digest
             self.deleted: MutableSequence[tuple[str, str]] = []
             self.copies: MutableSequence[tuple[str, str]] = []
-            self.target = object()
+            self.target = TARGET.HarborTarget(
+                url="https://registry.example.test",
+                host="registry.example.test",
+                project="unit",
+            )
             self.credential = object()
 
         def inspect(self, image: str) -> str:
@@ -1156,15 +1168,27 @@ def test_harbor_push_failure_cleanup_restores_prior_tag_or_removes_new_tag(
             :returns: Fully qualified image reference for the copy operation.
             """
             separator = "@" if reference.startswith("sha256:") else ":"
-            return f"registry.example.test/unit/{repository}{separator}{reference}"
+            return (
+                f"{self.target.host}/{self.target.project}/{repository}"
+                f"{separator}{reference}"
+            )
 
-        def copy(self, source: str, destination: str) -> str:
+        def copy(
+            self,
+            source: str,
+            destination: str,
+            *,
+            before_write: Optional[Callable[[], None]] = None,
+        ) -> str:
             """Record a copy and move the destination tag to the source digest.
 
             :param source: Source image reference being published or restored.
             :param destination: Destination reference recorded for verification.
+            :param before_write: Optional guard that must pass before altering the tag.
             :returns: Digest assigned to the destination after the copy.
             """
+            if before_write is not None:
+                before_write()
             self.copies.append((source, destination))
             self.current = self.inspect(source)
             return self.current
@@ -1337,37 +1361,8 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
 
     harbor = HarborService()
 
-    class KubernetesService:
-        """Simulate absent build resources and a completed OpenShift build."""
-
-        def __init__(self):
-            """Start with no applied BuildConfig read-back state."""
-            self.applied: Optional[JSONObject] = None
-            self.target = object()
-
-        def read(self, _kind: str, _name: str, _namespace: str) -> Optional[JSONObject]:
-            """Report no BuildConfig before apply and read back applied state.
-
-            :param _kind: Resource kind accepted by the Kubernetes double.
-            :param _name: Resource name accepted by the Kubernetes double.
-            :param _namespace: Namespace accepted by the Kubernetes double.
-            :returns: ``None`` before apply, then the applied resource with a UID.
-            """
-            if self.applied is None:
-                return
-            observed = deepcopy(self.applied)
-            metadata = observed["metadata"]
-            assert isinstance(metadata, dict)
-            metadata["uid"] = "buildconfig-uid"
-            return observed
-
-        def apply(self, document: JSONObject) -> None:
-            """Store a generated resource for independent read-back.
-
-            :param document: Resource document submitted by ``ResourceSet``.
-            :returns: None after storing a detached copy.
-            """
-            self.applied = deepcopy(document)
+    class KubernetesService(MemoryCluster):
+        """Reuse native object storage and simulate OpenShift build completion."""
 
         def command(
             self, *_args: str, openshift: bool = False
@@ -1405,50 +1400,13 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
             harbor.current = produced_digest
             return {"status": {"output": {"to": {"imageDigest": produced_digest}}}}
 
-        def delete(self, *_args: str) -> None:
-            """Accept deletion of a resource created for the simulated build.
-
-            :param *_args: Ignored positional arguments accepted by the fake boundary.
-            :returns: ``None`` after the fixture deletion.
-
-            """
-            return
-
-    class Resources:
-        """Accept BuildConfig apply, recovery, and deletion during failure cleanup."""
-
-        def apply(self, document: JSONObject) -> JSONObject:
-            """Accept a generated resource without changing fixture state.
-
-            :param document: BuildConfig applied by the callback.
-            :returns: The applied BuildConfig for the callback's next step.
-            """
-            return document
-
-        def recover(self) -> None:
-            """Accept recovery of BuildConfig resources in this fixture.
-
-            :returns: ``None``; candidate-tag assertions are the focus here.
-            """
-            return
-
-        def delete(self, _kind: str, _name: str) -> None:
-            """Accept removal of a fixture-managed resource.
-
-            :param _kind: Kind of resource requested for removal.
-            :param _name: Name of resource requested for removal.
-            :returns: ``None`` after the fixture deletion.
-            """
-            return
-
-    workflow = TOOLBOX_ACTIONS.WorkflowAction(Namespace())
+    workflow = TOOLBOX_ACTIONS.WorkflowAction(Namespace(action="create"))
     workflow.spec = Spec()
     workflow.resolved_base = "registry.example.test/base@sha256:" + "b" * 64
     context = DELIVERY_STATE.DeliveryState()
     context.harbor = harbor
     context.kubernetes = KubernetesService()
     build = TOOLBOX_ACTIONS.HarborBuild(workflow=workflow)
-    build._resource_set = Resources()
     downstream = Recorded(
         [], "downstream", collect_error=RuntimeError("downstream failed")
     )
@@ -1456,10 +1414,7 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
     with pytest.raises(RuntimeError, match="downstream failed"):
         _run_callbacks([build, downstream], context=context)
 
-    candidate_tag = (
-        TOOLBOX_ACTIONS.BUILD_TAG_PREFIX
-        + Spec.fingerprint[: TOOLBOX_ACTIONS.FINGERPRINT_TAG_LENGTH]
-    )
+    candidate_tag = TOOLBOX.build_candidate_reference(Spec.fingerprint)
     assert harbor.current == prior_digest
     assert harbor.deleted == expected_deletes
     assert len(harbor.copies) == expected_copies

@@ -27,7 +27,7 @@ from lib.python.core.kubernetes.podman_probe import (
     ProbeMode,
     resolve_probe_mode,
 )
-from lib.python.core.report import emit_result, plan_digest, report
+from lib.python.core.report import emit_result, report
 from lib.python.core.runner_scope import scope_record
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import TargetError
@@ -123,7 +123,7 @@ class ImageBuildChain:
                 output.update(
                     status=DRY_RUN,
                     plan=plan,
-                    plan_digest=plan_digest(plan),
+                    plan_digest=self.action.fingerprint(self.args.node or "auto"),
                     confirmable=False,
                     access={},
                 )
@@ -176,7 +176,7 @@ class ImageBuildChain:
             if hasattr(state, "chain_plan"):
                 output["plan"] = state.chain_plan
                 output["plan_digest"] = state.chain_plan_digest
-                output["confirmable"] = True
+                output["confirmable"] = False
             if hasattr(state, "selected_node"):
                 output["selected_node"] = state.selected_node
             if state.chain_cleanup:

@@ -11,7 +11,6 @@ import json
 from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import pytest
@@ -38,10 +37,10 @@ from test_image_build_chain import (
     READINESS,
     TOOLBOX_IMAGE,
     ChainCluster,
+    ChainHarbor,
     JournalCallback,
     _args,
     _lifecycle_executor,
-    _prepared_action,
     _target,
 )
 
@@ -245,6 +244,7 @@ def test_chain_schema_rejects_pass_without_complete_runner_delivery(
 def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
     explicit: bool,
     gitlab_selector: Optional[str],
     gitlab_profile: Optional[str],
@@ -253,6 +253,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
 
     :param monkeypatch: Fixture replacing configuration and forbidden live boundaries.
     :param capsys: Actual JSON emitter capture.
+    :param tmp_path: Fixture location for the inactive registry authfile.
     :param explicit: Whether the caller supplies the explicit dry-run flag.
     :param gitlab_selector: Default or ``--gitlab`` instance used in either planning mode.
     :param gitlab_profile: Deprecated profile name used in either planning mode.
@@ -263,7 +264,6 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     args.dry_run = explicit
     args.gitlab = gitlab_selector
     args.gitlab_profile = gitlab_profile
-    template = _prepared_action()
     resolutions = []
     bindings = []
     reads = []
@@ -299,16 +299,6 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     monkeypatch.setattr(MODEL, "bind_sources", bind)
     monkeypatch.setattr(
         MODEL,
-        "WorkflowAction",
-        lambda *_a, **_k: SimpleNamespace(
-            spec=template.toolbox.spec,
-            runner=template.toolbox.runner,
-            resolved_base=None,
-            prepare=lambda: None,
-        ),
-    )
-    monkeypatch.setattr(
-        MODEL,
         "prepare_start_plan",
         lambda *_a, **_k: pytest.fail("runner delivery prepared a consumer pipeline"),
         raising=False,
@@ -321,6 +311,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         """
         state.selected_node = NODE
         state.kubernetes = ChainCluster()
+        state.harbor = ChainHarbor(tmp_path, [])
 
     def workflow(action):
         assert not explicit, "dry-run entered provider callbacks"
@@ -378,14 +369,13 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
             for scope in scope_record["scopes"]
         ] == [
             (
-                purpose,
+                "manager",
                 CALLER_NAMESPACE,
                 CALLER_NAMESPACE_UID,
                 "borrowed",
                 "present",
                 "preserved",
             )
-            for purpose in ("manager", "build")
         ]
     assert "run_id" not in output
     assert not hasattr(command.action.state, "run_scope")

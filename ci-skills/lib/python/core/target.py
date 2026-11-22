@@ -144,6 +144,8 @@ class HarborTarget:
     :param credential_file: Combined credential file, or ``None`` when unconfigured.
     :param username_file: Separate username file, or ``None`` when unconfigured.
     :param password_file: Separate password file, or ``None`` when unconfigured.
+    :param reference_toolbox: Optional project-relative Harbor artifact used
+        as the runner chain's published source.
 
     .. attribute :: url
         :type: str
@@ -174,6 +176,11 @@ class HarborTarget:
         :type: Optional[Path]
 
         Separate password file, or ``None`` when unconfigured.
+
+    .. attribute :: reference_toolbox
+        :type: str | None
+
+        Published source within the configured project for the runner chain.
     """
 
     url: str
@@ -182,6 +189,7 @@ class HarborTarget:
     credential_file: Optional[Path] = None
     username_file: Optional[Path] = None
     password_file: Optional[Path] = None
+    reference_toolbox: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1577,7 +1585,15 @@ def _parse_harbor(
     ):
         raise TargetError("harbor_credential_selection_invalid")
     return HarborTarget(
-        url, host, _string(harbor, "project", HARBOR_AUTHORITY), **files
+        url,
+        host,
+        _string(harbor, "project", HARBOR_AUTHORITY),
+        reference_toolbox=(
+            _string(harbor, "reference_toolbox", HARBOR_AUTHORITY)
+            if "reference_toolbox" in harbor
+            else None
+        ),
+        **files,
     )
 
 

@@ -36,26 +36,23 @@ from lib.python.core.kubernetes.kubernetes import DEFAULT_COMMAND_TIMEOUT
 from lib.python.core.kubernetes.podman_probe import ProbeMode, select_ready_worker
 from lib.python.core.kubernetes.run_scope import RunScope
 from lib.python.core.kubernetes.runner_scope import observe_namespace
-from lib.python.core.report import plan_digest
 from lib.python.core.runner_identity import NameSource, ResolvedName
 from lib.python.core.runner_options import RUNNER_NAME_LIMIT
 from lib.python.core.runner_scope import ScopePurpose, ScopeSource
 
-from .model import RUNNER_TOKEN_NAME, ImageBuildChainAction, ImageBuildChainState
+from .model import (
+    REGISTRY_COMPONENT,
+    REGISTRY_TAG,
+    RUNNER_TOKEN_NAME,
+    ImageBuildChainAction,
+    ImageBuildChainState,
+)
 
 CHAIN_MANAGER_CHANGED: Final = "chain_manager_identity_changed_rerun_plan"
 
 
 class ProviderTransition(StrEnum):
     """Closed provider-service transitions used by the shared chain state.
-
-    .. attribute :: RETAIN_TOOLBOX_HARBOR
-
-        Retain the authenticated toolbox Harbor service.
-
-    .. attribute :: USE_TOOLBOX_HARBOR
-
-        Restore the retained toolbox Harbor service.
 
     .. attribute :: RETAIN_RUNNER_GITLAB
 
@@ -66,8 +63,6 @@ class ProviderTransition(StrEnum):
         Restore the retained runner-scope GitLab service.
     """
 
-    RETAIN_TOOLBOX_HARBOR = "retain_toolbox_harbor"
-    USE_TOOLBOX_HARBOR = "use_toolbox_harbor"
     RETAIN_RUNNER_GITLAB = "retain_runner_gitlab"
     USE_RUNNER_GITLAB = "use_runner_gitlab"
 
@@ -137,11 +132,7 @@ class RetainProvider(LocalCallback[ImageBuildChainState, ImageBuildChainAction])
         :raises ValueError: The role is unknown or its producer did not run.
         """
         state = self.state
-        if self.role == ProviderTransition.RETAIN_TOOLBOX_HARBOR:
-            state.toolbox_harbor = state.harbor
-        elif self.role == ProviderTransition.USE_TOOLBOX_HARBOR:
-            state.harbor = state.toolbox_harbor
-        elif self.role == ProviderTransition.RETAIN_RUNNER_GITLAB:
+        if self.role == ProviderTransition.RETAIN_RUNNER_GITLAB:
             state.runner_gitlab = state.gitlab
             state.access_evidence["gitlab_runner"] = copy_json(state.access)
         elif self.role == ProviderTransition.USE_RUNNER_GITLAB:
@@ -150,6 +141,32 @@ class RetainProvider(LocalCallback[ImageBuildChainState, ImageBuildChainAction])
         else:
             raise ValueError("chain_provider_role_invalid")
         return {"verified": True, "role": self.role.value}
+
+
+class ResolveChainConsumer(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
+    """Resolve repository defaults before authorizing the Harbor destination."""
+
+    def run(self) -> JSONObject:
+        """Bind the configured reference and the derived consumer destination.
+
+        :returns: Verified consumer identity.
+        :raises ValueError: A required consumer name or source image is unavailable.
+        """  # noqa: DOC502 - numeric repository binding validates the access receipt.
+        action, state = self.action, self.state
+        if not action.repository_identity.name and action.runner_kind == "project":
+            action.bind_repository(state.gitlab.access)
+        consumer = action.naming_base.value
+        if not REGISTRY_COMPONENT.fullmatch(consumer):
+            raise ValueError(
+                "consumer_name_not_harbor_repository: supply --project-name"
+            )
+        if not REGISTRY_TAG.fullmatch(action.toolbox.args.tag):
+            raise ValueError("toolbox_destination_tag_invalid")
+        if not action.toolbox.args.source_image:
+            raise ValueError(
+                "harbor_reference_toolbox_missing: configure the selected Harbor target"
+            )
+        return {"verified": True, "consumer_name": consumer}
 
 
 class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
@@ -162,10 +179,13 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
         :raises ValueError: Live producers are missing or confirmation differs.
         """
         state, action = self.state, self.action
-        if not action.repository_identity.name and action.runner_kind == "project":
-            action.bind_repository(state.gitlab.access)
         if action.manager_scope is None:
-            raise ValueError("repository_identity_required: provide --namespace")
+            raise ValueError("repository_identity_required: provide --project-name")
+        conflicts = action.naming_conflicts()
+        if not conflicts:
+            action.destination_digest = state.harbor.digest(
+                action.toolbox.repository, action.toolbox.args.tag
+            )
         nodes = state.kubernetes.json("get", "nodes", "-o", "json")
         selected = select_ready_worker(nodes, action.args.node)
         state.selected_node = selected.name
@@ -181,11 +201,9 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
             action.manager_scope.bounded_name(
                 MANAGER_ROLE,
                 limit=RUNNER_NAME_LIMIT,
-                prefix=action.repository_identity.name,
+                prefix=action.naming_base.value or None,
             ),
-            NameSource.REPOSITORY
-            if action.repository_identity.name
-            else NameSource.UNKNOWN,
+            action.naming_base.source,
         )
         action.resolved_runner_name = resolve_manager_name(
             state.kubernetes, action.manager_scope, preferred
@@ -204,19 +222,18 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
             operation=action.manager_scope.run_id,
             required=not action.manager_scope.owns_namespace,
         )
-        if action.toolbox.spec is not None:
-            observe_namespace(
-                state,
-                state.kubernetes,
-                namespace=action.toolbox.spec.namespace,
-                purpose=ScopePurpose.BUILD,
-                source=ScopeSource.TOOLBOX_DEFAULT,
-                operation=action.toolbox.runner.operation,
-            )
         document = action.plan(state.selected_node)
-        digest = plan_digest(document)
+        digest = action.fingerprint(state.selected_node)
         state.chain_plan = document
         state.chain_plan_digest = digest
+        if conflicts:
+            raise ValueError(
+                "consumer_naming_conflict: resolve the explicit fields shown in the plan"
+            )
+        if action.resolved_runner_name.source == NameSource.PROVIDER:
+            raise ValueError(
+                "consumer_runner_already_exists: use its existing runner and workload"
+            )
         if action.mode == ProbeMode.APPLY and action.args.confirm_plan != digest:
             raise ValueError("confirm_plan_mismatch_rerun_live_plan")
         return {
@@ -353,6 +370,7 @@ def _runner_args(action: ImageBuildChainAction, token_path: Path) -> argparse.Na
         project=action.runner_reference if action.runner_kind == "project" else None,
         group=action.runner_reference if action.runner_kind == "group" else None,
         description=args.runner_description,
+        project_name=action.project_name,
         protected=getattr(args, "protected", None),
         tag=list(args.runner_label),
         runner_id=None,
@@ -380,7 +398,7 @@ def _manager_args(
         project=action.runner_reference if action.runner_kind == "project" else None,
         group=action.runner_reference if action.runner_kind == "group" else None,
         runner_id=state.created_runner_id,
-        description=action.args.runner_description,
+        description=action.explicit_description,
         tag=list(action.args.runner_label),
         node=state.selected_node,
         image=state.published_image,

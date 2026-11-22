@@ -11,10 +11,11 @@ import base64
 import hashlib
 import os
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Optional
+from typing import Final, Optional, TypeGuard
 from urllib.parse import quote, urlencode
 
 from lib.python.access.harbor_credentials import (
@@ -27,6 +28,7 @@ from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.cli_api import APIError, response_decoder
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
 from lib.python.core.json_types import JSONObject
+from lib.python.core.resource_guard import locked_resource
 from lib.python.core.runtime import error_class, run_command_bounded
 from lib.python.core.target import HarborTarget, Target, TargetError
 from lib.python.protocol.http import HTTPClient
@@ -39,6 +41,20 @@ HARBOR_API: Final = "api/v2.0"
 REGISTRY_TOKEN_ENDPOINT: Final = "service/token"
 REGISTRY_TOKEN_SERVICE: Final = "harbor-registry"
 COPY_FLAGS: Final = ("--all", "--preserve-digests")
+
+
+def is_registry_digest(value: object) -> TypeGuard[str]:
+    """Check an immutable image digest's exact lowercase SHA-256 shape.
+
+    :param value: Candidate provider digest.
+    :returns: Whether it is ``sha256:`` plus 64 lowercase hexadecimal digits.
+    """
+    if not isinstance(value, str) or not value.startswith(DIGEST_PREFIX):
+        return False
+    hexadecimal = value.removeprefix(DIGEST_PREFIX)
+    return len(hexadecimal) == 64 and all(
+        ch in "0123456789abcdef" for ch in hexadecimal
+    )
 
 
 def image_at_digest(image: str, digest: str) -> str:
@@ -160,7 +176,7 @@ class HarborService:
                 return None
             raise
         digest = result.get("digest") if isinstance(result, dict) else None
-        if not isinstance(digest, str) or not digest.startswith(DIGEST_PREFIX):
+        if not is_registry_digest(digest):
             raise APIError("artifact_digest_missing")
         return digest
 
@@ -188,15 +204,24 @@ class HarborService:
             )
         return DIGEST_PREFIX + hashlib.sha256(result.stdout.encode()).hexdigest()
 
-    def copy(self, source: str, destination: str) -> str:
+    def copy(
+        self,
+        source: str,
+        destination: str,
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> str:
         """Copy all manifests and independently prove destination digest equality.
 
         :param source: Full source image reference.
         :param destination: Full destination image reference.
+        :param before_write: Optional confirmation check immediately before native copy.
         :returns: Independently observed destination digest.
         :raises APIError: If the copy or either independent read-back fails.
         """
         expected = self.inspect(source)
+        if before_write is not None:
+            before_write()
         result = run_command_bounded(
             [
                 "skopeo",
@@ -504,6 +529,7 @@ class PushAction(SkillAction):
 
     :param repository: Project-relative destination repository.
     :param tag: Destination tag selected for publication and independent read-back.
+    :param confirmed: Optional exact destination snapshot from the confirmed plan.
 
     .. attribute :: repository
         :type: str
@@ -514,10 +540,16 @@ class PushAction(SkillAction):
         :type: str
 
         Destination tag selected for publication and independent read-back.
+
+    .. attribute :: confirmed
+        :type: TagSnapshot | None
+
+        Exact previous digest or absence authorized by the plan.
     """
 
     repository: str
     tag: str
+    confirmed: TagSnapshot | None = None
 
 
 class HarborPush(HarborCallback[PushAction]):
@@ -529,7 +561,35 @@ class HarborPush(HarborCallback[PushAction]):
         :param action: Destination repository and tag selected by the workflow.
         """
         super().__init__(action)
+        self._lease = ExitStack()
         self._tag_snapshot: Optional[TagSnapshot] = None
+        self._attempted_digest: str | None = None
+
+    def _check_destination(self, observed: str | None) -> None:
+        """Check that the exact destination still matches a confirmed snapshot.
+
+        :param observed: Independently observed destination digest or absence.
+        :raises APIError: The bound destination differs from the confirmed state.
+        """
+        confirmed = self.action.confirmed
+        if confirmed is not None and (
+            confirmed.service.target != self.harbor.target
+            or confirmed.repository != self.action.repository
+            or confirmed.tag != self.action.tag
+            or observed != confirmed.prior_digest
+        ):
+            raise APIError("toolbox_destination_changed_rerun_live_plan")
+
+    def _before_copy(self, expected: str) -> None:
+        """Recheck the destination immediately before dispatch and record intent.
+
+        :param expected: Digest the exact write attempts to publish.
+        :raises APIError: Harbor read-back or confirmation fails.
+        """  # noqa: DOC502 - Harbor read and binding validation propagate APIError.
+        self._check_destination(
+            self.harbor.digest(self.action.repository, self.action.tag)
+        )
+        self._attempted_digest = expected
 
     def collect(self) -> JSONObject:
         """Capture the destination's prior digest or absence before publication.
@@ -537,9 +597,21 @@ class HarborPush(HarborCallback[PushAction]):
         :returns: Empty report evidence; the recovery snapshot remains internal.
         :raises APIError: If the current destination tag cannot be read.
         """  # noqa: DOC502 - Registry read/restore helpers propagate APIError.
-        self._tag_snapshot = TagSnapshot.capture(
-            self.harbor, self.action.repository, self.action.tag
+        service = self.harbor
+        self._lease.enter_context(
+            locked_resource(
+                Path(tempfile.gettempdir()) / f"ci-skills-harbor-locks-{os.getuid()}",
+                [
+                    service.target.url,
+                    service.target.project,
+                    self.action.repository,
+                    self.action.tag,
+                ],
+            )
         )
+        observed = TagSnapshot.capture(service, self.action.repository, self.action.tag)
+        self._check_destination(observed.prior_digest)
+        self._tag_snapshot = observed
         return {}
 
     def cleanup(self) -> JSONObject:
@@ -548,9 +620,20 @@ class HarborPush(HarborCallback[PushAction]):
         :returns: Empty evidence after independent recovery verification.
         :raises APIError: If the captured tag state cannot be restored and read back.
         """  # noqa: DOC502 - Registry read/restore helpers propagate APIError.
-        if self.state.failed and self._tag_snapshot is not None:
-            self._tag_snapshot.restore()
-        return {}
+        try:
+            snapshot = self._tag_snapshot
+            if not self.state.failed or snapshot is None:
+                return {}
+            if self.action.confirmed is not None:
+                if self._attempted_digest is None:
+                    return {}
+                current = self.harbor.digest(self.action.repository, self.action.tag)
+                if current not in (snapshot.prior_digest, self._attempted_digest):
+                    raise APIError("tag_recovery_destination_changed")
+            snapshot.restore()
+            return {}
+        finally:
+            self._lease.close()
 
     def run(self) -> JSONObject:
         """Skip an identical tag or copy and verify the preceding producer's image.
@@ -566,9 +649,19 @@ class HarborPush(HarborCallback[PushAction]):
             raise ValueError("immutable_source_image_required")
         expected = service.inspect(source)
         current = service.digest(action.repository, action.tag)
+        self._check_destination(current)
         destination = service.image(action.repository, action.tag)
         changed = current != expected
-        digest = service.copy(source, destination) if changed else expected
+        digest = expected
+        if changed:
+            if action.confirmed is None:
+                digest = service.copy(source, destination)
+            else:
+                digest = service.copy(
+                    source,
+                    destination,
+                    before_write=lambda: self._before_copy(expected),
+                )
         if service.digest(action.repository, action.tag) != digest:
             raise APIError("published_digest_mismatch")
         self.state.published_image = service.image(action.repository, digest)

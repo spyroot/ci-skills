@@ -64,6 +64,19 @@ def _source(tmp_path: Path) -> Path:
     return source
 
 
+def _top_level_manifests(skills_dir: Path) -> list[Path]:
+    """List one-level ``SKILL.md`` manifests discovered under a skills directory.
+
+    :param skills_dir: Parent skills directory scanned one level deep.
+    :returns: Sorted ``SKILL.md`` paths found in immediate child directories.
+    """
+    return sorted(
+        entry / "SKILL.md"
+        for entry in skills_dir.iterdir()
+        if entry.is_dir() and (entry / "SKILL.md").is_file()
+    )
+
+
 def test_install_copies_all_package_files_and_reads_back_digest(tmp_path: Path) -> None:
     """Copy package files and verify the installed tree digest by read-back.
 
@@ -277,9 +290,11 @@ def test_upgrade_preserves_previous_skill_and_verifies_new_copy(tmp_path: Path) 
     destination = skills_dir / installer.SKILL_NAME
     assert upgraded["status"] == "PASS"
     assert upgraded["previous_version"] == str(previous)
+    assert previous.parent == skills_dir / installer.BACKUP_DIRECTORY_NAME
     assert "# Updated" in (destination / "SKILL.md").read_text()
     assert "# Updated" not in (previous / "SKILL.md").read_text()
     assert upgraded["digest"] == installer.tree_digest(destination)["digest"]
+    assert _top_level_manifests(skills_dir) == [destination / "SKILL.md"]
 
 
 def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(
@@ -324,7 +339,11 @@ def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(
     assert result["status"] == "BLOCKED"
     assert (destination / "SKILL.md").read_bytes() == before
     assert not (skills_dir / installer.JOURNAL_NAME).exists()
-    assert not list(skills_dir.glob(f".{installer.SKILL_NAME}.previous-*"))
+    assert not list(skills_dir.glob(f"{installer.LEGACY_PREVIOUS_ENTRY_PREFIX}*"))
+    backup_dir = skills_dir / installer.BACKUP_DIRECTORY_NAME
+    assert not backup_dir.exists() or not list(
+        backup_dir.glob(f"{installer.PREVIOUS_ENTRY_PREFIX}*")
+    )
 
 
 def test_repeated_upgrade_preserves_each_immediate_previous_version(
@@ -356,6 +375,248 @@ def test_repeated_upgrade_preserves_each_immediate_previous_version(
     assert (
         skills_dir / installer.SKILL_NAME / "SKILL.md"
     ).read_text() == "version three\n"
+    assert _top_level_manifests(skills_dir) == [
+        skills_dir / installer.SKILL_NAME / "SKILL.md"
+    ]
+
+
+def _stage_interrupted_upgrade(
+    installer: ModuleType,
+    tmp_path: Path,
+    *,
+    nonce: str,
+    layout: Optional[str] = None,
+    activate_new: bool = False,
+) -> tuple[Path, Path, Path, str, str]:
+    """Create an interrupted upgrade state with a journal and moved prior skill.
+
+    :param installer: Loaded installer module under test.
+    :param tmp_path: Pytest directory holding source and skills directories.
+    :param nonce: 32-hex transaction identifier written to the journal.
+    :param layout: Optional ``previous_layout`` value written to the journal;
+        omitting it simulates a legacy v1.0 journal.
+    :param activate_new: Whether to copy the updated files into ``destination``.
+    :returns: Tuple of ``(skills_dir, destination, previous, old_digest, new_digest)``.
+    """
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    destination = skills_dir / installer.SKILL_NAME
+    old_digest = installer.tree_digest(destination)["digest"]
+    (source / "SKILL.md").write_text("new\n", encoding="utf-8")
+    new_digest = installer.tree_digest(source)["digest"]
+    if layout == installer.PreviousLayout.BACKUPS_DIR.value:
+        backup_dir = skills_dir / installer.BACKUP_DIRECTORY_NAME
+        backup_dir.mkdir(mode=0o700, exist_ok=True)
+        previous = backup_dir / f"{installer.PREVIOUS_ENTRY_PREFIX}{nonce}"
+    else:
+        previous = skills_dir / f"{installer.LEGACY_PREVIOUS_ENTRY_PREFIX}{nonce}"
+    journal: dict[str, object] = {
+        "schema_version": "1.0",
+        "nonce": nonce,
+        "old_digest": old_digest,
+        "new_digest": new_digest,
+    }
+    if layout is not None:
+        journal[installer.JOURNAL_PREVIOUS_LAYOUT_KEY] = layout
+    installer._write_journal(skills_dir, journal)
+    destination.rename(previous)
+    if activate_new:
+        destination.mkdir()
+        (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+        (destination / "scripts").mkdir()
+        (destination / "scripts" / "check.py").write_bytes(
+            (source / "scripts" / "check.py").read_bytes()
+        )
+    return skills_dir, destination, previous, old_digest, new_digest
+
+
+@pytest.mark.parametrize("upgrade", [False, True], ids=["install", "upgrade"])
+@pytest.mark.parametrize("dry_run", [True, False], ids=["dry-run", "apply"])
+@pytest.mark.parametrize(
+    "unsafe_kind",
+    ["symlink-dir", "broken-symlink", "regular-file"],
+)
+def test_install_blocks_when_backup_directory_is_unsafe(
+    tmp_path: Path, upgrade: bool, dry_run: bool, unsafe_kind: str
+) -> None:
+    """Reject install and upgrade during preflight and apply when .ci-skills.backups is unsafe.
+
+    :param tmp_path: Pytest directory holding source, destination, and unsafe backup path.
+    :param upgrade: Whether to test upgrading an installed skill or a fresh install.
+    :param dry_run: Whether to run in preflight dry-run mode or apply mode.
+    :param unsafe_kind: Kind of unsafe filesystem entry placed at ``.ci-skills.backups``.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    destination = skills_dir / installer.SKILL_NAME
+    before: Optional[bytes] = None
+    if upgrade:
+        first = installer.install(
+            source, skills_dir, dry_run=False, require_verified=False
+        )
+        assert first["status"] == "PASS"
+        before = (destination / "SKILL.md").read_bytes()
+        (source / "SKILL.md").write_text("new version\n", encoding="utf-8")
+    else:
+        skills_dir.mkdir(parents=True)
+    backup_path = skills_dir / installer.BACKUP_DIRECTORY_NAME
+    escape = tmp_path / "outside"
+    if unsafe_kind == "symlink-dir":
+        escape.mkdir()
+        backup_path.symlink_to(escape, target_is_directory=True)
+    elif unsafe_kind == "broken-symlink":
+        backup_path.symlink_to(escape / "missing", target_is_directory=True)
+    else:
+        backup_path.write_text("not a directory\n", encoding="utf-8")
+
+    blocked = installer.install(
+        source, skills_dir, dry_run=dry_run, require_verified=False, upgrade=upgrade
+    )
+
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["reason"] == "install_recovery_unsafe"
+    if upgrade:
+        assert (destination / "SKILL.md").read_bytes() == before
+    else:
+        assert not destination.exists()
+    assert not (skills_dir / installer.JOURNAL_NAME).exists()
+    if unsafe_kind == "symlink-dir":
+        assert list(escape.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("activate_new", "expected_action"),
+    [
+        pytest.param(False, "restore_previous", id="restore-previous"),
+        pytest.param(
+            True, "complete_verified_activation", id="complete-verified-activation"
+        ),
+    ],
+)
+def test_recovery_handles_backups_dir_layout(
+    tmp_path: Path, activate_new: bool, expected_action: str
+) -> None:
+    """Recover interrupted upgrades stored under the nested backup directory.
+
+    :param tmp_path: Pytest directory holding journal, backup, and destination trees.
+    :param activate_new: Whether the new destination copy is already in place.
+    :param expected_action: Recovery action expected for the interrupted state.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installer = _installer()
+    skills_dir, destination, previous, old_digest, new_digest = (
+        _stage_interrupted_upgrade(
+            installer,
+            tmp_path,
+            nonce="c" * 32,
+            layout=installer.PreviousLayout.BACKUPS_DIR.value,
+            activate_new=activate_new,
+        )
+    )
+
+    recovered = installer.recover_install(skills_dir, dry_run=False)
+
+    assert recovered["status"] == "PASS"
+    assert recovered["action"] == expected_action
+    assert recovered["digest"] == (new_digest if activate_new else old_digest)
+    assert destination.exists()
+    assert previous.exists() is activate_new
+    assert not (skills_dir / installer.JOURNAL_NAME).exists()
+
+
+@pytest.mark.parametrize(
+    "invalid_layout",
+    [
+        pytest.param("unknown", id="unknown-string"),
+        pytest.param(123, id="non-string"),
+    ],
+)
+def test_recovery_blocks_on_invalid_journal_previous_layout(
+    tmp_path: Path, invalid_layout: object
+) -> None:
+    """Reject a recovery journal declaring an unknown or non-string backup layout.
+
+    :param tmp_path: Pytest directory holding the journaled install state.
+    :param invalid_layout: Invalid value written under ``previous_layout``.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installer = _installer()
+    skills_dir, destination, _previous, _old_digest, _new_digest = (
+        _stage_interrupted_upgrade(
+            installer,
+            tmp_path,
+            nonce="d" * 32,
+            layout=None,
+        )
+    )
+    journal_path = skills_dir / installer.JOURNAL_NAME
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal[installer.JOURNAL_PREVIOUS_LAYOUT_KEY] = invalid_layout
+    journal_path.unlink()
+    installer._write_journal(skills_dir, journal)
+
+    blocked = installer.recover_install(skills_dir, dry_run=False)
+
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["reason"] == "install_recovery_unsafe"
+    assert not destination.exists()
+    assert journal_path.exists()
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink-dir", "regular-file"])
+def test_recovery_blocks_when_backup_directory_is_unsafe(
+    tmp_path: Path, unsafe_kind: str
+) -> None:
+    """Reject recovery when .ci-skills.backups is a symlink or regular file.
+
+    :param tmp_path: Pytest directory holding journal and unsafe backup entry.
+    :param unsafe_kind: Unsafe entry replacing ``.ci-skills.backups``.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installer = _installer()
+    skills_dir, destination, previous, _old_digest, _new_digest = (
+        _stage_interrupted_upgrade(
+            installer,
+            tmp_path,
+            nonce="e" * 32,
+            layout=installer.PreviousLayout.BACKUPS_DIR.value,
+        )
+    )
+    backup_dir = skills_dir / installer.BACKUP_DIRECTORY_NAME
+    outside = tmp_path / "outside-backups"
+    backup_dir.rename(outside)
+    if unsafe_kind == "symlink-dir":
+        backup_dir.symlink_to(outside, target_is_directory=True)
+    else:
+        backup_dir.write_text("not a directory\n", encoding="utf-8")
+
+    blocked = installer.recover_install(skills_dir, dry_run=False)
+
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["reason"] == "install_recovery_unsafe"
+    assert not destination.exists()
+    assert (skills_dir / installer.JOURNAL_NAME).exists()
+    assert (outside / previous.name).is_dir()
+
+
+def test_previous_entry_path_fails_closed_on_unknown_layout(tmp_path: Path) -> None:
+    """Reject an unsupported backup layout instead of falling back to legacy paths.
+
+    :param tmp_path: Pytest directory supplying the skills directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installer = _installer()
+
+    with pytest.raises(ValueError, match="install_recovery_unsafe"):
+        installer._previous_entry_path(tmp_path, "f" * 32, "unsupported")
 
 
 def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path: Path) -> None:
@@ -366,24 +627,9 @@ def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path: Path) -
     :returns: None; assertions in the body validate the regression.
     """
     installer = _installer()
-    source = _source(tmp_path)
-    skills_dir = tmp_path / "skills"
-    installer.install(source, skills_dir, dry_run=False, require_verified=False)
-    destination = skills_dir / installer.SKILL_NAME
-    old_digest = installer.tree_digest(destination)["digest"]
-    (source / "SKILL.md").write_text("new\n", encoding="utf-8")
-    nonce = "a" * 32
-    previous = skills_dir / f".{installer.SKILL_NAME}.previous-{nonce}"
-    installer._write_journal(
-        skills_dir,
-        {
-            "schema_version": "1.0",
-            "nonce": nonce,
-            "old_digest": old_digest,
-            "new_digest": installer.tree_digest(source)["digest"],
-        },
+    skills_dir, destination, previous, old_digest, _new_digest = (
+        _stage_interrupted_upgrade(installer, tmp_path, nonce="a" * 32)
     )
-    destination.rename(previous)
 
     expired = installer.recover_install(skills_dir, dry_run=False, deadline=0.0)
     assert expired["status"] == "BLOCKED"
@@ -413,29 +659,10 @@ def test_recovery_finishes_verified_activation_without_rolling_it_back(
     :returns: None; assertions in the body validate the regression.
     """
     installer = _installer()
-    source = _source(tmp_path)
-    skills_dir = tmp_path / "skills"
-    installer.install(source, skills_dir, dry_run=False, require_verified=False)
-    destination = skills_dir / installer.SKILL_NAME
-    old_digest = installer.tree_digest(destination)["digest"]
-    (source / "SKILL.md").write_text("new\n", encoding="utf-8")
-    nonce = "b" * 32
-    previous = skills_dir / f".{installer.SKILL_NAME}.previous-{nonce}"
-    installer._write_journal(
-        skills_dir,
-        {
-            "schema_version": "1.0",
-            "nonce": nonce,
-            "old_digest": old_digest,
-            "new_digest": installer.tree_digest(source)["digest"],
-        },
-    )
-    destination.rename(previous)
-    destination.mkdir()
-    (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
-    (destination / "scripts").mkdir()
-    (destination / "scripts" / "check.py").write_bytes(
-        (source / "scripts" / "check.py").read_bytes()
+    skills_dir, destination, previous, _old_digest, _new_digest = (
+        _stage_interrupted_upgrade(
+            installer, tmp_path, nonce="b" * 32, activate_new=True
+        )
     )
 
     recovered = installer.recover_install(skills_dir, dry_run=False)
