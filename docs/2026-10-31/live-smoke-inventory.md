@@ -282,3 +282,14 @@ remote mirror. The access receipt was captured from the same install at `2026-11
 superseded here are the #158 `ff5aa48` set, preserved under `tests/acceptance/historical/pre-issue149-ci-api-selection/`,
 and this branch's earlier `857070e` set (repository `1467450060`, mirror `32`), preserved under
 `tests/acceptance/historical/pre-issue149-158-integration/`.
+
+### Mirror qualification read-back — 2026-11-22, guarded image adoption candidate `e0c93c6`
+
+Candidate `e0c93c6` is the guarded image adoption branch merged with `main` `00a32b4` and the issue #149 head
+`9ce2d7b`. One installed-candidate qualification, run `pr147-mirror-20261122-e0c93c6`, created repository
+`1467491120` and GitLab mirror `34` from source `261` with `main` and `smoke-seed` at `aafe5d50`. The applied sync read
+back verified, a wrong confirmation returned BLOCKED `mirror_plan_mismatch`, and the repeat returned NO_OP. Cleanup
+reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T11:33:46Z` GitHub returned 404 by ID and by name, mirror
+`34` returned 404, and source `261` listed no remote mirror. The access receipt was captured from the same install at
+`2026-11-22T11:29:18Z`. The issue #149 `5db056f` set it supersedes is preserved under
+`tests/acceptance/historical/pre-guarded-image-adoption-at-5db056f/`.
