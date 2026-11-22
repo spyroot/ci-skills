@@ -47,7 +47,21 @@ MANAGED_BY_VALUE: str = "ci-skills"
 
 @dataclass(frozen=True, slots=True)
 class CatalogSourceRef:
-    """Identify one catalog source serving a package."""
+    """Identify one catalog source serving a package.
+
+    :param name: CatalogSource name read from the PackageManifest status.
+    :param namespace: Namespace that holds the CatalogSource.
+
+    .. attribute :: name
+        :type: str
+
+        CatalogSource name read from the PackageManifest status.
+
+    .. attribute :: namespace
+        :type: str
+
+        Namespace that holds the CatalogSource.
+    """
 
     name: str
     namespace: str
@@ -55,7 +69,45 @@ class CatalogSourceRef:
 
 @dataclass(frozen=True, slots=True)
 class OperatorOverrides:
-    """Carry the caller's six optional overrides, each checked against the cluster."""
+    """Carry the caller's six optional overrides, each checked against the cluster.
+
+    :param channel: Subscription channel from ``--channel``.
+    :param source: CatalogSource name from ``--source``.
+    :param source_namespace: CatalogSource namespace from ``--source-namespace``.
+    :param install_mode: OperatorGroup install mode from ``--install-mode``.
+    :param approval: InstallPlan approval from ``--approval``.
+    :param starting_csv: Subscription starting CSV from ``--starting-csv``.
+
+    .. attribute :: channel
+        :type: Optional[str]
+
+        Subscription channel from ``--channel``.
+
+    .. attribute :: source
+        :type: Optional[str]
+
+        CatalogSource name from ``--source``.
+
+    .. attribute :: source_namespace
+        :type: Optional[str]
+
+        CatalogSource namespace from ``--source-namespace``.
+
+    .. attribute :: install_mode
+        :type: Optional[str]
+
+        OperatorGroup install mode from ``--install-mode``.
+
+    .. attribute :: approval
+        :type: Optional[str]
+
+        InstallPlan approval from ``--approval``.
+
+    .. attribute :: starting_csv
+        :type: Optional[str]
+
+        Subscription starting CSV from ``--starting-csv``.
+    """
 
     channel: Optional[str] = None
     source: Optional[str] = None
@@ -67,7 +119,69 @@ class OperatorOverrides:
 
 @dataclass(frozen=True, slots=True)
 class OperatorPlan:
-    """Hold the resolved enable decision the plan binds."""
+    """Hold the resolved enable decision the plan binds.
+
+    :param package: OLM package name.
+    :param namespace: Target namespace the package enables into.
+    :param channel: Resolved Subscription channel.
+    :param catalog: Catalog source that serves the package.
+    :param install_mode: Resolved OperatorGroup install mode.
+    :param approval: Resolved InstallPlan approval.
+    :param starting_csv: Starting CSV, or None for the channel head.
+    :param existing_subscription: Subscription already present for the package, or None.
+    :param installed_csv: CSV reported by the existing Subscription, or None.
+    :param csv_phase: Phase of the installed CSV, or None.
+
+    .. attribute :: package
+        :type: str
+
+        OLM package name.
+
+    .. attribute :: namespace
+        :type: str
+
+        Target namespace the package enables into.
+
+    .. attribute :: channel
+        :type: str
+
+        Resolved Subscription channel.
+
+    .. attribute :: catalog
+        :type: CatalogSourceRef
+
+        Catalog source that serves the package.
+
+    .. attribute :: install_mode
+        :type: str
+
+        Resolved OperatorGroup install mode.
+
+    .. attribute :: approval
+        :type: str
+
+        Resolved InstallPlan approval.
+
+    .. attribute :: starting_csv
+        :type: Optional[str]
+
+        Starting CSV, or None for the channel head.
+
+    .. attribute :: existing_subscription
+        :type: Optional[JSONObject]
+
+        Subscription already present for the package, or None.
+
+    .. attribute :: installed_csv
+        :type: Optional[str]
+
+        CSV reported by the existing Subscription, or None.
+
+    .. attribute :: csv_phase
+        :type: Optional[str]
+
+        Phase of the installed CSV, or None.
+    """
 
     package: str
     namespace: str
@@ -91,7 +205,27 @@ class OperatorPlan:
 
 @dataclass(frozen=True, slots=True)
 class OperatorNeed:
-    """State one caller-suppliable value the plan cannot decide."""
+    """State one caller-suppliable value the plan cannot decide.
+
+    :param need: Need code, for example ``override_conflict``.
+    :param evidence: Observed cluster value that produced the need.
+    :param supply: Option or action the caller supplies to resolve it.
+
+    .. attribute :: need
+        :type: str
+
+        Need code, for example ``override_conflict``.
+
+    .. attribute :: evidence
+        :type: str
+
+        Observed cluster value that produced the need.
+
+    .. attribute :: supply
+        :type: str
+
+        Option or action the caller supplies to resolve it.
+    """
 
     need: str
     evidence: str
@@ -150,7 +284,51 @@ class OLMAction(SkillAction):
 
 @dataclass
 class OLMState(DeliveryState):
-    """Mutable state the OLM callbacks hand to each other through named fields."""
+    """Mutable state the OLM callbacks hand to each other through named fields.
+
+    :param package: OLM package name.
+    :param namespace: Target namespace the package enables into.
+    :param overrides: Caller overrides from the command line.
+    :param plan: Resolved enable plan, or None before resolution.
+    :param needs: Caller-suppliable values the resolution could not decide.
+    :param shipped_document: Document the apply step sent, or None.
+    :param wait_for: ``(field, value)`` from ``--wait-for``, or None.
+
+    .. attribute :: package
+        :type: str
+
+        OLM package name.
+
+    .. attribute :: namespace
+        :type: str
+
+        Target namespace the package enables into.
+
+    .. attribute :: overrides
+        :type: OperatorOverrides
+
+        Caller overrides from the command line.
+
+    .. attribute :: plan
+        :type: Optional[OperatorPlan]
+
+        Resolved enable plan, or None before resolution.
+
+    .. attribute :: needs
+        :type: list[OperatorNeed]
+
+        Caller-suppliable values the resolution could not decide.
+
+    .. attribute :: shipped_document
+        :type: Optional[JSONObject]
+
+        Document the apply step sent, or None.
+
+    .. attribute :: wait_for
+        :type: Optional[tuple[str, str]]
+
+        ``(field, value)`` from ``--wait-for``, or None.
+    """
 
     package: str = ""
     namespace: str = ""

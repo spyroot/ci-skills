@@ -17,7 +17,11 @@ from __future__ import annotations
 from typing import Final, Optional
 
 from lib.python.core.json_types import JSONObject
-from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
+from lib.python.core.kubernetes.kubernetes import (
+    K8SCallback,
+    KubernetesError,
+    KubernetesService,
+)
 from lib.python.core.kubernetes.olm_models import (
     APPROVAL_AUTOMATIC,
     APPROVAL_MANUAL,
@@ -47,7 +51,7 @@ NEED_APPROVAL_INVALID: Final = "approval_invalid"
 NEED_OVERRIDE_CONFLICT: Final = "override_conflict"
 
 
-def _olm_available(service) -> bool:
+def _olm_available(service: KubernetesService) -> bool:
     """Discover the OLM API without inferring from one missing resource.
 
     :param service: Verified Kubernetes service retained by the workflow.
@@ -63,13 +67,16 @@ def _olm_available(service) -> bool:
     return True
 
 
-def _catalogs_for(service, package: str) -> dict[CatalogSourceRef, JSONObject]:
+def _catalogs_for(
+    service: KubernetesService, package: str
+) -> dict[CatalogSourceRef, JSONObject]:
     """Group the cluster's PackageManifests for one package by catalog source.
+
+    A failed list call propagates the ``KubernetesError`` raised by ``service.json``.
 
     :param service: Verified Kubernetes service retained by the workflow.
     :param package: OLM package name.
     :returns: Mapping of catalog source identity to its PackageManifest.
-    :raises KubernetesError: If the list call fails.
     """
     document = service.json(
         "get",
@@ -141,7 +148,7 @@ def _supported_modes(
 
 
 def _resolve_plan(
-    action: OLMAction, service
+    action: OLMAction, service: KubernetesService
 ) -> tuple[OperatorPlan, list[OperatorNeed]]:
     """Read the cluster and resolve the enable plan or the caller-suppliable needs.
 

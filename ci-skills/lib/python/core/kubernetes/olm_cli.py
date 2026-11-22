@@ -152,9 +152,11 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_operator_mode(args: argparse.Namespace) -> ActionMode:
     """Select the execution mode under this command's persistence policy.
 
+    ``validate_action_mode`` raises ``ValueError`` when flags conflict or violate
+    the mode policy.
+
     :param args: Parsed command arguments.
     :returns: The validated execution mode.
-    :raises ValueError: Flags conflict or violate the mode policy.
     """
     return validate_action_mode(
         apply=args.apply,
@@ -227,11 +229,14 @@ class OCPOperator:
     def _prepare(self, mode: ActionMode) -> ActionMode:
         """Resolve Kubernetes and optional registry profiles; build the action.
 
+        ``resolve_target`` and ``bind_sources`` propagate ``TargetError`` when the
+        target lacks Kubernetes configuration and ``OSError`` when target or
+        credential files cannot be read.
+
         :param mode: Execution mode already validated at the argument boundary.
         :returns: Selected operation mode.
-        :raises TargetError: If the target lacks Kubernetes configuration.
-        :raises ValueError: If modes, apply-before-delivery, or timeout are invalid.
-        :raises OSError: If configured target or credential files cannot be read.
+        :raises ValueError: If the action, package, namespace, kind or
+            ``--wait-for`` value is missing or invalid, or apply is selected.
         """
         if not self.args.action or not self.args.package or not self.args.namespace:
             raise ValueError("operator_package_namespace_required")
