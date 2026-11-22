@@ -90,7 +90,7 @@ The [portability gate][portability] and [endpoint gate][endpoints] retain their 
 [exec-ci15]: ../exec-plans/active/ci15-runner-workflows.md
 [exec-ci16]: ../exec-plans/active/ci16-olm-operator.md
 [exec-ci12]: ../exec-plans/completed/ci12-node-onboarding.md
-[exec-ci13]: ../exec-plans/active/ci13-image-build-readiness.md
+[exec-ci13]: ../exec-plans/completed/ci13-image-build-readiness.md
 [exec-toolbelt]: ../exec-plans/active/gitlab-toolbelt-plan.md
 [exec-hooks]: ../exec-plans/active/skill-session-hook.md
 [exec-gitlab-targets]: ../exec-plans/active/gitlab-private-public-targets.md

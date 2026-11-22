@@ -1,0 +1,34 @@
+{
+  "branch": "ci13-chain-proof-smoke",
+  "branch_create": {
+    "status": 201
+  },
+  "branch_delete": {
+    "status": 204
+  },
+  "commit": {
+    "id": "411157d59f2a25dc4310f05a801a3de3790dc6c3",
+    "status": 201
+  },
+  "job": {
+    "finished_at": "2026-11-22T11:43:04.099Z",
+    "id": 132015,
+    "runner": "ci13-chain-proof",
+    "started_at": "2026-11-22T11:43:02.122Z",
+    "status": "success",
+    "tag_list": [
+      "ci13-chain-proof"
+    ],
+    "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/132015"
+  },
+  "pipeline": {
+    "id": 16232,
+    "status": 201,
+    "web_url": "https://gitlab.dcloud.run/hott/test/-/pipelines/16232"
+  },
+  "pipeline_delete": {
+    "status": 204
+  },
+  "project": "hott/test",
+  "tag": "ci13-chain-proof"
+}
