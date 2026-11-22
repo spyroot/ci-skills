@@ -90,6 +90,14 @@ def runner_control_plan_digest(target: JSONObject, intent: JSONObject) -> str:
     )
 
 
+# Largest description, wiki content or actions file ``_file_text`` reads (1 MiB).
+ACTION_FILE_MAX_BYTES: Final = 1_048_576
+# GitLab issue, milestone and MR field that holds the description text.
+DESCRIPTION_FIELD: Final = "description"
+# Parsed ``--description-file`` argument; also the prefix of its error reasons.
+DESCRIPTION_FILE: Final = "description_file"
+
+
 class ActionError(ValueError):
     """An operation cannot be planned or independently verified."""
 
@@ -453,11 +461,22 @@ def _file_text(value: Optional[str], name: str) -> Optional[str]:
         return None
     path = Path(value).expanduser()
     try:
-        if path.stat().st_size > 1_048_576:
+        if path.stat().st_size > ACTION_FILE_MAX_BYTES:
             raise ActionError(f"{name}_too_large")
         return path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise ActionError(f"{name}_unreadable") from exc
+
+
+def _description(args: argparse.Namespace) -> Optional[str]:
+    """Read the ``--description-file`` text for an issue, milestone or MR.
+
+    :param args: Parsed action arguments holding the ``description_file`` path.
+    :returns: File text, or ``None`` when no description file was selected.
+    :raises ActionError: The file exceeds ``ACTION_FILE_MAX_BYTES``, is
+        unreadable, or is not UTF-8.
+    """  # noqa: DOC502 - _file_text raises the reasons prefixed by DESCRIPTION_FILE.
+    return _file_text(getattr(args, DESCRIPTION_FILE), DESCRIPTION_FILE)
 
 
 def _select_target(
@@ -673,7 +692,7 @@ def _fields(
             elif field in {"title", "state", "slug"}:
                 _required_text(selected[field], f"{name}_{field}")
             elif (
-                field == "description"
+                field == DESCRIPTION_FIELD
                 and selected[field] is not None
                 and not isinstance(selected[field], str)
             ):
@@ -722,7 +741,7 @@ def _same(current: JSONObject, body: JSONObject) -> bool:
         else:
             actual = current.get(field)
         if (
-            field == "description"
+            field == DESCRIPTION_FIELD
             and isinstance(actual, str)
             and isinstance(expected, str)
         ):
@@ -832,11 +851,10 @@ def _resource_arguments(result: argparse.ArgumentParser, kind: str) -> None:
         "gitlab_merge_request",
     }:
         result.add_argument("--title", help="requested title")
-    if kind in {"gitlab_milestone", "gitlab_issue"}:
+    if kind in {"gitlab_milestone", "gitlab_issue", "gitlab_merge_request"}:
         result.add_argument(
             "--description-file", metavar="PATH", help="UTF-8 description body"
         )
-    if kind in {"gitlab_milestone", "gitlab_issue", "gitlab_merge_request"}:
         result.add_argument("--milestone-id", type=int, help="numeric milestone ID")
     if kind == "gitlab_milestone":
         result.add_argument("--start-date", help="start date YYYY-MM-DD")

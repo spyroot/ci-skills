@@ -14,12 +14,13 @@ from urllib.parse import urlencode
 
 from lib.python.core.gitlab.gitlab_action import GitLabOperation
 from lib.python.core.gitlab.gitlab_actions import (
+    DESCRIPTION_FIELD,
     ActionError,
     ActionPlan,
     PreparedOperation,
     _date,
+    _description,
     _fields,
-    _file_text,
     _id,
     _object,
     _pages,
@@ -58,11 +59,11 @@ def prepare(args: Namespace) -> PreparedOperation:
             body["title"] = _required_text(args.title, "title")
     else:
         raise ActionError("unsupported_milestone_action")
-    description = _file_text(args.description_file, "description_file")
+    description = _description(args)
     if description is not None:
         if args.action == "adjust-time":
             raise ActionError("adjust_time_accepts_dates_only")
-        body["description"] = description
+        body[DESCRIPTION_FIELD] = description
     start_date = _date(args.start_date, "start_date")
     due_date = _date(args.due_date, "due_date")
     for field, value in (("start_date", start_date), ("due_date", due_date)):

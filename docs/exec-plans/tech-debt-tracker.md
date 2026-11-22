@@ -13,9 +13,9 @@ Resolved documentation discrepancies remain identified separately from unfinishe
 | TD-05 | CI11 inventory link is unresolved | [Source inventory section][ci11-inventory] points to a missing index |
 | TD-06 | CI14 mirror status/gate labels lag source | [Reconciled plan][ci14-plan] vs [phase][ci14-phase] |
 | TD-07 | CI15 structured phase labels lag source; remaining behavior stays active | [Current progress][ci15-plan] |
-| TD-08 | Mirror partial-ID, timeout and URL matching follow-ups (P2) | [#130](https://github.com/spyroot/ci-skills/issues/130) |
+| TD-08 | RESOLVED: mirror partial-ID, timeout and URL matching follow-ups (P2) | [#130](https://github.com/spyroot/ci-skills/issues/130) |
 | TD-09 | Pre-existing configured-namespace failure overlap | [#131](https://github.com/spyroot/ci-skills/issues/131) |
-| TD-10 | Legacy ownership, numeric chain and absent-scope delete repetition (P2) | [#132](https://github.com/spyroot/ci-skills/issues/132) |
+| TD-10 | RESOLVED: legacy ownership, numeric chain and absent-scope delete repetition (P2) | [#132](https://github.com/spyroot/ci-skills/issues/132) |
 | TD-11 | Legacy `[gitlab]`, `[gitlab.NAME]` and `--gitlab-profile` read for one release | [GitLab targets plan][exec-gitlab-targets] DEC-05 |
 | TD-12 | `routing` not yet in `gitlab_job` and `gitlab_pipeline` read and watch results | [GitLab targets plan][exec-gitlab-targets] DEC-15 |
 
@@ -33,6 +33,10 @@ TD-05: the source inventory section links to the absent
 TD-06/TD-07: the new ExecPlans identify delivered source and missing proof. The active plans now credit completed
 bounded proof and approved remaining decisions. Historical structured
 phase snapshots still need descriptive status reconciliation; their normative requirements remain unchanged.
+TD-08/TD-10: #130 and #132 were closed on 2026-11-22. Commit `9d93978` (merged through `a476185`) and commit
+`c4e98bc` (#144) carry the fixes; each issue's closing comment names the test for every item. Unit tests cover the
+mirror failure paths; the committed mirror receipts cover create and NO_OP only. No committed receipt shows a
+repeated delete of an absent runner scope returning NO_OP.
 
 [ci13-plan]: active/ci13-image-build-readiness.md#progress
 [ci13-phase]: ../phases/CI13-IMAGE-BUILD-READINESS.md#implementation-plan

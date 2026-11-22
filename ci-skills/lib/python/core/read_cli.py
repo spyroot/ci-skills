@@ -31,7 +31,7 @@ from lib.python.core.catalog import describe
 from lib.python.core.cli import MachineArgumentParser, add_gitlab_selection_arguments
 from lib.python.core.cli_api import APIError
 from lib.python.core.executor import WorkflowExecutor
-from lib.python.core.json_types import JSONValue, json_string
+from lib.python.core.json_types import JSONObject, JSONValue, json_string
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.read_tools import ReadExit, ReadToolError, read_failure_message
 from lib.python.core.report import render_value
@@ -129,6 +129,7 @@ def _output(
     script: str,
     operation: Callable[[], JSONValue],
     mode: ApiOutput,
+    details: Optional[Callable[[], Optional[JSONObject]]] = None,
 ) -> int:
     """Write a command result and translate known failures to native exit codes.
 
@@ -136,6 +137,8 @@ def _output(
     :param script: Registered command path used for metadata and diagnostics.
     :param operation: Zero-argument callback, skipped for ``--describe``.
     :param mode: Named JSON, YAML, or text output representation.
+    :param details: Zero-argument callback returning the details of the stderr
+        ``result`` event after success or failure, or ``None`` for no details.
     :returns: Zero on success; 64 for invalid arguments, 65 for invalid data,
         66 for missing input, or 69 for a blocked operation.
     :raises KeyError: If the command path is not registered.
@@ -158,6 +161,7 @@ def _output(
                 "result",
                 status,
                 persist=persist,
+                details=details() if details else None,
             )
         sys.stdout.write(rendered)
         return ReadExit.SUCCESS
@@ -189,6 +193,7 @@ def _output(
             BLOCKED,
             error_class=sanitize(reason, 160),
             persist=persist,
+            details=details() if details else None,
         )
     except OSError:
         pass
@@ -270,6 +275,7 @@ def api_main(argv: Optional[Sequence[str]] = None) -> int:
     action_mode = mode
     if not args.describe and (not args.action or not args.provider):
         parser.error("action and provider are required")
+    context = ApiReadState.from_args(args)
 
     def operation() -> JSONValue:
         """Execute the parsed read action or describe its request.
@@ -280,13 +286,12 @@ def api_main(argv: Optional[Sequence[str]] = None) -> int:
         :raises APIError: If the provider request fails.
         :raises OSError: If a native provider command cannot be started.
         """  # noqa: DOC502 - Ordered callbacks propagate input, provider, and I/O errors.
-        context = ApiReadState.from_args(args)
         WorkflowExecutor(context, _api_callbacks(args, action_mode)).run()
         return context.payload
 
     if args.describe or args.dry_run:
         mode = ApiOutput.YAML if args.yaml else ApiOutput.JSON
-    return _output(args, "bin/ci-api", operation, mode)
+    return _output(args, "bin/ci-api", operation, mode, context.log_details)
 
 
 def binary_main(argv: Optional[Sequence[str]] = None) -> int:

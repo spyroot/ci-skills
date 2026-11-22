@@ -435,6 +435,42 @@ def resolve_target(
             gitlab_selection=gitlab_selection,
         )
     selected, source = resolve_target_file(None)
+    return load_selected_target(
+        selected,
+        source,
+        required_surfaces=required_surfaces,
+        optional_surfaces=optional_surfaces,
+        gitlab_selection=gitlab_selection,
+    )
+
+
+def load_selected_target(
+    selected: Path,
+    source: str,
+    *,
+    required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
+    optional_surfaces: tuple[str, ...] = (),
+    gitlab_selection: Optional[GitLabSelection] = None,
+) -> Target:
+    """Load the file ``resolve_target_file(None)`` selected and record its source.
+
+    ``resolve_target`` calls it when no ``--target`` or binding is given, and
+    ``ci-api`` calls it for every target it reads.
+
+    :param selected: Target file returned by ``resolve_target_file(None)``.
+    :param source: Source label returned with it: ``env:CI_SKILLS_TARGET``,
+        ``project`` or ``user``.
+    :param required_surfaces: Authority tables the selected target must provide.
+    :param optional_surfaces: Additional supported authorities selected when configured.
+    :param gitlab_selection: ``--gitlab`` and ``--gitlab-profile`` values, or
+        ``None``; ``None`` makes ``load_target`` read ``[gitlab_routing].default``,
+        else ``gitlab_private``.
+    :returns: Target with ``source_file`` set to ``selected``, ``source_kind`` set
+        to ``source``, and ``target_reference`` set to
+        ``env:CI_SKILLS_TARGET -> file:<path>`` for the environment source, else
+        ``<source>:<path>``, with any ``--gitlab`` option appended.
+    :raises TargetError: The file or a required authority cannot be loaded.
+    """  # noqa: DOC502 - load_target validates the selected file.
     reference = (
         f"env:{TARGET_ENV} -> file:{selected.resolve()}"
         if source == f"env:{TARGET_ENV}"
