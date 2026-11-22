@@ -661,12 +661,6 @@ workflow/YAML and Markdown checks, schemas, diff hygiene, secrets, and Ruff lint
 exercise Python mocks, edge cases, and package behavior on the current runner. These test suites run on GitHub;
 GitHub does not need private GitLab or Kubernetes access.
 
-The `mutation` job in `.github/workflows/mutation.yml` installs pinned `mutmut` and `coverage`, reports coverage of
-the modules listed in `pyproject.toml` `[tool.mutmut]`, mutates each of them in place, and runs the test modules in
-`tests/python/mutation-targets.txt` against every mutant. A surviving or timed-out mutant fails the job; its
-`mutation-results.txt`, `mutation.xml` and coverage report are in the `ci-evidence-mutation` artifact.
-`required-result` does not aggregate this job.
-
 The registered `gates/gate-ci-skills-portability.py` checks selected executable tests and smoke sources for fixed
 deployment selectors, including locally consumed target files. Runtime inputs and the operation's own synthetic
 fixtures are allowed; arbitrary helper calls are outside its bounded analysis. Its JSON/YAML report is defined by
