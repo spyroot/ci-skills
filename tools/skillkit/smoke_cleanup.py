@@ -40,7 +40,12 @@ REVISION_FIELD: Final = "revision"
 BEFORE_FIELD: Final = "before"
 DELETE_FIELD: Final = "delete"
 AFTER_FIELD: Final = "after"
+# Key of the Agent record's absence read-back after the repeat delete.
+REPEAT_FIELD: Final = "repeat"
+# Value of STATUS_FIELD in a cleanup record whose absence reads and repeat passed.
+CLEANUP_PASS: Final = "PASS_INDEPENDENT_ABSENCE_AND_REPEAT"
 
-# Values of KIND_FIELD in the two cleanup records.
+# Values of KIND_FIELD in the cleanup records.
 MIRROR_CLEANUP_KIND: Final = "gitlab_mirror_smoke_cleanup"
 RUNNER_CLEANUP_KIND: Final = "gitlab_runner_smoke_cleanup"
+AGENT_CLEANUP_KIND: Final = "gitlab_agent_smoke_cleanup"

@@ -498,6 +498,82 @@
       },
       "use_when": "Before a GitLab operation; this route needs GitLab access only."
     },
+    "gitlab_agent.py": {
+      "capabilities": [
+        "namespaced"
+      ],
+      "execution_surface": "selected GitLab API and Kubernetes authority; shared Helm/OCI adapters",
+      "options": [
+        "--agent-name",
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--gitlab",
+        "--gitlab-profile",
+        "--human",
+        "--job-url",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--namespace",
+        "--output-dir",
+        "--project",
+        "--project-name",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Connect a selected GitLab project to Kubernetes through its Agent.",
+      "read_only": false,
+      "report_kind": "gitlab_agent",
+      "required_options": [],
+      "required_tools": [
+        "glab",
+        "kubectl",
+        "helm",
+        "skopeo"
+      ],
+      "requires_authorities": [
+        "gitlab",
+        "kubernetes"
+      ],
+      "returns": "Confirmed plan or native installation, connection, selected-project CI proof and exact-owned cleanup evidence.",
+      "side_effects": "Confirmed connect may create one Agent registration, token, owned namespace, token Secret, nonsecret recovery ConfigMap and Helm release. Successful connect retains the installation; failure compensates only run-created objects. Unowned Agent/release collisions are blocked and preserved. Verify is read-only. Confirmed delete preserves borrowed resources. Connection alone never proves CI access.",
+      "subcommands": {
+        "connect": {
+          "purpose": "Register, install and independently verify one owned Agent connection.",
+          "read_back": "Match native registration, immutable chart/image and active GraphQL connection metadata to independently read owned Pod UIDs.",
+          "required_options": [],
+          "result_schema": "schemas/results/gitlab-agent.schema.json"
+        },
+        "delete": {
+          "purpose": "Remove only exact run-owned native identities.",
+          "read_back": "Check known native IDs/UIDs absent and borrowed objects preserved; absent-record repeat proves logical Agent/release/run-marker absence.",
+          "required_options": [
+            "--run-id",
+            "--agent-name"
+          ],
+          "result_schema": "schemas/results/gitlab-agent.schema.json"
+        },
+        "verify": {
+          "mutates": false,
+          "purpose": "Verify actual selected-project CI access through that Agent.",
+          "read_back": "Match native project/job/pipeline/consumer SHA and the staged .gitlab-ci.yml, ci_access_probe.py and ci_access_proof.py bytes to the installed candidate, real KAS context and selected cluster UID.",
+          "required_options": [
+            "--run-id",
+            "--job-url"
+          ],
+          "result_schema": "schemas/results/gitlab-agent.schema.json"
+        }
+      },
+      "use_when": "Install an Agent, verify selected-project CI access, or remove one owned run."
+    },
     "gitlab_issue.py": {
       "capabilities": [],
       "execution_surface": "selected authority API",
@@ -1772,6 +1848,7 @@
     "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
     "commit files to a GitLab branch": "gitlab_repository.py",
+    "connect a GitLab project to Kubernetes through its Agent": "gitlab_agent.py",
     "connectivity or CNI health": "cilium_status.py",
     "create a GitLab MR or assign its milestone": "gitlab_mr.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",

@@ -38,6 +38,7 @@ DEPLOY: Final = "deploy"
 PROBE: Final = "probe"
 RUNNER_KIND: Final = runner_tests.RUNNERS.RUNNER_KIND
 FIELD_PROJECT_NAME: Final = "project_name"
+INVALID_CONSUMER_BASES: Final = ("", "!!!", "---")
 PARSER_CASES: Final = (
     (GITHUB, contract_tests.CREATE_ACTION),
     (contract_tests.MANAGER, DEPLOY),
@@ -447,7 +448,23 @@ def test_project_name_build_candidate_normalizes_and_bounds_prefix(
 
     tag = toolbox.build_candidate_reference(fingerprint, name_prefix=project_name)
 
-    assert tag == f"{expected_prefix}-build-{suffix}"
+    assert tag == expected_prefix + toolbox.BUILD_TAG_SEPARATOR + suffix
+
+
+@pytest.mark.parametrize("name_prefix", INVALID_CONSUMER_BASES)
+def test_project_name_build_candidate_tag_rejects_base_without_dns_token(
+    legacy_toolbox_spec: callback_tests.TOOLBOX.ToolboxSpec,
+    name_prefix: str,
+) -> None:
+    """A present consumer base that normalizes to nothing never falls back to legacy.
+
+    :param legacy_toolbox_spec: Existing explicit toolbox inputs and fingerprint.
+    :param name_prefix: Consumer base with no DNS-safe characters.
+    """
+    with pytest.raises(ValueError, match=probe_tests.RUN_SCOPE.RUN_SCOPE_KIND_INVALID):
+        callback_tests.TOOLBOX.build_candidate_reference(
+            legacy_toolbox_spec.fingerprint, name_prefix=name_prefix
+        )
 
 
 @pytest.mark.parametrize(

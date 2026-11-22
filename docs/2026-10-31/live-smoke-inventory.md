@@ -305,6 +305,27 @@ by name, mirror `35` returned 404, and source `261` listed no remote mirror. The
 same install at `2026-11-22T11:36:36Z`. The `e0c93c6` set it supersedes is preserved under
 `tests/acceptance/historical/pre-runner-cleanup-confirmation/`.
 
+### GitLab Agent series and mirror read-back — 2026-11-22, CI14 Agent candidate `ea09ff7`
+
+Candidate `ea09ff7` is the CI14 Agent branch merged with `main` `96602b5` and the runner cleanup confirmation head
+`857ae1f`. One installed-candidate qualification, run `pr154-mirror-20261122-ea09ff7`, created repository `1467518714`
+and GitLab mirror `36` from source `261` with `main` and `smoke-seed` at `aafe5d50`. The applied sync read back
+verified, a wrong confirmation returned BLOCKED `mirror_plan_mismatch`, and the repeat returned NO_OP. Cleanup reported
+`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T12:13:20Z` GitHub returned 404 by ID and by name, mirror `36`
+returned 404, and source `261` listed no remote mirror. The access receipt was captured at `2026-11-22T12:02:48Z`.
+
+The same install ran the Agent series on dcloud `hott/test` (project `123`), run `afa99f3a4db54fe1a4602057c5c65ca5`.
+`connect` registered Agent `11` (`test`) and installed release `test-agent-fd1a7cb3d85eddb5` in namespace
+`test-fd1a7cb3d85eddb510a4` (APPLIED, `12:08:47Z`). Repeating the apply with the first digest returned BLOCKED
+`confirm_plan_mismatch_rerun_live_plan` without a write; a new live plan for the same run applied as NO_OP. The three
+proof files in the install were byte-identical to branch `ci-agent-access-proof` (commit `5d9b88f8`), so pipeline
+`16261` ran there with the run's eight variables; job `132233` (runner tag `pr-coordinator-mirror-fixtures`) succeeded
+and `verify` returned VERIFIED. `delete` returned APPLIED and its repeat NO_OP; the attached cleanup record reports
+`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`. At `2026-11-22T12:23:05Z` project `123` listed no cluster Agents, Agent `11`
+returned 404, the namespace returned NotFound, and Helm listed no release by that name. The receipts superseded here are
+this branch's `36f9e94` set, preserved under `tests/acceptance/historical/pre-ci14-agent-main-integration/`, and the
+`77f2565` set, preserved under `tests/acceptance/historical/pre-ci14-agent-series-at-77f2565/`.
+
 ### Mirror qualification read-back — 2026-11-22, runner cleanup confirmation candidate `22ce1d8`
 
 Candidate `22ce1d8` is the runner cleanup confirmation branch merged with `main` `215b8ef` (#147). One
@@ -314,3 +335,17 @@ mirror `40`, returned NO_OP on repeat and deleted both (`PASS_INDEPENDENT_ABSENC
 from this install was BLOCKED only by `event_trace`; the rerun passed and is the receipt (`2026-11-22T16:25:56Z`). The
 `main` `3ebe9ba` set is preserved under `tests/acceptance/historical/pre-runner-cleanup-confirmation-at-3ebe9ba/` and
 this branch's `77f2565` set under `tests/acceptance/historical/pre-runner-cleanup-main-integration/`.
+
+### GitLab Agent series and mirror read-back — 2026-11-22, CI14 Agent candidate `238ab84`
+
+Candidate `238ab84` is the CI14 Agent branch with `RUN_SCOPE_KIND_INVALID` (`fae0cc9`) merged with the runner cleanup
+confirmation head `14961dd`, which carries `main` through #147. One mirror qualification, run
+`pr154-mirror-20261122-238ab84`, created repository `1467758933` and GitLab mirror `44`, returned NO_OP on repeat and
+deleted both; at `2026-11-22T16:37:12Z` GitHub returned 404 by ID and source `261` listed no remote mirror. The access
+receipt was captured at `2026-11-22T16:30:54Z`. The Agent series on `hott/test`, run `4b30ebdb503d4c90a43819b3fd983385`,
+connected Agent `12` in namespace `test-dd83de40632438857213` (APPLIED, then NO_OP after a new live plan), verified CI
+access from job `134109` in pipeline `16490` on branch `ci-agent-access-proof` (the three proof files are byte-identical
+to the install), and deleted it (APPLIED, then NO_OP with the attached cleanup record). At `2026-11-22T16:46:04Z`
+project `123` listed no cluster Agents and the namespace returned NotFound. The `ea09ff7` set is preserved under
+`tests/acceptance/historical/pre-ci14-agent-at-ea09ff7/` and the `22ce1d8` set under
+`tests/acceptance/historical/pre-ci14-agent-series-at-22ce1d8/`.

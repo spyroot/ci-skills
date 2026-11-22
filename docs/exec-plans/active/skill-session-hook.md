@@ -735,14 +735,18 @@ Proposed library interfaces:
 def decode_event(document: JSONObject) -> HookEvent:
     """Normalize one host event; raise HookInputError for an invalid used field."""
 
+
 def recognize(event: HookEvent, skill_root: Path) -> Optional[Invocation]:
     """Return the supported installed invocation; None means no recognized call."""
+
 
 def inspect_prerequisites(invocation: Invocation) -> HookAdvice:
     """Return configuration advice for this operation without authenticating."""
 
+
 def inspect_result(invocation: Invocation, result: JSONValue) -> HookAdvice:
     """Summarize available output without claiming an unobserved result."""
+
 
 def encode_advice(advice: HookAdvice) -> JSONObject:
     """Return host-compatible context; return {} when no advice is needed."""

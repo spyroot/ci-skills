@@ -21,6 +21,7 @@ from test_gitlab_runner_lifecycle import FakeAPI, _bound_session, _plan, _runner
 from test_tool_pod import MemoryCluster
 
 NAMESPACES = import_script_module("lib.python.core.kubernetes.runner_scope")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
 SCOPES = import_script_module("lib.python.core.runner_scope")
 WORKFLOWS = import_script_module("lib.python.core.toolbox_actions")
 RUNNER = import_script_module("lib.python.core.runner")
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
     from lib.python.core.toolbox_actions import WorkflowAction
 
-NAMESPACE_KIND: Final = NAMESPACES.NAMESPACE_KIND
+NAMESPACE_KIND: Final = KINDS.NAMESPACE_KIND
 CLUSTER_NAMESPACE: Final = ""
 CREATE_OPERATION: Final = RUNNERS.RUNNER_CREATE
 UPDATE_OPERATION: Final = "update"
@@ -388,7 +389,7 @@ def test_github_workflow_binds_deferred_consumers_to_verified_custom_identity(
     )
     cluster.objects[selected.namespace_key] = native_namespace
     deployment = {
-        FIELD_KIND: NAMESPACES.DEPLOYMENT_KIND,
+        FIELD_KIND: KINDS.DEPLOYMENT_KIND,
         FIELD_METADATA: {FIELD_NAME: selected.legacy_name},
         NAMESPACES.SPEC_FIELD: {
             NAMESPACES.TEMPLATE_FIELD: {
@@ -417,7 +418,7 @@ def test_github_workflow_binds_deferred_consumers_to_verified_custom_identity(
     }
     cluster.objects[
         (
-            NAMESPACES.DEPLOYMENT_KIND.casefold(),
+            KINDS.DEPLOYMENT_KIND.casefold(),
             selected.namespace,
             selected.legacy_name,
         )
@@ -620,7 +621,7 @@ def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_id
     namespace = _namespace(selected, owned=False)
     cluster.objects[selected.namespace_key] = namespace
     deployment: JSONObject = {
-        FIELD_KIND: NAMESPACES.DEPLOYMENT_KIND,
+        FIELD_KIND: KINDS.DEPLOYMENT_KIND,
         FIELD_METADATA: {
             FIELD_NAME: selected.legacy_name,
             FIELD_UID: selected.replacement_uid,
@@ -668,7 +669,7 @@ def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_id
         del observed[FIELD_METADATA][FIELD_LABELS][RESOURCES.OPERATION_LABEL]
     cluster.objects[
         (
-            NAMESPACES.DEPLOYMENT_KIND.casefold(),
+            KINDS.DEPLOYMENT_KIND.casefold(),
             selected.namespace,
             selected.legacy_name,
         )
@@ -692,7 +693,7 @@ def test_legacy_github_runner_in_explicit_borrowed_namespace_retains_verified_id
     assert (
         cluster.objects[
             (
-                NAMESPACES.DEPLOYMENT_KIND.casefold(),
+                KINDS.DEPLOYMENT_KIND.casefold(),
                 selected.namespace,
                 selected.legacy_name,
             )

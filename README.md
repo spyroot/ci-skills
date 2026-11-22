@@ -331,7 +331,11 @@ and `source_repo`, plus strings `source_commit` and `commit_label`:
 ```python
 from lib.python.core.abstract.callbacks import Callbacks
 from lib.python.core.executor import WorkflowExecutor
-from lib.python.core.binary_build import BinaryBuildAction, BinaryBuildState, PlanBinaryBuild
+from lib.python.core.binary_build import (
+    BinaryBuildAction,
+    BinaryBuildState,
+    PlanBinaryBuild,
+)
 
 action = BinaryBuildAction(
     spec=spec,
@@ -553,6 +557,20 @@ the exact identity and project assignments before `--apply --confirm-plan DIGEST
 Run `<command> --describe` for the machine contract and `--help` for examples. The generated `tools.json` marks each
 command read-only or mutating, lists its subcommands and options, and routes an agent to the correct first access call.
 
+### GitLab Agent connection
+
+Use `gitlab_agent.py connect|verify|delete` for an owned installation and actual selected-project CI access.
+The [Agent reference](ci-skills/references/gitlab-agent.md) explains prerequisites and
+[the active plan](docs/exec-plans/active/ci14-gitlab-connections.md) tracks qualification.
+Pass `connect --project group/app --live-plan` to inspect fresh prerequisites and get a plan digest, then repeat
+with its `--run-id RUN_ID --apply --confirm-plan DIGEST`. Optional `--project-name` supplies the consumer naming base;
+explicit Agent/namespace names win without changing real provider identity. Live-plan reports fresh-workload egress
+UNPROVEN; connect must verify a real GraphQL/owned-Pod connection before PASS. Connection alone is not CI proof:
+`verify --project group/app --run-id RUN_ID --job-url JOB_URL` checks an actual selected-project consumer job.
+Successful connect retains its installation. Initial and repeated cleanup both use
+`delete --project group/app --run-id RUN_ID --agent-name AGENT_NAME` with existing live-plan/confirmation controls.
+Cleanup removes only verified run-owned native IDs/UIDs and preserves every pre-existing object.
+
 ## For agents
 
 Read the package [SKILL.md](ci-skills/SKILL.md) to choose a command and understand target resolution, status
@@ -730,3 +748,22 @@ Kubernetes; GitHub is additionally required only when publication checking is se
    `tests/acceptance/runner-lifecycle/` and the tag pair under `tests/acceptance/runner-tag/`.
 4. Run the checker locally and commit only a `PASS` set. Move a superseded receipt to
    `tests/acceptance/historical/` instead of deleting it.
+
+The GitLab Agent series is five receipts from one run of one installed copy, plus one cleanup record:
+
+1. `gitlab_agent.py connect --live-plan`, then `--run-id RUN_ID --apply --confirm-plan DIGEST --receipt-out
+   agent-connect-applied.json`; repeat the confirmed connect for `agent-connect-no-op.json`.
+2. Stage the proof job and run it as in the [Agent reference](ci-skills/references/gitlab-agent.md#ci-access-proof-job),
+   then `gitlab_agent.py verify --run-id RUN_ID --job-url JOB_URL --receipt-out agent-verify.json`.
+3. `gitlab_agent.py delete --run-id RUN_ID --agent-name AGENT_NAME` with live plan and confirmation, receipt
+   `agent-delete-applied.json`, then
+   `python tools/qualify_agent_cleanup.py observe --skill SKILL --connect-receipt agent-connect-applied.json
+   --out after.json`, with the `--binding`, `--gitlab` or `--gitlab-profile` the series used.
+4. Repeat the confirmed delete for `agent-delete-no-op.json`, observe again into `repeat.json`, then
+   `python tools/qualify_agent_cleanup.py attach --skill SKILL --connect-receipt agent-connect-applied.json
+   --after after.json --repeat repeat.json --receipt agent-delete-no-op.json
+   --out agent-delete-no-op-with-cleanup.json`.
+5. Commit the four receipts and the attached NO_OP receipt. `observe` refuses another installed copy and refuses
+   while the Agent, its token or any run-created object in the ownership record still exists; `attach` requires the
+   `after` read before the repeat receipt and the `repeat` read after it; `check_agent_series` rejects the series
+   without the record.

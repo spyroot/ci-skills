@@ -11,31 +11,49 @@ import json
 import math
 import sys
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from http import HTTPMethod
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
-from typing import TYPE_CHECKING, Optional, TypeAlias
+from typing import TYPE_CHECKING, Final, Optional, TypeAlias
 
 import pytest
-from conftest import import_script_module
+from conftest import FIXTURE_GITHUB, import_script_module
 
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
+CLI_API = import_script_module("lib.python.core.cli_api")
+GITHUB = import_script_module("lib.python.core.github.github")
 RUNTIME = import_script_module("lib.python.core.runtime")
 
 CallRecord: TypeAlias = tuple[tuple[str, ...], int, Mapping[str, Optional[str]]]
+
+PROJECT_ENDPOINT: Final = "projects/42"
+AGENTS_ENDPOINT: Final = f"{PROJECT_ENDPOINT}/cluster_agents"
+PAGE_QUERY: Final = "?per_page=100&page=1"
+RAW_TEXT: Final = "plain response text\n"
+JSON_OK: Final = 'HTTP/2 200 OK\r\n\r\n{"id":42}'
+INCLUDE_FLAG: Final = "--include"
+UNPARSEABLE_ENDPOINT: Final = "https://["
+QUERY_ONLY_ENDPOINT: Final = "?x"
 
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject, JSONValue
 
 
-def _session() -> SimpleNamespace:
-    """Provide a selected GitLab host and child token environment.
+def _session(host: str = "gitlab.example.test") -> SimpleNamespace:
+    """Provide a selected provider host and child token environment.
 
-    :returns: Session-shaped fixture for native glab transport calls.
+    :param host: Provider host the session binds; the GitLab fixture host by default.
+    :returns: Session-shaped fixture for native CLI transport calls.
     """
-    return SimpleNamespace(
-        host="gitlab.example.test", environment={"GITLAB_TOKEN": "selected"}
-    )
+    return SimpleNamespace(host=host, environment={"GITLAB_TOKEN": "selected"})
+
+
+# Every client built on the shared transport, with the host its session binds.
+SHARED_TRANSPORT_CLIENTS: Final = (
+    pytest.param(API.GlabAPIClient, _session().host, id="glab"),
+    pytest.param(GITHUB.GitHubAPIClient, FIXTURE_GITHUB["host"], id="gh"),
+)
 
 
 def _result(code: int, stdout: str = "", stderr: str = "") -> RUNTIME.CommandResult:
@@ -49,8 +67,22 @@ def _result(code: int, stdout: str = "", stderr: str = "") -> RUNTIME.CommandRes
     return RUNTIME.CommandResult(("glab",), code, stdout, stderr)
 
 
-def test_malformed_absolute_endpoint_is_classified_before_native_command() -> None:
-    """Reject endpoints whose URL parser fails before running ``glab``.
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        pytest.param(UNPARSEABLE_ENDPOINT, id="url-parser-fails"),
+        pytest.param(QUERY_ONLY_ENDPOINT, id="query-without-path"),
+    ),
+)
+def test_malformed_endpoint_is_classified_before_native_command(
+    endpoint: str,
+) -> None:
+    """Reject endpoints whose URL parser fails or whose path is empty before ``glab``.
+
+    A query-only endpoint has an empty path; before the empty-path rule it was
+    sent and recorded as a GET of an empty endpoint.
+
+    :param endpoint: Malformed caller-selected endpoint.
     :returns: None; assertions in the body validate the regression.
     """
     calls: MutableSequence[Sequence[str]] = []
@@ -69,10 +101,12 @@ def test_malformed_absolute_endpoint_is_classified_before_native_command() -> No
         calls.append(tuple(argv))
         raise AssertionError("malformed endpoint reached native command")
 
+    client = API.GlabAPIClient(command=command)
     with pytest.raises(API.GitLabAPIError, match="invalid_relative_endpoint"):
-        API.GlabAPIClient(command=command).get_json(_session(), "https://[")
+        client.get_json(_session(), endpoint)
 
     assert calls == []
+    assert client.requests == ()
 
 
 def test_get_retries_only_transient_failures_with_unchanged_target_and_retry_after() -> (
@@ -110,13 +144,14 @@ def test_get_retries_only_transient_failures_with_unchanged_target_and_retry_aft
         return next(outcomes)
 
     client = API.GlabAPIClient(command=command, sleep=sleeps.append)
-    assert client.get_json(_session(), "projects/42") == {"id": 42}
+    assert client.get_json(_session(), PROJECT_ENDPOINT) == {"id": 42}
     assert len(calls) == 3
     assert all(call == calls[0] for call in calls)
     assert "--include" in calls[0][0]
     assert "--header" not in calls[0][0]
     assert 0.2 <= sleeps[0] <= 0.24
     assert sleeps[1] == 1
+    assert client.requests == (CLI_API.APIRequest(HTTPMethod.GET, PROJECT_ENDPOINT),)
 
 
 @pytest.mark.parametrize("status", ("401 unauthorized", "403 forbidden"))
@@ -444,10 +479,11 @@ def test_json_body_write_rejects_invalid_scalars_before_native_command(
         """
         raise AssertionError("invalid JSON body reached native command")
 
+    client = API.GlabAPIClient(command=command)
     with pytest.raises(API.GitLabAPIError, match="invalid_request_body"):
-        API.GlabAPIClient(command=command).post_json(
-            _session(), "projects/42/issues", body
-        )
+        client.post_json(_session(), "projects/42/issues", body)
+
+    assert client.requests == ()
 
 
 def test_json_body_write_rejects_cycles_before_native_command() -> None:
@@ -474,10 +510,11 @@ def test_json_body_write_rejects_cycles_before_native_command() -> None:
         """
         raise AssertionError("cyclic JSON body reached native command")
 
+    client = API.GlabAPIClient(command=command)
     with pytest.raises(API.GitLabAPIError, match="invalid_request_body"):
-        API.GlabAPIClient(command=command).post_json(
-            _session(), "projects/42/issues", body
-        )
+        client.post_json(_session(), "projects/42/issues", body)
+
+    assert client.requests == ()
 
 
 def test_json_capture_kills_a_child_before_retaining_unbounded_response() -> None:
@@ -520,3 +557,120 @@ def test_post_body_file_is_removed_after_timeout() -> None:
         )
     assert len(captured) == 1
     assert not captured[0].exists()
+
+
+def test_client_records_each_request_method_and_path_in_order() -> None:
+    """Record method and query-free path of every sent request, including a failure.
+
+    :returns: None; assertions in the body validate the request trace.
+    """
+    replies = iter(
+        (
+            _result(0, 'HTTP/2 200 OK\r\n\r\n{"id":42}'),
+            _result(0, 'HTTP/2 201 Created\r\n\r\n{"id":17}'),
+            _result(0, "HTTP/2 204 No Content\r\ncontent-length: 0\r\n\r\n"),
+            _result(1, "HTTP/2 404 Not Found\r\n\r\n{}"),
+        )
+    )
+
+    def command(
+        argv: Sequence[str], *, timeout: int, env: Optional[Mapping[str, Optional[str]]]
+    ) -> RUNTIME.CommandResult:
+        """Answer the four requests in order.
+
+        :param argv: glab command vector accepted by the double.
+        :param timeout: Bounded request timeout accepted by the double.
+        :param env: Selected child environment accepted by the double.
+        :returns: The next scripted native result.
+        """
+        return next(replies)
+
+    client = API.GlabAPIClient(command=command)
+    session = _session()
+    client.get_json(session, "projects/42?per_page=100&page=1")
+    client.post_json(session, "projects/42/cluster_agents", {"name": "one"})
+    client.request_no_content(session, "DELETE", "projects/42/cluster_agents/17")
+    with pytest.raises(API.GitLabAPIError):
+        client.get_json(session, "projects/42/cluster_agents/17")
+
+    assert [(item.method, item.endpoint) for item in client.requests] == [
+        ("GET", "projects/42"),
+        ("POST", "projects/42/cluster_agents"),
+        ("DELETE", "projects/42/cluster_agents/17"),
+        ("GET", "projects/42/cluster_agents/17"),
+    ]
+    assert session.environment["GITLAB_TOKEN"] not in repr(client.requests)
+
+
+@pytest.mark.parametrize(("client_type", "host"), SHARED_TRANSPORT_CLIENTS)
+def test_raw_text_read_is_recorded_once_without_its_query(
+    client_type: type[CLI_API.CLIAPIClient], host: str
+) -> None:
+    """Record a raw paginated ``get_text`` read as one query-free GET.
+
+    :param client_type: Shared-transport client class under test.
+    :param host: Provider host bound by the request session.
+    :returns: None; assertions in the body validate the request trace.
+    """
+    calls: MutableSequence[tuple[str, ...]] = []
+
+    def command(
+        argv: Sequence[str], *, timeout: int, env: Optional[Mapping[str, Optional[str]]]
+    ) -> RUNTIME.CommandResult:
+        """Return plain response text for the one raw read.
+
+        :param argv: Native command vector recorded for the raw-mode check.
+        :param timeout: Bounded request timeout accepted by the double.
+        :param env: Selected child environment accepted by the double.
+        :returns: Successful result whose stdout carries no HTTP headers.
+        """
+        calls.append(tuple(argv))
+        return _result(0, RAW_TEXT)
+
+    client = client_type(command=command)
+    text = client.get_text(_session(host), PROJECT_ENDPOINT + PAGE_QUERY, paginate=True)
+
+    assert text == RAW_TEXT
+    assert len(calls) == 1
+    assert INCLUDE_FLAG not in calls[0]
+    assert client.requests == (CLI_API.APIRequest(HTTPMethod.GET, PROJECT_ENDPOINT),)
+
+
+@pytest.mark.parametrize(("client_type", "host"), SHARED_TRANSPORT_CLIENTS)
+def test_each_client_keeps_its_own_request_log(
+    client_type: type[CLI_API.CLIAPIClient], host: str
+) -> None:
+    """Keep one request log per client and return a snapshot, not a live view.
+
+    :param client_type: Shared-transport client class under test.
+    :param host: Provider host bound by the request session.
+    :returns: None; assertions in the body validate log isolation.
+    """
+
+    def command(
+        argv: Sequence[str], *, timeout: int, env: Optional[Mapping[str, Optional[str]]]
+    ) -> RUNTIME.CommandResult:
+        """Answer every request with one JSON object.
+
+        :param argv: Native command vector accepted by the double.
+        :param timeout: Bounded request timeout accepted by the double.
+        :param env: Selected child environment accepted by the double.
+        :returns: Successful HTTP 200 result.
+        """
+        return _result(0, JSON_OK)
+
+    session = _session(host)
+    first = client_type(command=command)
+    second = client_type(command=command)
+    first.get_json(session, PROJECT_ENDPOINT)
+    earlier = first.requests
+    second.post_json(session, AGENTS_ENDPOINT, {"name": "one"})
+    first.get_json(session, AGENTS_ENDPOINT)
+
+    project_read = CLI_API.APIRequest(HTTPMethod.GET, PROJECT_ENDPOINT)
+    assert earlier == (project_read,)
+    assert first.requests == (
+        project_read,
+        CLI_API.APIRequest(HTTPMethod.GET, AGENTS_ENDPOINT),
+    )
+    assert second.requests == (CLI_API.APIRequest(HTTPMethod.POST, AGENTS_ENDPOINT),)

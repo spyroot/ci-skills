@@ -136,6 +136,10 @@ class CommandDefinition(TypedDict):
 
         Observable effects beyond the result.
 
+    .. attribute :: credentials
+
+        Which credential each step uses and where a created credential is stored, one line each.
+
     """
 
     kind: str
@@ -157,6 +161,7 @@ class CommandDefinition(TypedDict):
     required_options: NotRequired[Sequence[str]]
     execution_surface: NotRequired[str]
     side_effects: NotRequired[str]
+    credentials: NotRequired[Sequence[str]]
 
 
 class NodeDefinition(TypedDict):

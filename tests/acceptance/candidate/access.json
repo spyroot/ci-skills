@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-11-22T16:25:56.029750+00:00",
+  "captured_at": "2026-11-22T16:30:54.561857+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -22,7 +22,7 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "07b0e686d151ea8956d71cbf5ba6cfff9917e73cea9ef703fc236fada4acff6b",
+      "readback_sha256": "9655d11cc7ba3e6a39838195aa06746d6df45c757214c8457523d665b60ccb01",
       "record_count": 15,
       "status": "PASS"
     },
@@ -35,7 +35,7 @@
       "ciliumnode_count": 13,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "7e3337a1d4f93a9355a3e41d9a57e4c282412df6a7135a7aefe4ffe514dded31",
+      "readback_sha256": "3f34b435dab4e6bdf792c3fa71a00e33c8aa53fe0b48121b52dc8b73b172a6fa",
       "record_count": 13,
       "status": "PASS"
     },
@@ -43,8 +43,8 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "d4919bdd2fd4606ed4dbb7b9703d4e440c5283eacb600b1f897e2e096fd8fe5c",
-      "record_count": 5616,
+      "readback_sha256": "bf6b0d23ed7cca81c7e1c64d4e7473492640a566ce1c4e8527a5e9022cbaa3dc",
+      "record_count": 6547,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -58,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "9055bf1e71f10d7cf9fe2066a05ec834061b43f512a940efc9ce3d7623795315",
+      "readback_sha256": "ba81bc0b955a758292f81c7c82ad0d1cae779be68f4614aec978cafb03f1acad",
       "record_count": 1,
       "status": "PASS"
     },
@@ -66,19 +66,19 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "d925fe7f7344ddac120127833af066d0af889bd429d14a668eb73eb7241b8c64",
+      "readback_sha256": "7d4b07daa5f22206921c12232f070e627f493e22bcaf0262b99f5c3e999a2643",
       "record_count": 86,
       "resource_counts": {
         "attachments": 40,
         "csidrivers": 6,
         "csinodes": 13,
         "daemonsets": 45,
-        "deployments": 234,
+        "deployments": 232,
         "nodes": 13,
-        "pods": 887,
+        "pods": 876,
         "pvcs": 78,
         "pvs": 86,
-        "replicasets": 582,
+        "replicasets": 580,
         "statefulsets": 15,
         "storageclasses": 10
       },
@@ -100,12 +100,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "4b39fbfe7d650308b229a7930bdd240a1b858442870d45314c59370b864edaf3",
-    "file_count": 277,
-    "functional_digest": "b019b60ffcb48f5e308234ed512d566bfab7fafc94fd950819c78c99ca5fe528",
+    "digest": "374b09496a22e4e2f347004f8796d016d8bc39b1c61f9635ea478d4e965c3964",
+    "file_count": 316,
+    "functional_digest": "beefc15da98bf9b67bee41437e4cfac408d92836be4a183a5c02786a57f1a322",
     "revision": {
       "source": "installer_record",
-      "value": "22ce1d82b31eea132c8e71346a9a349fe7665aea",
+      "value": "238ab846c44025d58ef9937db8c31d9b5d0ff706",
       "verified": true
     }
   },
@@ -189,5 +189,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "22ce1d82b31eea132c8e71346a9a349fe7665aea"
+  "tested_revision": "238ab846c44025d58ef9937db8c31d9b5d0ff706"
 }

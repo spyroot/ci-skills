@@ -75,6 +75,7 @@ BUILD_HISTORY_LIMIT: Final = 2
 HASH_SEPARATOR: Final = b"\0"
 BUILD_TAG_PREFIX: Final = "ci-skills-build-"
 FINGERPRINT_TAG_LENGTH: Final = 24
+BUILD_TAG_SEPARATOR: Final = "-build-"
 
 DigestLookup = Callable[[str], Optional[str]]
 
@@ -572,7 +573,7 @@ def build_candidate_reference(
     :raises ValueError: A present prefix has no valid DNS token.
     """  # noqa: DOC502 - Shared DNS normalization validates the consumer base.
     prefix = (
-        f"{dns_token(name_prefix, limit=DNS_LABEL_LIMIT)}-build-"
+        dns_token(name_prefix, limit=DNS_LABEL_LIMIT) + BUILD_TAG_SEPARATOR
         if name_prefix is not None
         else BUILD_TAG_PREFIX
     )

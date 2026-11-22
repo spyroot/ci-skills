@@ -195,7 +195,11 @@ jobs:
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
             ci-skills/schemas/results/gitlab-runner-delete.schema.json \
-            ci-skills/schemas/results/gitlab-routing.schema.json
+            ci-skills/schemas/results/gitlab-routing.schema.json \
+            ci-skills/schemas/gitlab-agent.schema.json \
+            ci-skills/schemas/gitlab-agent-ownership.schema.json \
+            ci-skills/schemas/gitlab-agent-ci-access.schema.json \
+            ci-skills/schemas/results/gitlab-agent.schema.json
           check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             tests/acceptance/runner-tag/*.json
           check-jsonschema --schemafile schemas/live-acceptance-policy.schema.json \
