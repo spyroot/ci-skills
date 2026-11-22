@@ -156,6 +156,7 @@ Routing, in short:
 | Build a schema-declared toolbox | `bin/toolbox.py` |
 | Probe Podman, or copy the prepared toolbox and configure its runner | `bin/image_build_readiness.py probe\|chain` |
 | Enable an OLM operator and apply its shipped resource | `bin/ocp_operator.py install\|apply\|remove` |
+| Inspect NVIDIA GPU Operator health or pause/resume | `bin/nvidia_gpu_operator.py health-check\|pause\|resume` |
 | Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | access to configured GitHub, GitLab and Kubernetes providers | `access_check.py` |

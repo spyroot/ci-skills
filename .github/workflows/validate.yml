@@ -181,7 +181,8 @@ jobs:
             ci-skills/lib/python/core/kubernetes/olm_models.py \
             ci-skills/lib/python/core/kubernetes/olm_callbacks.py \
             ci-skills/lib/python/core/kubernetes/olm_resources.py \
-            ci-skills/lib/python/core/kubernetes/olm_cli.py
+            ci-skills/lib/python/core/kubernetes/olm_cli.py \
+            ci-skills/lib/python/core/kubernetes/nvidia_gpu
       - name: Check manifests and schemas
         id: schema
         run: |
@@ -200,6 +201,7 @@ jobs:
             ci-skills/schemas/results/toolbox-workflow.schema.json \
             ci-skills/schemas/results/image-build-readiness.schema.json \
             ci-skills/schemas/results/olm-operator.schema.json \
+            ci-skills/schemas/results/nvidia-gpu-operator.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
             ci-skills/schemas/results/gitlab-runner-delete.schema.json \

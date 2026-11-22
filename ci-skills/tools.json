@@ -1524,6 +1524,83 @@
       "subcommands": {},
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
     },
+    "nvidia_gpu_operator.py": {
+      "capabilities": [
+        "namespaced",
+        "node_scoped"
+      ],
+      "execution_surface": "configured Kubernetes API",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--mcp",
+        "--namespace",
+        "--node",
+        "--nvidia-driver",
+        "--output-dir",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--scope",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Inspect NVIDIA GPU Operator health and safely pause or resume node, policy, or MachineConfigPool reconciliation on OpenShift.",
+      "read_only": false,
+      "report_kind": "nvidia_gpu_operator",
+      "required_options": [],
+      "required_tools": [
+        "kubectl",
+        "oc on OpenShift"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "Health evidence across ClusterPolicy, GPUCluster, NVIDIADriver pools, DaemonSets, validators, nodes, and MCPs, or a confirmed pause/resume read-back.",
+      "side_effects": "health-check is read-only. pause and resume mutate only the confirmed Node label, upgradePolicy.autoUpgrade field, or MachineConfigPool.spec.paused field.",
+      "subcommands": {
+        "health-check": {
+          "mutates": false,
+          "purpose": "Read ClusterPolicy/GPUCluster, NVIDIADriver pools, DRA, MCO/MCP, DaemonSets, validators, and GPU node drift.",
+          "read_back": "Structured health snapshot and non-standard/drift findings.",
+          "requires_authorities": [
+            "kubernetes"
+          ],
+          "result_schema": "schemas/results/nvidia-gpu-operator.schema.json",
+          "side_effects": "None; read-only cluster inspection."
+        },
+        "pause": {
+          "mutates": true,
+          "purpose": "Pause GPU operands, driver upgrades, autoUpgrade, or an OpenShift MachineConfigPool.",
+          "read_back": "Independent read-back verifying the paused state.",
+          "requires_authorities": [
+            "kubernetes"
+          ],
+          "result_schema": "schemas/results/nvidia-gpu-operator.schema.json",
+          "side_effects": "Apply mode sets the confirmed pause label or spec flag after server-side dry-run."
+        },
+        "resume": {
+          "mutates": true,
+          "purpose": "Resume GPU operands, driver upgrades, autoUpgrade, or an OpenShift MachineConfigPool.",
+          "read_back": "Independent read-back verifying the resumed state.",
+          "requires_authorities": [
+            "kubernetes"
+          ],
+          "result_schema": "schemas/results/nvidia-gpu-operator.schema.json",
+          "side_effects": "Apply mode clears or restores the confirmed pause label or spec flag after server-side dry-run."
+        }
+      },
+      "use_when": "An OpenShift cluster needs GPU Operator health verification (standard, DRA, or non-standard/Secure Boot drivers) or symmetric pause/resume before maintenance."
+    },
     "ocp_node_onboard.py": {
       "capabilities": [],
       "execution_surface": "installed skill controls tools, ISO generation and node join in the selected cluster",
@@ -1941,6 +2018,7 @@
     "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
     "enable an OLM operator such as the NVIDIA Network Operator": "ocp_operator.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
+    "inspect NVIDIA GPU Operator health or pause and resume reconciliation": "nvidia_gpu_operator.py",
     "mirror GitLab to GitHub": "gitlab_mirror.py",
     "open a GitLab bug": "gitlab_issue.py",
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",

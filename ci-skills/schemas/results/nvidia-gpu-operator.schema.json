@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/nvidia-gpu-operator.schema.json",
+  "title": "NVIDIA GPU Operator result",
+  "description": "Versioned envelope for nvidia_gpu_operator.py health-check, pause, and resume evidence (CI17).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "operation",
+    "captured_at",
+    "errors",
+    "summary"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "kind": {
+      "type": "string",
+      "const": "nvidia_gpu_operator"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "PARTIAL",
+        "BLOCKED",
+        "DRY_RUN",
+        "PLANNED",
+        "NO_OP",
+        "APPLIED"
+      ]
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "health-check",
+        "pause",
+        "resume"
+      ]
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "target": {
+      "type": "string"
+    },
+    "target_file": {
+      "type": "string"
+    },
+    "target_source": {
+      "type": "string"
+    },
+    "tested_revision": {
+      "type": "string"
+    },
+    "mutated": {
+      "type": "boolean"
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "node_filter": {
+          "type": "string"
+        },
+        "allocation_mode": {
+          "type": "string",
+          "enum": [
+            "device-plugin",
+            "dra",
+            "conflict",
+            "none"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "confirmable": {
+      "type": "boolean"
+    },
+    "needs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "need",
+          "evidence",
+          "supply"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "need": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "supply": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "access": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "reason"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "record_count",
+        "error_count"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}
