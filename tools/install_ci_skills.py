@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the repository's CI skill into a local Codex or Claude skills directory.
+"""Install the repository's CI skill into a local Codex, Claude, or Antigravity skills directory.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -41,8 +41,16 @@ SKILL_NAME = "ci-skills"
 SKILLS_DIRECTORY_NAME: Final = "skills"
 CODEX_HOME_DIRECTORY_NAME: Final = ".codex"
 CLAUDE_HOME_DIRECTORY_NAME: Final = ".claude"
+GEMINI_HOME_DIRECTORY_NAME: Final = ".gemini"
+ANTIGRAVITY_CONFIG_DIRECTORY_NAME: Final = "config"
+AGENTS_DIRECTORY_NAME: Final = ".agents"
 JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
+JOURNAL_PREVIOUS_LAYOUT_KEY: Final = "previous_layout"
+INSTALL_RECOVERY_UNSAFE_REASON: Final = "install_recovery_unsafe"
 LOCK_NAME = f".{SKILL_NAME}.install.lock"
+BACKUP_DIRECTORY_NAME: Final = f".{SKILL_NAME}.backups"
+PREVIOUS_ENTRY_PREFIX: Final = "previous-"
+LEGACY_PREVIOUS_ENTRY_PREFIX: Final = f".{SKILL_NAME}.previous-"
 LOCK_WAIT_SECONDS = 30
 SOURCE = Path(__file__).resolve().parents[1] / SKILL_NAME
 runpy.run_path(str(SOURCE / "bin" / "_bootstrap.py"))
@@ -82,7 +90,7 @@ RECOVERY = {
     "destination_symlink": "Choose a real skills directory; the installed skill cannot be a symlink.",
     "destination_not_directory": "Inspect the existing path; an installed skill must be a directory.",
     "incomplete_install_recover": "Run --recover --apply --confirm-recover, then retry installation.",
-    "install_recovery_unsafe": "Inspect the installed skill and transaction journal before changing either.",
+    INSTALL_RECOVERY_UNSAFE_REASON: "Inspect the installed skill and transaction journal before changing either.",
     "install_io_failure": "Run --recover --apply --confirm-recover, then retry installation.",
     "install_lock_timeout": "Wait for the other installer process to finish, then retry.",
     AgentProfileReason.DEADLINE_EXPIRED: "Make a new plan and choose a longer --timeout.",
@@ -110,11 +118,9 @@ def skills_directory() -> Path:
     :returns: CODEX_HOME/skills when configured, otherwise ~/.codex/skills.
     """
     codex_home = os.environ.get("CODEX_HOME")
-    return (
-        Path(codex_home).expanduser()
-        if codex_home
-        else Path.home() / CODEX_HOME_DIRECTORY_NAME
-    ) / SKILLS_DIRECTORY_NAME
+    if codex_home:
+        return Path(codex_home).expanduser() / SKILLS_DIRECTORY_NAME
+    return _user_skills_directory(CODEX_HOME_DIRECTORY_NAME)
 
 
 class InstallScope(StrEnum):
@@ -123,6 +129,8 @@ class InstallScope(StrEnum):
     CODEX_HOME = "codex-home"
     CLAUDE_USER = "claude-user"
     CLAUDE_PROJECT = "claude-project"
+    ANTIGRAVITY_USER = "antigravity-user"
+    ANTIGRAVITY_PROJECT = "antigravity-project"
 
 
 def repository_root(working_directory: Path) -> Path:
@@ -139,12 +147,35 @@ def repository_root(working_directory: Path) -> Path:
     return Path(repository)
 
 
+def _user_skills_directory(*directory_parts: str) -> Path:
+    """Resolve a user-scoped skills directory under ``HOME``.
+
+    :param directory_parts: Relative directory components under ``HOME``.
+    :returns: ``~/<directory_parts>/skills``.
+    """
+    return Path.home().joinpath(*directory_parts, SKILLS_DIRECTORY_NAME)
+
+
+def _project_skills_directory(working_directory: Path, *directory_parts: str) -> Path:
+    """Resolve a repository-scoped skills directory from the enclosing Git root.
+
+    :param working_directory: Directory inside the repository that receives the skill.
+    :param directory_parts: Relative directory components under the Git root.
+    :returns: ``<git root>/<directory_parts>/skills``.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``working_directory``
+        is not inside a Git repository or Git cannot be run.
+    """  # noqa: DOC502 - repository_root raises AgentProfileError.
+    return repository_root(working_directory).joinpath(
+        *directory_parts, SKILLS_DIRECTORY_NAME
+    )
+
+
 def claude_user_skills_directory() -> Path:
     """Resolve the Claude user skills directory at invocation time.
 
     :returns: ``~/.claude/skills``.
     """
-    return Path.home() / CLAUDE_HOME_DIRECTORY_NAME / SKILLS_DIRECTORY_NAME
+    return _user_skills_directory(CLAUDE_HOME_DIRECTORY_NAME)
 
 
 def claude_project_skills_directory(working_directory: Path) -> Path:
@@ -154,12 +185,29 @@ def claude_project_skills_directory(working_directory: Path) -> Path:
     :returns: ``<git root>/.claude/skills``.
     :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``working_directory``
         is not inside a Git repository or Git cannot be run.
-    """  # noqa: DOC502 - repository_root raises AgentProfileError.
-    return (
-        repository_root(working_directory)
-        / CLAUDE_HOME_DIRECTORY_NAME
-        / SKILLS_DIRECTORY_NAME
+    """  # noqa: DOC502 - _project_skills_directory raises AgentProfileError.
+    return _project_skills_directory(working_directory, CLAUDE_HOME_DIRECTORY_NAME)
+
+
+def antigravity_user_skills_directory() -> Path:
+    """Resolve the Antigravity user skills directory at invocation time.
+
+    :returns: ``~/.gemini/config/skills``.
+    """
+    return _user_skills_directory(
+        GEMINI_HOME_DIRECTORY_NAME, ANTIGRAVITY_CONFIG_DIRECTORY_NAME
     )
+
+
+def antigravity_project_skills_directory(working_directory: Path) -> Path:
+    """Resolve the Antigravity project skills directory of the enclosing Git repository.
+
+    :param working_directory: Directory inside the repository that receives the skill.
+    :returns: ``<git root>/.agents/skills``.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``working_directory``
+        is not inside a Git repository or Git cannot be run.
+    """  # noqa: DOC502 - _project_skills_directory raises AgentProfileError.
+    return _project_skills_directory(working_directory, AGENTS_DIRECTORY_NAME)
 
 
 SCOPE_SKILLS_DIRECTORIES: Final[Mapping[InstallScope, Callable[[Path], Path]]] = (
@@ -170,6 +218,10 @@ SCOPE_SKILLS_DIRECTORIES: Final[Mapping[InstallScope, Callable[[Path], Path]]] =
                 lambda _working_directory: claude_user_skills_directory()
             ),
             InstallScope.CLAUDE_PROJECT: claude_project_skills_directory,
+            InstallScope.ANTIGRAVITY_USER: (
+                lambda _working_directory: antigravity_user_skills_directory()
+            ),
+            InstallScope.ANTIGRAVITY_PROJECT: antigravity_project_skills_directory,
         }
     )
 )
@@ -180,11 +232,12 @@ def scope_skills_directory(scope: InstallScope, working_directory: Path) -> Path
 
     :param scope: Requested install scope.
     :param working_directory: Directory used to find the Git repository for
-        ``claude-project``; user scopes ignore it.
+        project scopes; user scopes ignore it.
     :returns: Directory that receives the ``ci-skills`` entry.
-    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``claude-project`` is
-        requested outside a Git repository.
-    """  # noqa: DOC502 - The claude-project resolver raises AgentProfileError.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when a project scope
+        (``claude-project`` or ``antigravity-project``) is requested outside a
+        Git repository.
+    """  # noqa: DOC502 - Project scope resolvers raise AgentProfileError.
     return SCOPE_SKILLS_DIRECTORIES[scope](working_directory)
 
 
@@ -327,6 +380,59 @@ def _installed_matches(
     )
 
 
+class PreviousLayout(StrEnum):
+    """Journaled location layouts for preserved upgrade backups."""
+
+    LEGACY_SIBLING = "legacy_sibling"
+    BACKUPS_DIR = "backups_dir"
+
+
+PREVIOUS_LAYOUT_VALUES: Final[frozenset[str]] = frozenset(
+    member.value for member in PreviousLayout
+)
+
+
+def _backup_directory(skills_dir: Path) -> Path:
+    """Locate the hidden directory that holds preserved upgrade backups.
+
+    Storing backups one level deeper prevents one-level skill scanners from
+    discovering a preserved ``SKILL.md`` beside the active installation.
+
+    :param skills_dir: Parent directory for the installed skill.
+    :returns: Path to ``<skills_dir>/.ci-skills.backups``.
+    """
+    return skills_dir / BACKUP_DIRECTORY_NAME
+
+
+def _validate_backup_directory(backup_dir: Path) -> None:
+    """Reject a symlink or non-directory at the upgrade backup directory.
+
+    :param backup_dir: Candidate backup directory inside ``skills_dir``.
+    :raises ValueError: ``install_recovery_unsafe`` if the path is unsafe.
+    """
+    if backup_dir.is_symlink() or (backup_dir.exists() and not backup_dir.is_dir()):
+        raise ValueError(INSTALL_RECOVERY_UNSAFE_REASON)
+
+
+def _previous_entry_path(skills_dir: Path, nonce: str, layout: PreviousLayout) -> Path:
+    """Derive the preserved previous-version path for a transaction layout.
+
+    :param skills_dir: Parent directory for the installed skill.
+    :param nonce: Transaction identifier.
+    :param layout: Journaled backup layout.
+    :returns: Backup path inside ``.ci-skills.backups`` or legacy sibling path.
+    :raises ValueError: ``install_recovery_unsafe`` when ``.ci-skills.backups`` is
+        a symlink or non-directory, or the layout is unsupported.
+    """  # noqa: DOC502 - _validate_backup_directory raises ValueError.
+    if layout is PreviousLayout.BACKUPS_DIR:
+        backup_dir = _backup_directory(skills_dir)
+        _validate_backup_directory(backup_dir)
+        return backup_dir / f"{PREVIOUS_ENTRY_PREFIX}{nonce}"
+    if layout is PreviousLayout.LEGACY_SIBLING:
+        return skills_dir / f"{LEGACY_PREVIOUS_ENTRY_PREFIX}{nonce}"
+    raise ValueError(INSTALL_RECOVERY_UNSAFE_REASON)
+
+
 def _journal_path(skills_dir: Path) -> Path:
     """Locate the install transaction journal inside the skills directory.
 
@@ -429,8 +535,14 @@ def _read_journal(skills_dir: Path) -> tuple[JSONObject, Path, Path]:
         digest = data.get(key)
         if not isinstance(digest, str) or len(digest) != 64:
             raise ValueError("install_recovery_unsafe")
+    raw_layout = data.get(
+        JOURNAL_PREVIOUS_LAYOUT_KEY, PreviousLayout.LEGACY_SIBLING.value
+    )
+    if not isinstance(raw_layout, str) or raw_layout not in PREVIOUS_LAYOUT_VALUES:
+        raise ValueError(INSTALL_RECOVERY_UNSAFE_REASON)
+    layout = PreviousLayout(raw_layout)
     staging = skills_dir / f".{SKILL_NAME}.stage-{nonce}"
-    previous = skills_dir / f".{SKILL_NAME}.previous-{nonce}"
+    previous = _previous_entry_path(skills_dir, nonce, layout)
     old_kind = data.get("old_kind", "directory")
     if not isinstance(old_kind, str) or old_kind not in {"directory", "symlink"}:
         raise ValueError("install_recovery_unsafe")
@@ -615,6 +727,7 @@ def _install_unlocked(
                 status="DRY_RUN" if dry_run else "PASS", already_installed=True
             )
             return result
+        _validate_backup_directory(_backup_directory(skills_dir))
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
@@ -623,7 +736,11 @@ def _install_unlocked(
         skills_dir.mkdir(parents=True, exist_ok=True)
         nonce = uuid.uuid4().hex
         staging = skills_dir / f".{SKILL_NAME}.stage-{nonce}"
-        previous = skills_dir / f".{SKILL_NAME}.previous-{nonce}"
+        previous = _previous_entry_path(skills_dir, nonce, PreviousLayout.BACKUPS_DIR)
+        if _present(destination):
+            backup_dir = _backup_directory(skills_dir)
+            backup_dir.mkdir(mode=0o700, exist_ok=True)
+            _validate_backup_directory(backup_dir)
         old_digest = _entry_digest(destination) if _present(destination) else "0" * 64
         old_kind = "symlink" if destination.is_symlink() else "directory"
         try:
@@ -636,6 +753,7 @@ def _install_unlocked(
                         "old_digest": old_digest,
                         "old_kind": old_kind,
                         "new_digest": expected_digest["digest"],
+                        JOURNAL_PREVIOUS_LAYOUT_KEY: PreviousLayout.BACKUPS_DIR.value,
                     },
                 )
                 staging.mkdir(mode=0o700)
@@ -841,7 +959,9 @@ class InstallerCLI:
             help=(
                 "named skills directory: codex-home ($CODEX_HOME/skills or "
                 "~/.codex/skills), claude-user (~/.claude/skills), "
-                "claude-project (<git root>/.claude/skills of the current directory)"
+                "claude-project (<git root>/.claude/skills of the current directory), "
+                "antigravity-user (~/.gemini/config/skills), "
+                "antigravity-project (<git root>/.agents/skills of the current directory)"
             ),
         )
         location.add_argument(

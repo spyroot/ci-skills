@@ -44,6 +44,13 @@ from lib.python.core.kubernetes.run_scope import (
 from lib.python.core.kubernetes.scc_access import SCCAccessAction
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.report import plan_digest
+from lib.python.core.runner_identity import (
+    RepositoryIdentity,
+    RepositorySource,
+    ResolvedName,
+    resolve_name,
+    validate_project_name,
+)
 from lib.python.core.target import Target
 
 DEFAULT_CPU_REQUEST: Final = podman_runtime.DEFAULT_CPU_REQUEST
@@ -71,6 +78,7 @@ PROBE_EVIDENCE_MOUNT: Final = "/ci-skills/evidence"
 PROBE_SCRIPT_NAME: Final = "probe.bash"
 INNER_SCRIPT_NAME: Final = "inner.sh"
 PROBE_CONFIGMAP_ROLE: Final = "podman-scripts"
+PROBE_JOB_ROLE: Final = "podman-probe"
 PROBE_SCRIPT_SOURCES: Final = {
     PROBE_SCRIPT_NAME: PROBE_SCRIPT_ROOT / PROBE_SCRIPT_NAME,
     INNER_SCRIPT_NAME: PROBE_SCRIPT_ROOT / INNER_SCRIPT_NAME,
@@ -209,6 +217,21 @@ class PodmanProbeAction(SkillAction):
 
         Existing caller-selected namespace, or ``None`` for a generated scope.
 
+    .. attribute :: project_name
+        :type: str | None
+
+        Validated optional consumer naming override.
+
+    .. attribute :: repository_identity
+        :type: RepositoryIdentity
+
+        Actual invoking consumer repository, or explicit unknown provenance.
+
+    .. attribute :: naming_base
+        :type: ResolvedName
+
+        Shared consumer name retained for namespace and resource defaults.
+
     .. attribute :: service_account
         :type: str
 
@@ -224,6 +247,11 @@ class PodmanProbeAction(SkillAction):
     mode: ProbeMode
     confirm_plan: Optional[str]
     namespace: Optional[str]
+    project_name: str | None = None
+    repository_identity: RepositoryIdentity = field(
+        default_factory=lambda: RepositoryIdentity(None, RepositorySource.UNKNOWN)
+    )
+    naming_base: ResolvedName = field(init=False)
     service_account: str = field(init=False, default=DEFAULT_SERVICE_ACCOUNT)
 
     def __post_init__(self) -> None:
@@ -231,6 +259,19 @@ class PodmanProbeAction(SkillAction):
 
         :raises ValueError: If an image, node, namespace, or timeout is invalid.
         """
+        selected_project = validate_project_name(self.project_name)
+        object.__setattr__(self, "project_name", selected_project)
+        object.__setattr__(
+            self,
+            "naming_base",
+            resolve_name(
+                None,
+                self.repository_identity,
+                argument="--project-name",
+                project_name=selected_project,
+                pending=True,
+            ),
+        )
         immutable_image(self.probe_image)
         immutable_image(self.inner_image)
         if self.node is not None and not self.node.strip():
@@ -250,6 +291,29 @@ class PodmanProbeAction(SkillAction):
         if self.mode != ProbeMode.APPLY and self.confirm_plan is not None:
             raise ValueError("confirm_plan_requires_apply")
 
+    def new_scope(self, *, run_id: str | None = None) -> RunScope:
+        """Create one scope from confirmed namespace and consumer naming inputs.
+
+        :param run_id: Optional caller-selected identity, normally absent for a fresh probe.
+        :returns: Fresh operation scope preserving any explicit namespace.
+        :raises ValueError: A namespace, operation ID, or naming base is invalid.
+        """  # noqa: DOC502 - Shared scope creation validates derived identities.
+        return RunScope.new(
+            namespace=self.namespace,
+            run_id=run_id,
+            namespace_prefix=self.naming_base.value or None,
+        )
+
+    def resource_name(self, scope: RunScope, role: str) -> str:
+        """Name every probe resource through the same resolved consumer base.
+
+        :param scope: The exact operation scope retained after namespace opening.
+        :param role: Existing resource role within this probe.
+        :returns: DNS-safe name retaining the unchanged operation uniqueness suffix.
+        :raises ValueError: A selected role or consumer base has no valid token.
+        """  # noqa: DOC502 - Shared scope naming validates its inputs.
+        return scope.name(role, prefix=self.naming_base.value or None)
+
     def plan(self, selected_node: str) -> JSONObject:
         """Build the canonical nonsecret plan for one selected worker.
 
@@ -260,10 +324,7 @@ class PodmanProbeAction(SkillAction):
         kubernetes = self.target.kubernetes
         if kubernetes is None:
             raise ValueError("kubernetes_target_missing")
-        permission = SCCAccessAction(
-            constraint=PRIVILEGED_CONSTRAINT,
-            service_account=self.service_account,
-        )
+        permission = self.scc_access()
         side_effects = [
             "temporary_scc_role_binding_when_required",
             "temporary_configmap",
@@ -308,7 +369,15 @@ class PodmanProbeAction(SkillAction):
         :param selected_node: Concrete live worker, or ``auto`` offline.
         :returns: Canonical SHA-256 plan fingerprint.
         """
-        return plan_digest(self.plan(selected_node))
+        return plan_digest(
+            {
+                **self.plan(selected_node),
+                "project_name": self.project_name,
+                "consumer_name": self.naming_base.value or None,
+                "repository": self.repository_identity.reference,
+                "repository_source": self.repository_identity.source,
+            }
+        )
 
     def scc_access(self) -> SCCAccessAction:
         """Build the reusable SCC preparation action for this probe.
@@ -318,6 +387,7 @@ class PodmanProbeAction(SkillAction):
         return SCCAccessAction(
             constraint=PRIVILEGED_CONSTRAINT,
             service_account=self.service_account,
+            name_prefix=self.naming_base.value or None,
         )
 
 
@@ -461,9 +531,10 @@ def probe_scripts() -> JSONObject:
     }
 
 
-def probe_configmap(scope: RunScope) -> JSONObject:
+def probe_configmap(action: PodmanProbeAction, scope: RunScope) -> JSONObject:
     """Mount the installed script bundle as one run-owned, immutable ConfigMap.
 
+    :param action: Validated consumer naming inputs shared with the probe Job.
     :param scope: Generated run namespace, names, and ownership labels.
     :returns: ConfigMap document consumed read-only by the probe Job.
     :raises OSError: If an installed script is absent or unreadable.
@@ -473,7 +544,7 @@ def probe_configmap(scope: RunScope) -> JSONObject:
         "apiVersion": "v1",
         "kind": "ConfigMap",
         "metadata": {
-            "name": scope.name(PROBE_CONFIGMAP_ROLE),
+            "name": action.resource_name(scope, PROBE_CONFIGMAP_ROLE),
             "namespace": scope.namespace,
             "labels": dict(scope.labels),
         },
@@ -494,7 +565,7 @@ def probe_job(
     :param selected_node: Live-read Ready worker name.
     :returns: Complete ``batch/v1`` Job manifest.
     """
-    name = scope.name("podman-probe")
+    name = action.resource_name(scope, PROBE_JOB_ROLE)
     labels = dict(scope.labels)
     labels["app.kubernetes.io/name"] = PROBE_KIND
     runtime = PodmanRuntimeSettings(
@@ -535,10 +606,13 @@ def probe_job(
                                     "name": "EXPECTED_INNER_EXIT",
                                     "value": str(EXPECTED_INNER_EXIT),
                                 },
-                                {"name": "OK_NAME", "value": scope.name("inner-ok")},
+                                {
+                                    "name": "OK_NAME",
+                                    "value": action.resource_name(scope, "inner-ok"),
+                                },
                                 {
                                     "name": "FAIL_NAME",
-                                    "value": scope.name("inner-fail"),
+                                    "value": action.resource_name(scope, "inner-fail"),
                                 },
                                 {
                                     "name": "RUN_LABEL",
@@ -564,7 +638,9 @@ def probe_job(
                         {
                             "name": PROBE_VOLUME,
                             "configMap": {
-                                "name": scope.name(PROBE_CONFIGMAP_ROLE),
+                                "name": action.resource_name(
+                                    scope, PROBE_CONFIGMAP_ROLE
+                                ),
                                 "defaultMode": 0o444,
                             },
                         },

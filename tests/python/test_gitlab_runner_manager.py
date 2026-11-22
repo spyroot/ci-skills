@@ -556,38 +556,13 @@ def test_online_verification_retains_only_verified_manager_owned_resources(
     binding = SCC_ACCESS.role_binding_document(action.scc_access(), scope)
     binding_name = str(binding["metadata"]["name"])
 
-    class Kubernetes:
-        """Return one optional SCC binding without mutation facilities."""
-
-        def read(self, kind: str, name: str, namespace: str) -> Optional[dict]:
-            """Read the deterministic SCC binding selected by verification.
-
-            :param kind: Expected RoleBinding kind.
-            :param name: Expected deterministic binding name.
-            :param namespace: Expected manager namespace.
-            :returns: Missing, externally owned, or run-owned binding document.
-            """
-            assert (kind, name, namespace) == (
-                "RoleBinding",
-                binding_name,
-                NAMESPACE,
-            )
-            if binding_owner is None:
-                return None
-            return {
-                "apiVersion": "rbac.authorization.k8s.io/v1",
-                "kind": "RoleBinding",
-                "metadata": {
-                    "name": binding_name,
-                    "namespace": NAMESPACE,
-                    "labels": {
-                        RESOURCES.MANAGER_LABEL: RESOURCES.MANAGER_VALUE,
-                        RESOURCES.OPERATION_LABEL: binding_owner,
-                    },
-                },
-            }
-
-    state.kubernetes = Kubernetes()
+    cluster = ManagerCluster()
+    cluster.objects[NAMESPACE_KEY] = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+    if binding_owner is not None:
+        binding["metadata"]["labels"][RESOURCES.MANAGER_LABEL] = RESOURCES.MANAGER_VALUE
+        binding["metadata"]["labels"][RESOURCES.OPERATION_LABEL] = binding_owner
+        cluster.objects["rolebinding", NAMESPACE, binding_name] = binding
+    state.kubernetes = cluster
     monkeypatch.setattr(
         CALLBACKS,
         "read_runner_record",
@@ -836,40 +811,17 @@ def test_remove_scc_access_preserves_preexisting_external_binding() -> None:
         },
     }
 
-    class Kubernetes:
-        """Expose one external binding and reject every mutation attempt."""
-
-        def read(self, kind: str, name: str, namespace: str) -> dict:
-            """Return the preexisting binding selected by cleanup.
-
-            :param kind: Expected RoleBinding kind.
-            :param name: Expected deterministic binding name.
-            :param namespace: Expected manager namespace.
-            :returns: Externally owned binding.
-            """
-            assert (kind, name, namespace) == (
-                "RoleBinding",
-                binding_name,
-                NAMESPACE,
-            )
-            return external
-
-        def delete(self, kind: str, name: str, namespace: str) -> None:
-            """Fail if cleanup attempts to delete the external binding.
-
-            :param kind: Unexpected resource kind.
-            :param name: Unexpected resource name.
-            :param namespace: Unexpected resource namespace.
-            :raises AssertionError: Always; external grants must be preserved.
-            """
-            raise AssertionError(f"deleted external {kind}/{namespace}/{name}")
-
-    state.kubernetes = Kubernetes()
+    cluster = ManagerCluster()
+    cluster.objects[NAMESPACE_KEY] = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+    cluster.objects["rolebinding", NAMESPACE, binding_name] = external
+    state.kubernetes = cluster
     callback = SCC_ACCESS.RemoveSCCAccess(action.scc_access())
     callback.bind(state)
 
     result = callback.run()
 
+    assert cluster.read("RoleBinding", binding_name, NAMESPACE) == external
+    assert cluster.applied == cluster.deleted == []
     assert result == {
         "action": STATUS.NO_OP,
         "verified": True,
@@ -903,40 +855,20 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     }
     observed_deployments: list[str] = []
 
-    class Kubernetes:
-        """Read only the selected namespace and potential existing manager."""
+    class Kubernetes(ManagerCluster):
+        """Record the exact deployment candidates considered in the borrowed scope."""
 
         def read(self, kind: str, name: str, namespace: str) -> Optional[dict]:
-            """Supply independent namespace evidence and absence of a manager.
-
-            :param kind: Selected Namespace or candidate Deployment kind.
-            :param name: Exact selected namespace or existing manager name.
-            :param namespace: Cluster scope or selected manager namespace.
-            :returns: Borrowed namespace with a UID, or an absent Deployment.
-            :raises AssertionError: An unrelated object is read.
-            """
+            """Record deployment lookups and use the shared transport for all reads."""
             if kind == "Deployment":
                 assert namespace == NAMESPACE
                 assert name in expected_deployments
                 observed_deployments.append(name)
-                return None
-            assert (kind, name, namespace) == ("Namespace", NAMESPACE, "")
-            return {
-                "kind": "Namespace",
-                "metadata": {"name": NAMESPACE, "uid": NAMESPACE_UID, "labels": {}},
-            }
+            return super().read(kind, name, namespace)
 
-        def delete(self, kind: str, name: str, namespace: str) -> None:
-            """Fail if caller-owned namespace cleanup performs a deletion.
-
-            :param kind: Unexpected native kind.
-            :param name: Unexpected object name.
-            :param namespace: Unexpected namespace.
-            :raises AssertionError: Always; caller namespaces are preserved.
-            """
-            raise AssertionError(f"unexpected delete {kind}/{namespace}/{name}")
-
-    state.kubernetes = Kubernetes()
+    cluster = Kubernetes()
+    cluster.objects[NAMESPACE_KEY] = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+    state.kubernetes = cluster
     select = WORKLOAD.SelectResolvedManagerScope(action.workload())
     select.bind(state)
     selected = select.run()
@@ -949,6 +881,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     assert set(observed_deployments) == expected_deployments
     assert len(observed_deployments) == len(expected_deployments)
     assert state.run_scope == scope
+    assert cluster.applied == cluster.deleted == []
     assert result == {
         "action": STATUS.NO_OP,
         "verified": True,
@@ -1153,16 +1086,30 @@ class ManagerCluster(MemoryCluster):
                 "configmaps": "configmap",
                 "deployments": "deployment",
                 "rolebindings": "rolebinding",
+                "secrets": "secret",
             }[args[1]]
             selector = dict(
                 item.split("=", 1) for item in args[args.index("-l") + 1].split(",")
             )
             self.events.append("lookup:" + kind)
+            namespace = next(
+                (
+                    args[args.index(option) + 1]
+                    for option in ("--namespace", "-n")
+                    if option in args
+                ),
+                None,
+            )
             return {
                 "items": [
                     deepcopy(document)
-                    for (resource_kind, _, _), document in self.objects.items()
+                    for (
+                        resource_kind,
+                        resource_namespace,
+                        _,
+                    ), document in self.objects.items()
                     if resource_kind == kind
+                    and (namespace is None or resource_namespace == namespace)
                     and all(
                         document["metadata"].get("labels", {}).get(key) == value
                         for key, value in selector.items()
@@ -1958,19 +1905,27 @@ def test_manager_confirmed_absence_refuses_concurrent_runtime_without_mutation(
     (K8S_RUNNER.REGISTRATION_SECRET_SUFFIX, K8S_RUNNER.REGISTRY_SECRET_SUFFIX),
     ids=("registration", "registry"),
 )
+@pytest.mark.parametrize("previous_name", (None, "earlier-consumer"))
 def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     suffix: str,
+    previous_name: Optional[str],
 ) -> None:
-    """A single old runtime Secret blocks absence after the Deployment is gone."""
+    """A run-owned runtime Secret blocks absence regardless of its name prefix."""
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
     runtime = _absent_manager_runtime(cluster, capsys, borrowed=True)
     remnant = next(
         key for key in runtime if key[0] == "secret" and key[2].endswith(suffix)
     )
-    cluster.objects[remnant] = json.loads(runtime[remnant])
+    document = json.loads(runtime[remnant])
+    if previous_name is not None:
+        kind, namespace, _ = remnant
+        name = f"{previous_name}{suffix}"
+        document["metadata"]["name"] = name
+        remnant = (kind, namespace, name)
+    cluster.objects[remnant] = document
     cluster.caller_namespace = ""
     survivors = deepcopy(cluster.objects)
 

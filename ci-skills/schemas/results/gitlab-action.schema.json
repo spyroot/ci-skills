@@ -19,12 +19,12 @@
     "target_file": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_file"},
     "target_source": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_source"},
     "phase": {"$ref": "gitlab-runner-delete.schema.json#/properties/phase"},
-    "operation": {"enum": ["create", "update", "adjust-time", "open-bug", "create-bug", "assign", "start", "commit"]},
+    "operation": {"enum": ["create", "update", "adjust-time", "open-bug", "create-bug", "assign", "start", "commit", "rename-tag", "bind-project", "set-protected", "set-name"]},
     "plan_digest": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan_digest"},
     "plan": {"$ref": "#/$defs/plan"},
     "mutated": {"$ref": "gitlab-runner-tag.schema.json#/properties/mutated"},
     "records": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/record"}},
-    "readback": {"anyOf": [{"$ref": "#/$defs/record"}, {"$ref": "gitlab-runner-tag.schema.json#/$defs/failed_readback"}, {"$ref": "#/$defs/planned_readback"}, {"$ref": "#/$defs/pipeline_planned_readback"}]},
+    "readback": {"anyOf": [{"$ref": "#/$defs/record"}, {"$ref": "gitlab-runner-tag.schema.json#/$defs/failed_readback"}, {"$ref": "#/$defs/planned_readback"}, {"$ref": "#/$defs/pipeline_planned_readback"}, {"$ref": "#/$defs/runner_control_planned_readback"}]},
     "result_action": {"$ref": "#/$defs/record/properties/action"},
     "identity": {"$ref": "gitlab-runner-tag.schema.json#/$defs/identity"},
     "verified_target": {"$ref": "gitlab-runner-tag.schema.json#/$defs/verified_target"},
@@ -43,7 +43,7 @@
     {"if": {"properties": {"kind": {"const": "gitlab_milestone"}}}, "then": {"properties": {"operation": {"enum": ["create", "update", "adjust-time"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_issue"}}}, "then": {"properties": {"operation": {"enum": ["open-bug", "create-bug"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_wiki"}}}, "then": {"properties": {"operation": {"enum": ["create", "update"]}}}},
-    {"if": {"properties": {"kind": {"const": "gitlab_runner"}}}, "then": {"properties": {"operation": {"enum": ["create", "assign"]}}}},
+    {"if": {"properties": {"kind": {"const": "gitlab_runner"}}}, "then": {"properties": {"operation": {"enum": ["create", "assign", "rename-tag", "bind-project", "set-protected", "set-name"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_pipeline"}}}, "then": {"properties": {"operation": {"const": "start"}}}},
     {
       "if": {"required": ["operation"]},
@@ -95,9 +95,18 @@
         "properties": {"phase": {"const": "LIVE_PLAN"}, "mutated": {"const": false}, "records": {"maxItems": 0}, "errors": {"maxItems": 0}, "summary": {"properties": {"record_count": {"const": 0}, "error_count": {"const": 0}}}},
         "oneOf": [
           {"properties": {"kind": {"const": "gitlab_runner"}, "operation": {"enum": ["assign", "create"]}, "readback": {"$ref": "#/$defs/planned_readback"}}},
-          {"properties": {"kind": {"const": "gitlab_pipeline"}, "operation": {"const": "start"}, "readback": {"$ref": "#/$defs/pipeline_planned_readback"}}}
+          {"properties": {"kind": {"const": "gitlab_pipeline"}, "operation": {"const": "start"}, "readback": {"$ref": "#/$defs/pipeline_planned_readback"}}},
+          {"properties": {"kind": {"const": "gitlab_runner"}, "operation": {"enum": ["rename-tag", "bind-project", "set-protected", "set-name"]}, "readback": {"$ref": "#/$defs/runner_control_planned_readback"}}}
         ]
       }
+    },
+    {
+      "if": {"required": ["operation"], "properties": {"operation": {"enum": ["rename-tag", "bind-project", "set-protected", "set-name"]}, "status": {"enum": ["PLANNED", "PASS"]}}},
+      "then": {"properties": {"plan": {"required": ["runner_control"], "properties": {"confirmation_ready": {"const": true}}}}}
+    },
+    {
+      "if": {"required": ["operation"], "properties": {"operation": {"enum": ["rename-tag", "bind-project", "set-protected", "set-name"]}, "status": {"const": "PASS"}}},
+      "then": {"properties": {"records": {"items": {"$ref": "#/$defs/verified_runner_control"}}, "readback": {"$ref": "#/$defs/verified_runner_control"}}}
     },
     {
       "if": {"properties": {"status": {"const": "BLOCKED"}}},
@@ -119,8 +128,48 @@
         "body_sha256": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan/properties/body_sha256"},
         "plan_digest": {"$ref": "#/properties/plan_digest"},
         "one_time_sink_required": {"type": "boolean"},
-        "requested_tags": {"$ref": "gitlab-runner-tag.schema.json#/$defs/tags"}
+        "requested_tags": {"$ref": "gitlab-runner-tag.schema.json#/$defs/tags"},
+        "runner_control": {"$ref": "#/$defs/runner_control"}
       }
+    },
+    "runner_control_state": {
+      "type": "object", "additionalProperties": false,
+      "required": ["description", "project_ids", "tag_list", "locked", "access_level"],
+      "properties": {
+        "project_ids": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+        "description": {"type": ["string", "null"]},
+        "tag_list": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "locked": {"type": "boolean"},
+        "access_level": {"enum": ["ref_protected", "not_protected"]}
+      }
+    },
+    "runner_control": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runner_id", "project_id", "before", "desired"],
+      "properties": {
+        "runner_id": {"type": "integer", "minimum": 1},
+        "project_id": {"type": "integer", "minimum": 1},
+        "before": {"$ref": "#/$defs/runner_control_state"},
+        "desired": {"$ref": "#/$defs/runner_control_state"}
+      }
+    },
+    "runner_control_planned_readback": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verified", "runner_control"],
+      "properties": {
+        "verified": {"const": true},
+        "runner_control": {"$ref": "#/$defs/runner_control"}
+      }
+    },
+    "verified_runner_control": {
+      "allOf": [
+        {"$ref": "#/$defs/verified_record"},
+        {"required": ["id", "runner_control", "observed"], "properties": {
+          "id": {"type": "integer", "minimum": 1},
+          "runner_control": {"$ref": "#/$defs/runner_control"},
+          "observed": {"$ref": "#/$defs/runner_control_state"}
+        }}
+      ]
     },
     "record": {
       "type": "object", "required": ["action", "verified"],

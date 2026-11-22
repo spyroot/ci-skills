@@ -11,7 +11,9 @@ import json
 import stat
 from collections.abc import Mapping, MutableSequence, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -72,9 +74,48 @@ TAG_SCHEMA = json.loads(
 )
 TAG_VALIDATOR = Draft202012Validator(TAG_SCHEMA)
 FACTORY_FAILURE: Final = "factory failed"
+RUNNER_CONTROL_KIND: Final = "gitlab_runner"
+RUNNER_CONTROL_ID: Final = 23
+RUNNER_CONTROL_PROJECT_ID: Final = 42
+OTHER_RUNNER_PROJECT_ID: Final = 99
+RUNNER_CONTROL_PROJECT: Final = "team/repo"
+RUNNER_CONTROL_ORIGIN: Final = "https://gitlab.example.test"
+RUNNER_CONTROL_DETAIL: Final = f"runners/{RUNNER_CONTROL_ID}"
+RUNNER_CONTROL_GID: Final = f"gid://gitlab/Ci::Runner/{RUNNER_CONTROL_ID}"
+RUNNER_CONTROL_GRAPHQL: Final = ("POST", "graphql")
+RUNNER_CONTROL_PUT: Final = ("PUT", RUNNER_CONTROL_DETAIL)
+RUNNER_CONTROL_GET: Final = ("GET", RUNNER_CONTROL_DETAIL)
+RUNNER_CONTROL_SCHEMA: Final = "results/gitlab-action.schema.json"
+OLD_RUNNER_TAG: Final = "old"
+NEW_RUNNER_TAG: Final = "replacement"
+KEEP_RUNNER_TAG: Final = "keep"
+NEW_RUNNER_NAME: Final = "consumer-runner"
+PROTECTED_REFS: Final = "ref_protected"
+UNPROTECTED_REFS: Final = "not_protected"
+RENAME_TAG_ARGS: Final = (
+    "rename-tag",
+    "--from-tag",
+    OLD_RUNNER_TAG,
+    "--to-tag",
+    NEW_RUNNER_TAG,
+)
+BIND_PROJECT_ARGS: Final = ("bind-project",)
+RUNNER_CONTROL_BASELINE: Final = json.dumps(
+    {
+        "id": RUNNER_CONTROL_ID,
+        "runner_type": "project_type",
+        "description": "owned-runner",
+        "locked": False,
+        "tag_list": [KEEP_RUNNER_TAG, OLD_RUNNER_TAG],
+        "access_level": UNPROTECTED_REFS,
+        "projects": [{"id": RUNNER_CONTROL_PROJECT_ID}],
+    }
+)
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from lib.python.core.gitlab.gitlab_actions import ActionPlan
     from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
     from lib.python.core.json_types import JSONObject, JSONValue
@@ -325,6 +366,444 @@ class FakeAPI:
         :returns: Next scripted DELETE result.
         """
         return self._next("DELETE", endpoint)
+
+
+class RunnerControlAPI(FakeAPI):
+    """Observe one runner and expose every native update through the existing journal."""
+
+    def __init__(self) -> None:
+        """Clone the immutable runner baseline for this case."""
+        super().__init__({})
+        self.runner: JSONObject = json.loads(RUNNER_CONTROL_BASELINE)
+        self.hidden_project_count = 0
+        self.persist_put = True
+
+    def _next(
+        self, method: str, endpoint: str, body: Optional[JSONValue] = None
+    ) -> JSONValue:
+        """Supply the current runner state and prove that GraphQL only queries it.
+
+        :param method: HTTP verb emitted by the workflow.
+        :param endpoint: Native GitLab path selected by the workflow.
+        :param body: Read-only GraphQL request or mutation payload, when present.
+        :returns: Fresh observation or successful update response for this request.
+        """
+        request = (method, endpoint)
+        project_runners = _list(f"projects/{RUNNER_CONTROL_PROJECT_ID}/runners")
+        response: JSONValue
+        if request == RUNNER_CONTROL_GET:
+            response = deepcopy(self.runner)
+        elif request == ("GET", project_runners):
+            response = [{"id": RUNNER_CONTROL_ID}]
+        elif request == RUNNER_CONTROL_GRAPHQL:
+            assert isinstance(body, Mapping)
+            assert body["variables"] == {"id": RUNNER_CONTROL_GID}
+            query = body["query"]
+            assert isinstance(query, str) and query.lstrip().startswith("query")
+            assert "projectCount" in query
+            assert isinstance(self.runner["projects"], list)
+            response = {
+                "data": {
+                    "runner": {
+                        "id": RUNNER_CONTROL_GID,
+                        "projectCount": len(self.runner["projects"])
+                        + self.hidden_project_count,
+                    },
+                },
+            }
+        elif request == RUNNER_CONTROL_PUT:
+            assert isinstance(body, Mapping)
+            if self.persist_put:
+                self.runner.update(deepcopy(body))
+            response = {**self.runner, **body}
+        else:
+            pytest.fail(f"Unexpected runner control request {method} {endpoint}")
+        self.responses[request] = [response]
+        return super()._next(method, endpoint, body)
+
+    @property
+    def writes(self) -> list[tuple[str, str, Optional[JSONValue]]]:
+        """Return mutation calls and exclude the verified read-only GraphQL query.
+
+        :returns: Native writes in observed order.
+        """
+        return [
+            call
+            for call in self.calls
+            if call[0] != "GET" and call[:2] != RUNNER_CONTROL_GRAPHQL
+        ]
+
+
+@pytest.fixture
+def runner_control_api(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> RunnerControlAPI:
+    """Bind real runner workflows to the same deterministic fixture through plan and apply.
+
+    :param monkeypatch: Replace only provider and credential boundaries.
+    :param tmp_path: Store the per-runner mutation lock within the test.
+    :returns: Provider fake whose state can be changed between invocations.
+    """
+    import test_gitlab_runner_lifecycle as lifecycle
+
+    api = RunnerControlAPI()
+    fixture_plan = _plan(
+        RUNNER_CONTROL_KIND, BIND_PROJECT_ARGS[0], {}, resource_id=RUNNER_CONTROL_ID
+    )
+    session = _bound_session(fixture_plan, skill=lifecycle.VERIFIED_SKILL)
+    target = TARGET.GitLabOperationTarget(
+        TARGET.GitLabTarget(
+            url=RUNNER_CONTROL_ORIGIN,
+            host=session.host,
+            project=RUNNER_CONTROL_PROJECT,
+        ),
+        Path(fixture_plan.target_file),
+    )
+    access = {
+        "status": STATUS.PASS,
+        "identity": lifecycle.VERIFIED_IDENTITY,
+        "target": lifecycle.VERIFIED_TARGET,
+    }
+    monkeypatch.setattr(
+        GITLAB_ACTION, "resolve_gitlab_target", lambda *_a, **_kw: (target, "unit")
+    )
+    monkeypatch.setattr(
+        GITLAB_ACTION, "bind_gitlab_session", lambda *_a, **_kw: session
+    )
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda **_kw: api)
+    monkeypatch.setattr(
+        GITLAB_ACTION, "check_gitlab_operation_access", lambda *_a, **_kw: access
+    )
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "runner-locks")
+    return api
+
+
+def _runner_control_report(
+    capsys: pytest.CaptureFixture[str],
+    arguments: Sequence[str],
+    status: str,
+    *mode: str,
+) -> JSONObject:
+    """Execute the real runner CLI and validate its machine report.
+
+    :param capsys: Capture report output for this invocation.
+    :param arguments: Operation name and its command-specific inputs.
+    :param status: Expected report outcome.
+    :param mode: Offline plan, live plan, or confirmed apply flags.
+    :returns: Parsed, schema-validated report.
+    """
+    code = RUNNER.main(
+        [
+            *arguments,
+            "--project",
+            RUNNER_CONTROL_PROJECT,
+            "--runner-id",
+            str(RUNNER_CONTROL_ID),
+            "--json",
+            *mode,
+        ]
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == status
+    assert code == STATUS.exit_code(status)
+    SCHEMA.specification_validator(RUNNER_CONTROL_SCHEMA).validate(report)
+    return report
+
+
+@pytest.mark.parametrize(
+    ("arguments", "field", "value", "initial"),
+    (
+        (RENAME_TAG_ARGS, "tag_list", [KEEP_RUNNER_TAG, NEW_RUNNER_TAG], {}),
+        (BIND_PROJECT_ARGS, "locked", True, {}),
+        (
+            ("set-protected", "--protected", "true"),
+            "access_level",
+            PROTECTED_REFS,
+            {},
+        ),
+        (
+            ("set-protected", "--protected", "false"),
+            "access_level",
+            UNPROTECTED_REFS,
+            {"access_level": PROTECTED_REFS},
+        ),
+        (
+            ("set-name", "--description", NEW_RUNNER_NAME),
+            "description",
+            NEW_RUNNER_NAME,
+            {},
+        ),
+    ),
+    ids=("rename-tag", "bind-project", "protect", "unprotect", "set-name"),
+)
+def test_runner_control_applies_only_selected_field_then_repeats_as_no_op(
+    capsys: pytest.CaptureFixture[str],
+    runner_control_api: RunnerControlAPI,
+    arguments: Sequence[str],
+    field: str,
+    value: JSONValue,
+    initial: JSONObject,
+) -> None:
+    """Bind a native change to the live plan and verify an unchanged repeat.
+
+    :param capsys: Capture complete plan and apply reports.
+    :param runner_control_api: Stateful provider fake using the common baseline.
+    :param arguments: Control verb and selected values.
+    :param field: The sole native field eligible for mutation.
+    :param value: Exact desired native value.
+    :param initial: Case-specific initial state, when needed.
+    """
+    api = runner_control_api
+    api.runner.update(deepcopy(initial))
+    offline = _runner_control_report(capsys, arguments, STATUS.DRY_RUN, "--dry-run")
+    assert offline["plan"]["confirmation_ready"] is False
+    assert api.calls == []
+
+    plan = _runner_control_report(capsys, arguments, STATUS.PLANNED, "--live-plan")
+    control = plan["plan"]["runner_control"]
+    assert plan["plan"]["confirmation_ready"] is True
+    assert control["runner_id"] == RUNNER_CONTROL_ID
+    assert control["project_id"] == RUNNER_CONTROL_PROJECT_ID
+    assert control["before"]["project_ids"] == [RUNNER_CONTROL_PROJECT_ID]
+    assert control["desired"] == {**control["before"], field: value}
+    assert plan["readback"]["runner_control"] == control
+    assert api.writes == []
+
+    applied = _runner_control_report(
+        capsys, arguments, STATUS.PASS, "--apply", "--confirm-plan", plan["plan_digest"]
+    )
+    assert applied["mutated"] is True
+    assert applied["result_action"] == STATUS.APPLIED
+    assert applied["readback"]["observed"] == control["desired"]
+    assert api.writes == [(*RUNNER_CONTROL_PUT, {field: value})]
+    write_index = api.calls.index(api.writes[0])
+    post_write_reads = [call[:2] for call in api.calls[write_index + 1 :]]
+    assert RUNNER_CONTROL_GET in post_write_reads
+    assert RUNNER_CONTROL_GRAPHQL in post_write_reads
+
+    api.calls.clear()
+    current = _runner_control_report(capsys, arguments, STATUS.PLANNED, "--live-plan")
+    assert current["plan_digest"] != plan["plan_digest"]
+    api.calls.clear()
+    repeated = _runner_control_report(
+        capsys,
+        arguments,
+        STATUS.PASS,
+        "--apply",
+        "--confirm-plan",
+        current["plan_digest"],
+    )
+    assert repeated["mutated"] is False
+    assert repeated["result_action"] == STATUS.NO_OP
+    assert repeated["readback"]["observed"] == control["desired"]
+    assert RUNNER_CONTROL_GET in [call[:2] for call in api.calls]
+    assert api.writes == []
+
+
+@pytest.mark.parametrize(
+    ("arguments", "field", "changed", "when", "reason"),
+    (
+        (
+            RENAME_TAG_ARGS,
+            "tag_list",
+            [KEEP_RUNNER_TAG, OLD_RUNNER_TAG, "added"],
+            "apply",
+            "confirm_plan_mismatch_rerun_live_plan",
+        ),
+        (
+            RENAME_TAG_ARGS,
+            "tag_list",
+            [KEEP_RUNNER_TAG],
+            "apply",
+            "runner_rename_tag_source_missing",
+        ),
+        (
+            BIND_PROJECT_ARGS,
+            "projects",
+            [{"id": RUNNER_CONTROL_PROJECT_ID}, {"id": OTHER_RUNNER_PROJECT_ID}],
+            "apply",
+            "runner_has_other_project_assignments",
+        ),
+        (
+            BIND_PROJECT_ARGS,
+            "id",
+            RUNNER_CONTROL_ID + 1,
+            "apply",
+            "runner_readback_mismatch",
+        ),
+        (BIND_PROJECT_ARGS, "locked", True, "guard", "runner_changed_rerun_live_plan"),
+        (
+            BIND_PROJECT_ARGS,
+            "hidden_project_count",
+            1,
+            "apply",
+            "runner_project_assignments_unverified",
+        ),
+    ),
+    ids=(
+        "stale-tags",
+        "missing-source",
+        "shared-projects",
+        "wrong-runner",
+        "guarded-drift",
+        "incomplete-projects",
+    ),
+)
+def test_runner_control_rejects_changed_or_unsafe_state_without_mutation(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    runner_control_api: RunnerControlAPI,
+    arguments: Sequence[str],
+    field: str,
+    changed: JSONValue,
+    when: str,
+    reason: str,
+) -> None:
+    """Refuse one changed native invariant per isolated copy of the valid plan.
+
+    :param capsys: Capture structured refusal evidence.
+    :param monkeypatch: Insert the guarded drift at the actual write boundary.
+    :param runner_control_api: Provider fake cloned from the immutable baseline.
+    :param arguments: Control verb and its valid inputs.
+    :param field: Sole invariant that changes after confirmation is issued.
+    :param changed: Value supplied by the provider after the transition.
+    :param when: Phase where the invariant changes.
+    :param reason: Expected refusal diagnostic for this case.
+    """
+    api = runner_control_api
+    plan = _runner_control_report(capsys, arguments, STATUS.PLANNED, "--live-plan")
+    assert api.writes == []
+    guard = API.runner_update_guard
+
+    if when == "guard":
+
+        @contextmanager
+        def drift_under_guard(origin: str, runner_id: int) -> Iterator[None]:
+            """Simulate a provider write after confirmation and before the final GET.
+
+            :param origin: GitLab authority protected by the existing update guard.
+            :param runner_id: Exact runner protected by the guard.
+            """
+            with guard(origin, runner_id):
+                api.runner[field] = deepcopy(changed)
+                yield
+
+        monkeypatch.setattr(RUNNERS, "runner_update_guard", drift_under_guard)
+    elif field == "hidden_project_count":
+        assert isinstance(changed, int)
+        api.hidden_project_count = changed
+    else:
+        api.runner[field] = deepcopy(changed)
+
+    blocked = _runner_control_report(
+        capsys,
+        arguments,
+        STATUS.BLOCKED,
+        "--apply",
+        "--confirm-plan",
+        plan["plan_digest"],
+    )
+    assert blocked["mutated"] is False
+    assert any(reason in error["reason"] for error in blocked["errors"])
+    if field == "projects":
+        live = _runner_control_report(capsys, arguments, STATUS.BLOCKED, "--live-plan")
+        for refusal in (blocked, live):
+            assert refusal["plan"]["project_ids"] == [
+                RUNNER_CONTROL_PROJECT_ID,
+                OTHER_RUNNER_PROJECT_ID,
+            ]
+            assert refusal["plan"]["confirmation_ready"] is False
+            assert any(
+                "separate approval required before detaching" in error["reason"]
+                for error in refusal["errors"]
+            )
+    assert api.writes == []
+
+
+@pytest.mark.parametrize(
+    ("field", "changed", "reason"),
+    (
+        ("value", "f" * 40, "confirm_plan_mismatch_rerun_live_plan"),
+        ("verified", False, "skill_revision_unverified"),
+    ),
+    ids=("different-source-revision", "unverified-source"),
+)
+def test_runner_control_rejects_plan_from_other_or_unverified_skill(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    runner_control_api: RunnerControlAPI,
+    field: str,
+    changed: JSONValue,
+    reason: str,
+) -> None:
+    """Reject a plan when one source invariant changes without a provider change.
+
+    :param capsys: Report capture for the real workflow.
+    :param monkeypatch: Change the authenticated invocation's skill provenance.
+    :param runner_control_api: Provider fake, unchanged between plan and apply.
+    :param field: Sole provenance field to change from the live plan.
+    :param changed: Observed value for the selected field during apply.
+    :param reason: Expected refusal diagnostic.
+    """
+    plan = _runner_control_report(
+        capsys, BIND_PROJECT_ARGS, STATUS.PLANNED, "--live-plan"
+    )
+    bind = GITLAB_ACTION.bind_gitlab_session
+    revision = dict(plan["skill"]["revision"])
+    assert revision[field] != changed
+    revision[field] = changed
+
+    def bind_changed_skill(*args: object, **kwargs: object) -> BoundGitLabSession:
+        """Return the same session identity with the changed skill revision.
+
+        :param *args: Args supplied by the real binding boundary.
+        :param **kwargs: Scope and credential options supplied by that boundary.
+        :returns: Session with changed source provenance and original target.
+        """
+        session = bind(*args, **kwargs)
+        return replace(session, skill={**session.skill, "revision": revision})
+
+    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", bind_changed_skill)
+    blocked = _runner_control_report(
+        capsys,
+        BIND_PROJECT_ARGS,
+        STATUS.BLOCKED,
+        "--apply",
+        "--confirm-plan",
+        plan["plan_digest"],
+    )
+    assert blocked["mutated"] is False
+    assert any(reason in error["reason"] for error in blocked["errors"])
+    assert runner_control_api.writes == []
+
+
+def test_runner_control_uses_native_get_to_verify_the_update(
+    capsys: pytest.CaptureFixture[str], runner_control_api: RunnerControlAPI
+) -> None:
+    """Fail the operation when GitLab echoes the desired PUT but persists the old value.
+
+    :param capsys: Capture the candidate's unverified update report.
+    :param runner_control_api: Provider fake whose PUT and GET can diverge.
+    """
+    api = runner_control_api
+    plan = _runner_control_report(
+        capsys, BIND_PROJECT_ARGS, STATUS.PLANNED, "--live-plan"
+    )
+    api.persist_put = False
+    report = _runner_control_report(
+        capsys,
+        BIND_PROJECT_ARGS,
+        STATUS.PARTIAL,
+        "--apply",
+        "--confirm-plan",
+        plan["plan_digest"],
+    )
+    assert report["mutated"] is True
+    assert report["readback"]["verified"] is False
+    assert api.writes == [(*RUNNER_CONTROL_PUT, {"locked": True})]
+    assert RUNNER_CONTROL_GET in [
+        call[:2] for call in api.calls[api.calls.index(api.writes[0]) + 1 :]
+    ]
 
 
 @pytest.mark.parametrize(
@@ -1150,10 +1629,44 @@ def test_wiki_update_accepts_provider_normalized_title() -> None:
     assert result["action"] == STATUS.APPLIED and result["verified"] is True
 
 
-def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
-    """Rollback a partial group assignment after one project fails read-back.
-    :returns: None; assertions in the body validate the regression.
+def test_runner_group_assign_verifies_each_project_and_marks_partial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Hold the shared runner guard through assignment and rollback.
+
+    :param monkeypatch: Observe the native API and actual per-runner guard boundary.
+    :param tmp_path: Private test lock directory.
     """
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    guard = RUNNERS.runner_update_guard
+    locked = False
+
+    @contextmanager
+    def track_guard(origin: str, runner_id: int) -> Iterator[None]:
+        """Track the shared guard while retaining its actual locking behavior.
+
+        :param origin: Exact origin used for both assignment and binding.
+        :param runner_id: Exact runner whose mutations must be serialized.
+        """
+        nonlocal locked
+        assert origin == plan.origin and runner_id == plan.resource_id
+        with guard(origin, runner_id):
+            locked = True
+            try:
+                yield
+            finally:
+                locked = False
+
+    class GuardedAPI(FakeAPI):
+        """Require the runner guard around every assignment and recovery call."""
+
+        def _next(
+            self, method: str, endpoint: str, body: Optional[JSONValue] = None
+        ) -> JSONValue:
+            assert locked, (method, endpoint)
+            return super()._next(method, endpoint, body)
+
+    monkeypatch.setattr(RUNNERS, "runner_update_guard", track_guard)
     plan = _plan(
         "gitlab_runner",
         "assign",
@@ -1163,7 +1676,7 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
         project_ids=(11, 12),
     )
     projects = _list("groups/42/projects?include_subgroups=true&with_shared=false")
-    api = FakeAPI(
+    api = GuardedAPI(
         {
             ("GET", "runners/7"): [
                 {"id": 7, "runner_type": "project_type", "projects": []},

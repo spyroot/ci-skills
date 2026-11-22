@@ -12,6 +12,8 @@ url = "https://registry.example.com"
 project = "builds"
 username_file = "credentials/harbor.username"
 password_file = "credentials/harbor.password"
+# Optional for the runner chain. Select the artifact published by toolbox.py create.
+# reference_toolbox = "ci-skills-toolbox:stable"
 ```
 
 Use both file fields above, or replace them with `credential_file`; do not mix

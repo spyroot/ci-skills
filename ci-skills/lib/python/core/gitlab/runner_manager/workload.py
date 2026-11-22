@@ -21,7 +21,6 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesError,
     KubernetesService,
 )
-from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.kubernetes.run_scope import (
     OpenRunScope,
     RunScope,
@@ -35,8 +34,13 @@ from lib.python.core.kubernetes.runner import (
     PullImage,
 )
 from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
-from lib.python.core.kubernetes.scc_access import role_binding_document
-from lib.python.core.runner import RunnerAction, runner_runtime_identities
+from lib.python.core.kubernetes.scc_access import role_binding_names
+from lib.python.core.runner import (
+    REGISTRATION_SECRET_SUFFIX,
+    REGISTRY_SECRET_SUFFIX,
+    RunnerAction,
+    runner_runtime_identities,
+)
 from lib.python.core.runner_identity import NameSource, ResolvedName
 from lib.python.core.runner_scope import (
     ScopeObservation,
@@ -60,9 +64,7 @@ _SECRET_COLUMNS: Final = (
 )
 
 
-def _run_secret_remnants(
-    service: KubernetesService, run_id: str, names: set[str]
-) -> bool:
+def _run_secret_remnants(service: KubernetesService, run_id: str) -> bool:
     result = service.command(
         "get",
         "secrets",
@@ -95,7 +97,7 @@ def _run_secret_remnants(
         ):
             raise KubernetesError("runner_manager_secret_metadata_invalid")
         seen.add(key)
-        remnant |= name in names
+        remnant |= name.endswith((REGISTRATION_SECRET_SUFFIX, REGISTRY_SECRET_SUFFIX))
     return remnant
 
 
@@ -107,13 +109,14 @@ def _require_manager_resources_absent(
     resources = {
         identity for name in names for identity in runner_runtime_identities(name)
     }
-    binding = KubernetesObject(role_binding_document(workflow.scc_access(), scope))
-    resources.add(("RoleBinding", binding.name))
+    resources.update(
+        ("RoleBinding", name)
+        for name in role_binding_names(workflow.scc_access(), scope)
+    )
     for kind, name in sorted(resources):
         if service.read(kind, name, scope.namespace) is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
-    secret_names = {name for kind, name in resources if kind == "Secret"}
-    if _run_secret_remnants(service, scope.run_id, secret_names):
+    if _run_secret_remnants(service, scope.run_id):
         raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
 
 
@@ -150,21 +153,12 @@ def resolve_manager_name(
     :param preferred: Planned repository-derived name and source.
     :returns: Unique existing identity, otherwise the uncreated planned name.
     :raises KubernetesError: Both legacy and preferred names identify owned workloads.
-    """
-    candidates = {scope.name(MANAGER_ROLE), preferred.value}
-    observed_names = [
-        name
-        for name in sorted(candidates)
-        if (document := service.read("Deployment", name, scope.namespace)) is not None
-        and scope.resources(service).owns(document)
-    ]
-    if len(observed_names) > 1:
-        raise KubernetesError("runner_manager_workload_ambiguous")
-    return (
-        ResolvedName(observed_names[0], NameSource.PROVIDER)
-        if observed_names
-        else preferred
+    """  # noqa: DOC502 - Shared ownership lookup raises on ambiguity.
+    candidates = (scope.name(MANAGER_ROLE), preferred.value)
+    observed = scope.resources(service).resolve_owned_name(
+        "Deployment", candidates, ambiguous_reason="runner_manager_workload_ambiguous"
     )
+    return ResolvedName(observed, NameSource.PROVIDER) if observed else preferred
 
 
 def preserve_manager_name(
@@ -323,11 +317,18 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
         scope = RunScope.new(
             namespace=getattr(workflow.args, "namespace", None),
             run_id=workflow.scope_id,
-            namespace_prefix=workflow.repository_identity.name,
+            namespace_prefix=workflow.consumer_name.value or None,
         )
         namespace = self.kubernetes.read("Namespace", scope.namespace, "")
         if scope.owns_namespace and namespace is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        if namespace is not None:
+            owned = scope.resources(self.kubernetes)
+            if any(
+                owned.owned_objects(kind)
+                for kind in ("Deployment", "Secret", "RoleBinding")
+            ):
+                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
         _require_manager_resources_absent(self.kubernetes, self.action, scope)
         if namespace is None and scope.owns_namespace:
             state.runner_scopes[scope_key(ScopePurpose.MANAGER, scope.namespace)] = (

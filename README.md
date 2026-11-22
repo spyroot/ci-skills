@@ -185,15 +185,19 @@ before installation; unknown fields and malformed JSON block the plan.
 | `codex-home` | `$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills`; same as no flag |
 | `claude-user` | `~/.claude/skills/ci-skills` |
 | `claude-project` | `<git root>/.claude/skills/ci-skills` of the repository containing the current directory |
+| `antigravity-user` | `~/.gemini/config/skills/ci-skills` |
+| `antigravity-project` | `<git root>/.agents/skills/ci-skills` of the repository containing the current directory |
 
 `--scope`, `--skills-dir` and `--destination` are mutually exclusive. Outside a Git repository,
-`--scope claude-project` returns `BLOCKED` with reason `agent_repository_unavailable`. `--scope` changes only the
-`ci-skills` copy;
-`glab-stack` still goes to `$REPO_ROOT/.agents/skills`. For a Claude user install:
+`--scope claude-project` and `--scope antigravity-project` return `BLOCKED` with reason
+`agent_repository_unavailable`. `--scope` changes only the `ci-skills` copy;
+`glab-stack` still goes to `$REPO_ROOT/.agents/skills`. For a Claude or Antigravity user install:
 
 ```bash
 conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
   --scope claude-user --dry-run --json
+conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
+  --scope antigravity-user --dry-run --json
 ```
 
 For any other skills directory, pass `--skills-dir DIR`.
@@ -214,7 +218,8 @@ conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
   --recover --apply --confirm-recover --timeout 10s --json
 ```
 
-An upgrade preserves the previous copy or link as a hidden sibling and reads back the installed digest. Installation,
+An upgrade preserves the previous copy or link under `.ci-skills.backups/` inside the skills directory (so one-level
+skill scanners discover only the active `ci-skills/SKILL.md`) and reads back the installed digest. Installation,
 upgrade, and recovery default to dry-run. The installer requires a clean committed skill subtree; compare its reported
 digest with `skill.digest` in later reports. It accepts `--json`, `--yaml`, and `--help`.
 
