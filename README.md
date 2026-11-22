@@ -218,7 +218,8 @@ conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
   --recover --apply --confirm-recover --timeout 10s --json
 ```
 
-An upgrade preserves the previous copy or link as a hidden sibling and reads back the installed digest. Installation,
+An upgrade preserves the previous copy or link under `.ci-skills.backups/` inside the skills directory (so one-level
+skill scanners discover only the active `ci-skills/SKILL.md`) and reads back the installed digest. Installation,
 upgrade, and recovery default to dry-run. The installer requires a clean committed skill subtree; compare its reported
 digest with `skill.digest` in later reports. It accepts `--json`, `--yaml`, and `--help`.
 

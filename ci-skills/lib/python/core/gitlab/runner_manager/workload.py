@@ -43,10 +43,7 @@ from lib.python.core.kubernetes.runner import (
     DeployRunner,
     PullImage,
 )
-from lib.python.core.kubernetes.runner_scope import (
-    observe_namespace,
-    scope_key,
-)
+from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
 from lib.python.core.kubernetes.scc_access import role_binding_names
 from lib.python.core.runner import (
     REGISTRATION_SECRET_SUFFIX,
@@ -344,6 +341,13 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
         namespace = self.kubernetes.read("Namespace", scope.namespace, "")
         if scope.owns_namespace and namespace is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        if namespace is not None:
+            owned = scope.resources(self.kubernetes)
+            if any(
+                owned.owned_objects(kind)
+                for kind in ("Deployment", "Secret", "RoleBinding")
+            ):
+                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
         _require_manager_resources_absent(self.kubernetes, self.action, scope)
         if namespace is not None:
             owned = scope.resources(self.kubernetes)

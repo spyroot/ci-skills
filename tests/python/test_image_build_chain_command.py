@@ -35,14 +35,12 @@ from test_image_build_chain import (
     NODE,
     PODMAN,
     READINESS,
-    TOOLBOX_ACTIONS,
     TOOLBOX_IMAGE,
     ChainCluster,
+    ChainHarbor,
     JournalCallback,
     _args,
-    _harbor,
     _lifecycle_executor,
-    _prepared_action,
     _target,
 )
 
@@ -52,12 +50,9 @@ MODEL = import_script_module("lib.python.core.kubernetes.image_build_chain.model
 STATUS = import_script_module("lib.python.sys.status")
 
 if TYPE_CHECKING:
-    from argparse import Namespace
-
     from lib.python.core.json_types import JSONObject
     from lib.python.core.kubernetes.image_build_chain import ImageBuildChainState
     from lib.python.core.target import Target
-    from lib.python.core.toolbox_actions import WorkflowAction
 
 
 def _validator() -> Draft202012Validator:
@@ -249,6 +244,7 @@ def test_chain_schema_rejects_pass_without_complete_runner_delivery(
 def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
     explicit: bool,
     gitlab_selector: Optional[str],
     gitlab_profile: Optional[str],
@@ -257,6 +253,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
 
     :param monkeypatch: Fixture replacing configuration and forbidden live boundaries.
     :param capsys: Actual JSON emitter capture.
+    :param tmp_path: Fixture location for the inactive registry authfile.
     :param explicit: Whether the caller supplies the explicit dry-run flag.
     :param gitlab_selector: Default or ``--gitlab`` instance used in either planning mode.
     :param gitlab_profile: Deprecated profile name used in either planning mode.
@@ -267,7 +264,6 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     args.dry_run = explicit
     args.gitlab = gitlab_selector
     args.gitlab_profile = gitlab_profile
-    template = _prepared_action()
     resolutions = []
     bindings = []
     reads = []
@@ -301,25 +297,6 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         return target
 
     monkeypatch.setattr(MODEL, "bind_sources", bind)
-
-    def toolbox(args: Namespace, **kwargs: object) -> WorkflowAction:
-        """Construct the real toolbox action from the chain's toolbox inputs.
-
-        :param args: Toolbox namespace built by the chain model.
-        :param **kwargs: Shared chain state and naming base passed by the chain model.
-        :returns: Toolbox action holding the fixture specification without file reads.
-        """
-        selected = TOOLBOX_ACTIONS.WorkflowAction(
-            args,
-            spec=template.toolbox.spec,
-            resolved_base=template.toolbox.resolved_base,
-            **kwargs,
-        )
-        selected.runner = template.toolbox.runner
-        monkeypatch.setattr(selected, "prepare", lambda: None)
-        return selected
-
-    monkeypatch.setattr(MODEL, "WorkflowAction", toolbox)
     monkeypatch.setattr(
         MODEL,
         "prepare_start_plan",
@@ -334,7 +311,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         """
         state.selected_node = NODE
         state.kubernetes = ChainCluster()
-        state.harbor = _harbor()
+        state.harbor = ChainHarbor(tmp_path, [])
 
     def workflow(action):
         assert not explicit, "dry-run entered provider callbacks"
@@ -392,14 +369,13 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
             for scope in scope_record["scopes"]
         ] == [
             (
-                purpose,
+                "manager",
                 CALLER_NAMESPACE,
                 CALLER_NAMESPACE_UID,
                 "borrowed",
                 "present",
                 "preserved",
             )
-            for purpose in ("manager", "build")
         ]
     assert "run_id" not in output
     assert not hasattr(command.action.state, "run_scope")

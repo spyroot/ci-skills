@@ -21,11 +21,12 @@ from collections.abc import (
 )
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Final, Optional, TypeGuard
+from typing import Final, Optional
 
 from lib.python.core import tooling
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.harbor.registry_mirror import is_registry_digest
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -74,7 +75,6 @@ BUILD_HISTORY_LIMIT: Final = 2
 HASH_SEPARATOR: Final = b"\0"
 BUILD_TAG_PREFIX: Final = "ci-skills-build-"
 FINGERPRINT_TAG_LENGTH: Final = 24
-BUILD_TAG_SEPARATOR: Final = "-build-"
 
 DigestLookup = Callable[[str], Optional[str]]
 
@@ -568,12 +568,11 @@ def build_candidate_reference(
 
     :param fingerprint: Existing specification fingerprint identifying build inputs.
     :param name_prefix: Optional consumer base; omission preserves legacy naming.
-    :returns: Registry tag whose consumer part is one DNS label token; explicit
-        published image fields are unchanged.
+    :returns: Bounded registry tag without changing explicit published image fields.
     :raises ValueError: A present prefix has no valid DNS token.
     """  # noqa: DOC502 - Shared DNS normalization validates the consumer base.
     prefix = (
-        dns_token(name_prefix, limit=DNS_LABEL_LIMIT) + BUILD_TAG_SEPARATOR
+        f"{dns_token(name_prefix, limit=DNS_LABEL_LIMIT)}-build-"
         if name_prefix is not None
         else BUILD_TAG_PREFIX
     )
@@ -630,7 +629,7 @@ def resolve_build_candidate(
     if (
         annotations.get(FINGERPRINT_ANNOTATION) == selected.fingerprint
         and image == selected.image
-        and _valid_digest(digest)
+        and is_registry_digest(digest)
         and selected.digest_lookup(selected.candidate_reference) == digest
     ):
         return selected, digest
@@ -768,7 +767,7 @@ class BuildToolbox(K8SCallback[BuildAction]):
         if (
             len(base_parts) != 2
             or not base_parts[0]
-            or not _valid_digest(base_parts[1])
+            or not is_registry_digest(base_parts[1])
             or any(character.isspace() for character in action.resolved_base_image)
         ):
             raise ToolboxError("resolved_base_image_not_immutable")
@@ -1010,7 +1009,7 @@ class BuildToolbox(K8SCallback[BuildAction]):
         output = status.get("output") if isinstance(status, Mapping) else None
         target = output.get("to") if isinstance(output, Mapping) else None
         digest = target.get("imageDigest") if isinstance(target, Mapping) else None
-        if not _valid_digest(digest):
+        if not is_registry_digest(digest):
             raise ToolboxError("build_output_digest_missing")
         return digest
 
@@ -1080,17 +1079,3 @@ def _unique(values: Iterable[str]) -> tuple[str, ...]:
     :returns: Tuple of unique values in first-seen order.
     """
     return tuple(dict.fromkeys(values))
-
-
-def _valid_digest(value: object) -> TypeGuard[str]:
-    """Check an immutable image digest's exact lowercase SHA-256 shape.
-
-    :param value: Candidate provider digest.
-    :returns: Whether it is ``sha256:`` plus 64 lowercase hexadecimal digits.
-    """
-    if not isinstance(value, str) or not value.startswith("sha256:"):
-        return False
-    hexadecimal = value.removeprefix("sha256:")
-    return len(hexadecimal) == 64 and all(
-        ch in "0123456789abcdef" for ch in hexadecimal
-    )

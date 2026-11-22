@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
 import signal
 from copy import deepcopy
 from dataclasses import replace
@@ -27,20 +28,19 @@ CALLBACKS = import_script_module(
     "lib.python.core.kubernetes.image_build_chain.callbacks"
 )
 CHAIN = import_script_module("lib.python.core.kubernetes.image_build_chain")
+CHAIN_MODEL = import_script_module("lib.python.core.kubernetes.image_build_chain.model")
 EXECUTOR = import_script_module("lib.python.core.executor")
 GITLAB_ACTIONS = import_script_module("lib.python.core.gitlab.gitlab_actions")
-KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 MANAGER_ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
 PODMAN = import_script_module("lib.python.core.kubernetes.podman_probe")
 READINESS = import_script_module("lib.python.core.kubernetes.image_build_readiness")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
-RUNNER = import_script_module("lib.python.core.runner")
 SCOPES = import_script_module("lib.python.core.runner_scope")
 IDENTITY = import_script_module("lib.python.core.runner_identity")
 TARGET = import_script_module("lib.python.core.target")
 STATUS = import_script_module("lib.python.sys.status")
-TOOLBOX = import_script_module("lib.python.core.toolbox")
-TOOLBOX_ACTIONS = import_script_module("lib.python.core.toolbox_actions")
+REGISTRY = import_script_module("lib.python.core.harbor.registry_mirror")
+SCHEMA = import_script_module("lib.python.core.schema")
 VERIFICATION = import_script_module(
     "lib.python.core.kubernetes.image_build_chain.verification"
 )
@@ -87,8 +87,22 @@ PROJECT_PATH: Final = "team/build"
 NAMESPACE_KIND: Final = "Namespace"
 CLUSTER_NAMESPACE: Final = ""
 RUNNER_ID = 73
-TOOLBOX_IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
-EMPTY_DOCKER_CONFIG: Final = b'{"auths":{}}'
+DEFAULT_CONSUMER: Final = "ci"
+SAMPLE_NAME: Final = "sample_project"
+SAMPLE_PROJECT: Final = f"team/{SAMPLE_NAME}"
+OVERRIDE_NAME: Final = "selected_project"
+LEGACY_BUILD_NAMESPACE: Final = "toolbox-builds"
+LEGACY_BUILD_APP: Final = "toolbox-build"
+LEGACY_TOOLBOX_TAG: Final = "curated"
+REFERENCE_REPOSITORY: Final = "reference-toolbox"
+REFERENCE_TAG: Final = "stable"
+REFERENCE_TOOLBOX: Final = f"{REFERENCE_REPOSITORY}:{REFERENCE_TAG}"
+HARBOR_HOST: Final = "harbor.example.test"
+HARBOR_PROJECT: Final = "toolbox"
+HARBOR_ORIGIN: Final = f"https://{HARBOR_HOST}"
+TOOLBOX_DIGEST: Final = runner_manager.IMAGE.rsplit("@", 1)[-1]
+TOOLBOX_IMAGE: Final = runner_manager.IMAGE
+CHAIN_REPORT_SCHEMA: Final = "results/image-build-readiness.schema.json"
 
 
 def _read_nodes(*args: str) -> JSONObject:
@@ -119,7 +133,7 @@ class ChainCluster(runner_manager.ManagerCluster):
     def json(self, *args: str) -> JSONObject:
         """Read nodes or delegate exact ownership lookups to the shared transport.
 
-        :param args: Native Kubernetes observation requested by a real callback.
+        :param *args: Native Kubernetes observation requested by a real callback.
         :returns: Ready NodeList or the shared manager's stored resource list.
         """
         if args == ("get", "nodes", "-o", "json"):
@@ -172,6 +186,7 @@ def _args(
     apply: bool = False,
     confirmation: Optional[str] = None,
     timeout: Optional[int] = None,
+    project_name: str | None = DEFAULT_CONSUMER,
 ) -> Namespace:
     """Parse a runner-delivery request without consumer job inputs.
 
@@ -179,6 +194,7 @@ def _args(
     :param apply: Select confirmed mutation mode.
     :param confirmation: Digest supplied to confirmed apply.
     :param timeout: Optional caller-selected operation bound in seconds.
+    :param project_name: Consumer naming override to pass to the parser when set.
     :returns: Public parser namespace with explicit chain inputs.
     """
     scope = ["--group", "team"] if group else ["--project", "team/build"]
@@ -192,15 +208,8 @@ def _args(
             "chain",
             "--binding",
             "/unit/target.toml",
-            "--toolbox-spec",
-            "/unit/toolbox.toml",
             *scope,
-            "--runner-description",
-            "ci13-unit-runner",
-            "--runner-label",
-            "ci13",
-            "--runner-label",
-            "podman",
+            *(["--project-name", project_name] if project_name is not None else []),
             "--namespace",
             CALLER_NAMESPACE,
             "--node",
@@ -255,22 +264,11 @@ def _target() -> TARGET.Target:
             "consuming_project": {"commit": "c" * 40, "source": "fixture"},
         },
         harbor=TARGET.HarborTarget(
-            url="https://harbor.example.test",
-            host="harbor.example.test",
-            project="toolbox",
+            url=HARBOR_ORIGIN,
+            host=HARBOR_HOST,
+            project=HARBOR_PROJECT,
+            reference_toolbox=REFERENCE_TOOLBOX,
         ),
-    )
-
-
-def _harbor() -> SimpleNamespace:
-    """Build the authenticated Harbor boundary read by toolbox candidate selection.
-
-    :returns: Target registry, private config, and a candidate tag with no digest.
-    """
-    return SimpleNamespace(
-        target=_target().harbor,
-        dockerconfig=EMPTY_DOCKER_CONFIG,
-        digest=lambda _repository, _reference: None,
     )
 
 
@@ -292,129 +290,382 @@ def _runner_plan() -> ActionPlan:
     )
 
 
+def _mock_chain_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return the same credential-free configured target for both chain actions.
+
+    :param monkeypatch: Redirect only target and credential resolution.
+    """
+    for module in (CHAIN_MODEL, MANAGER_ACTION):
+        monkeypatch.setattr(module, "resolve_target", lambda *_a, **_k: _target())
+        monkeypatch.setattr(module, "bind_sources", lambda target, **_k: target)
+
+
 def _prepared_action(
     *,
     group: bool = False,
     apply: bool = False,
     confirmation: Optional[str] = None,
 ) -> ImageBuildChainAction:
-    """Construct a chain action with component plans but no provider access.
+    """Prepare exact runner and reference-toolbox defaults without provider access.
 
     :param group: Select the group-runner case.
     :param apply: Select apply mode for confirmation tests.
     :param confirmation: Apply confirmation supplied by the caller.
-    :returns: Chain action ready for pure planning and callback tests.
+    :returns: Chain action ready for planning and callback tests.
     """
     action = CHAIN.ImageBuildChainAction(
         _args(group=group, apply=apply, confirmation=confirmation)
     )
-    action.target = _target()
-    action.target_source = "fixture"
-    action.gitlab_target = TARGET.GitLabOperationTarget(
-        action.target.gitlab, action.target.source_file
-    )
-    action.gitlab_selection = TARGET.select_gitlab_reference(
-        action.gitlab_target, project=action.args.project, group=action.args.group
-    )
-    action.repository_identity = (
-        IDENTITY.RepositoryIdentity(None, IDENTITY.RepositorySource.UNKNOWN)
-        if group
-        else IDENTITY.resolve_repository(action.args.project)
-    )
-    action.resolved_description = IDENTITY.ResolvedName(
-        action.args.runner_description, IDENTITY.NameSource.EXPLICIT
-    )
-    action.manager_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, False)
-    action.mode = PODMAN.ProbeMode.APPLY if apply else PODMAN.ProbeMode.LIVE_PLAN
-    action.explicit_description = action.args.runner_description
-    action.explicit_tags = tuple(action.args.runner_label)
-    specification = SimpleNamespace(
-        fingerprint="sha256:toolbox-spec",
-        base_image="registry.example.test/base@sha256:" + "e" * 64,
-        image_repository="toolbox/ci",
-        image_tag="unit",
-        namespace=CALLER_NAMESPACE,
-        app="ci13-toolbox",
-    )
-    action.toolbox = TOOLBOX_ACTIONS.WorkflowAction(
-        action._toolbox_args(),
-        spec=specification,
-        resolved_base=specification.base_image,
-        context=action.state,
-        naming_base=action.naming_base,
-    )
-    action.toolbox.repository_identity = action.repository_identity
-    action.toolbox.runner = RUNNER.RunnerAction(
-        namespace=CALLER_NAMESPACE,
-        name="ci13-toolbox",
-        source_root="",
-        labels=(),
-        timeout=action.args.timeout,
-    )
-    action.state.args = action.args
+    mode = PODMAN.ProbeMode.APPLY if apply else PODMAN.ProbeMode.LIVE_PLAN
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _mock_chain_targets(monkeypatch)
+        action.prepare(mode)
     return action
 
 
-def test_chain_toolbox_build_can_complete_after_command_default_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Honor the chain timeout when a toolbox Build outlasts the command default.
+class ChainHarbor(REGISTRY.HarborService):
+    """Record native service calls below the real digest and publication callbacks."""
 
-    :param monkeypatch: Fixture isolating configuration, provider reads, and time.
-    :returns: None; the real shared service observes a complete Build at 35 seconds.
+    def __init__(self, staging: Path, journal: list[str]) -> None:
+        """Bind the configured fixture registry and start with no destination tags.
+
+        :param staging: Test directory for the non-live registry credential path.
+        :param journal: Ordered executor stage observations.
+        """
+        super().__init__(
+            _target().harbor,
+            REGISTRY.RegistryCredential("unit", "fixture", "fixture"),
+            staging / "auth.json",
+            30,
+        )
+        self.journal = journal
+        self.tags: dict[str, str] = {}
+        self.copies: list[tuple[str, str]] = []
+        self.reads: list[tuple[str, str | None]] = []
+
+    def inspect(self, image: str) -> str:
+        """Observe the curated source tag or its immutable digest.
+
+        :param image: Registry reference submitted by the chain.
+        :returns: Configured test artifact digest.
+        """
+        assert image in {
+            self.image(REFERENCE_REPOSITORY, REFERENCE_TAG),
+            self.image(REFERENCE_REPOSITORY, TOOLBOX_DIGEST),
+        }
+        return TOOLBOX_DIGEST
+
+    def digest(self, repository: str, reference: str) -> str | None:
+        """Independently read the currently published tag.
+
+        :param repository: Destination repository selected by the callback.
+        :param reference: Destination tag selected by the callback.
+        :returns: Published digest or absence.
+        """
+        destination = self.image(repository, reference)
+        observed = self.tags.get(destination)
+        self.reads.append((destination, observed))
+        return observed
+
+    def copy(
+        self,
+        source: str,
+        destination: str,
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> str:
+        """Publish the observed source artifact under a distinct destination.
+
+        :param source: Digest-pinned source selected by live confirmation.
+        :param destination: Fully qualified mutable destination tag.
+        :param before_write: Optional destination guard before publication.
+        :returns: Digest copied by the registry transport.
+        """
+        digest = self.inspect(source)
+        if before_write is not None:
+            before_write()
+        self.journal.append("harbor-push")
+        self.copies.append((source, destination))
+        self.tags[destination] = digest
+        return digest
+
+    def delete_tag(self, repository: str, tag: str) -> bool:
+        """Remove the tag created by a failed fixture execution.
+
+        :param repository: Destination repository selected by recovery.
+        :param tag: Tag selected for rollback.
+        :returns: Whether the tag was present before removal.
+        """
+        return self.tags.pop(self.image(repository, tag), None) is not None
+
+
+@pytest.mark.parametrize("drift_at", ("collect", "before-native-copy"))
+def test_chain_publication_preserves_a_changed_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_at: str,
+) -> None:
+    """Reject one changed destination without publishing or rolling it back.
+
+    :param tmp_path: Fake registry credentials path supplied to the transport.
+    :param monkeypatch: Inject a change only during the copy source read.
+    :param drift_at: Observation point where an external writer changes the tag.
     """
     action = _prepared_action()
-    action.args = _args(timeout=300)
-    action.state.args = action.args
-    action.state.runner_auth_plan = action._runner_auth_plan()
-    action.toolbox = TOOLBOX_ACTIONS.WorkflowAction(
-        action.args, spec=action.toolbox.spec, context=action.state
+    state = action.state
+    registry = ChainHarbor(tmp_path, [])
+    state.harbor = registry
+    state.source_image = registry.image(REFERENCE_REPOSITORY, TOOLBOX_DIGEST)
+    repository = action.naming_base.value
+    tag = repository
+    destination = registry.image(repository, tag)
+    external_digest = "sha256:" + "e" * 64
+    confirmed = REGISTRY.TagSnapshot(registry, repository, tag, None)
+    publisher = REGISTRY.HarborPush(REGISTRY.PushAction(repository, tag, confirmed))
+    publisher.bind(state)
+    if drift_at == "collect":
+        registry.tags[destination] = external_digest
+        with pytest.raises(REGISTRY.APIError, match="toolbox_destination_changed"):
+            publisher.collect()
+    else:
+        publisher.collect()
+        inspect = registry.inspect
+        reads = []
+
+        def changed_after_source_read(image: str) -> str:
+            """Change the tag while the transport resolves the same source again.
+
+            :param image: Immutable reference to pass to the normal fake source read.
+            :returns: Unchanged source digest.
+            """
+            digest = inspect(image)
+            reads.append(image)
+            if len(reads) == 2:
+                registry.tags[destination] = external_digest
+            return digest
+
+        monkeypatch.setattr(registry, "inspect", changed_after_source_read)
+        with pytest.raises(REGISTRY.APIError, match="toolbox_destination_changed"):
+            publisher.run()
+
+    state.failed = True
+    assert publisher.cleanup() == {}
+    assert registry.copies == []
+    assert registry.tags[destination] == external_digest
+    assert confirmed.prior_digest is None
+
+
+def _mock_chain_auth(
+    action: ImageBuildChainAction, monkeypatch: pytest.MonkeyPatch, journal: list[str]
+) -> None:
+    """Provide auth callbacks for already bound in-memory provider services.
+
+    :param action: Chain carrying the seeded Kubernetes, GitLab, and Harbor providers.
+    :param monkeypatch: Replace only auth callbacks at their workflow entry points.
+    :param journal: Ordered observations for later mutation assertions.
+    """
+    for component, stage in (
+        ("K8SAuth", "kubernetes-auth"),
+        ("ScopedGitLabAuth", "runner-auth"),
+        ("HarborAuth", "harbor-auth"),
+    ):
+        monkeypatch.setattr(
+            WORKFLOW,
+            component,
+            lambda *_a, stage=stage, **_k: JournalCallback(action, journal, stage),
+        )
+
+
+LEGACY_SPEC_BASELINE: Final = json.dumps(
+    {
+        "apiVersion": "ci-skills/v1",
+        "kind": "ToolboxSpec",
+        "metadata": {"name": SAMPLE_NAME},
+        "spec": {
+            "baseImage": "reference.example.test/unused:base",
+            "image": {"repository": SAMPLE_NAME, "tag": LEGACY_TOOLBOX_TAG},
+            "build": {"namespace": LEGACY_BUILD_NAMESPACE, "app": LEGACY_BUILD_APP},
+            "dependencies": [],
+            "requiredCommands": ["gitlab-runner", "podman", "git"],
+        },
+    }
+)
+
+
+def _sample_chain_plan(
+    args: Namespace,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+) -> tuple[JSONObject, ChainCluster, ChainHarbor]:
+    """Capture a schema-checked offline or live plan using real chain callbacks.
+
+    :param args: Parsed planner inputs.
+    :param monkeypatch: Replace only external access boundaries.
+    :param tmp_path: Test directory holding the dummy registry authfile path.
+    :param capsys: Capture report emitted by the chain command.
+    :param status: Expected planner status.
+    :returns: Report with the in-memory Kubernetes and Harbor transports.
+    """
+    chain = CHAIN.ImageBuildChain(args)
+    _mock_chain_targets(monkeypatch)
+    stages: list[str] = []
+    _mock_chain_auth(chain.action, monkeypatch, stages)
+    state = chain.action.state
+    cluster = ChainCluster()
+    harbor = ChainHarbor(tmp_path, stages)
+    state.kubernetes = cluster
+    state.harbor = harbor
+    state.access = _verified_project_access(SAMPLE_PROJECT)
+    state.gitlab = SimpleNamespace(session=object(), access=state.access)
+    code = chain.execute()
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == status
+    assert code == STATUS.exit_code(status)
+    SCHEMA.specification_validator(CHAIN_REPORT_SCHEMA).validate(report)
+    assert harbor.copies == []
+    assert cluster.applied == cluster.deleted == []
+    if status == STATUS.DRY_RUN:
+        assert stages == []
+        assert harbor.reads == []
+    return report, cluster, harbor
+
+
+@pytest.mark.parametrize(
+    ("project", "override", "legacy_spec"),
+    (
+        (SAMPLE_PROJECT, None, False),
+        (SAMPLE_PROJECT, OVERRIDE_NAME, False),
+        (str(PROJECT_ID), None, False),
+        (SAMPLE_PROJECT, None, True),
+    ),
+    ids=(
+        "repository-fallback",
+        "explicit-project-name",
+        "numeric-readback",
+        "legacy-spec",
+    ),
+)
+def test_chain_plans_one_consumer_name_without_rebuilding_the_reference(
+    project: str,
+    override: str | None,
+    legacy_spec: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Use one resolved name for GitLab and Harbor with DNS-safe Kubernetes defaults.
+
+    :param project: Provider project path or numeric selector.
+    :param override: Explicit consumer name when supplied.
+    :param legacy_spec: Supply fixed destination tag and legacy build metadata.
+    :param monkeypatch: Isolate all provider configuration.
+    :param tmp_path: Temporary location of the explicit ToolboxSpec.
+    :param capsys: Capture the command's structured reports.
+    """
+    args = _args(project_name=override)
+    args.project = project
+    args.namespace = CALLER_NAMESPACE if legacy_spec else None
+    spec_path = tmp_path / "toolbox.json"
+    if legacy_spec:
+        spec_path.write_text(LEGACY_SPEC_BASELINE, encoding="utf-8")
+        args.toolbox_spec = str(spec_path)
+        args.runner_label = [SAMPLE_NAME, "podman"]
+
+    if project.isdecimal():
+        offline_args = deepcopy(args)
+        offline_args.live_plan = False
+        offline_args.dry_run = True
+        pending, _, _ = _sample_chain_plan(
+            offline_args, monkeypatch, tmp_path, capsys, STATUS.DRY_RUN
+        )
+        assert pending["confirmable"] is False
+        assert pending["plan"]["consumer_name"] is None
+        assert pending["plan"]["toolbox"]["repository"] is None
+        assert pending["plan"]["runner"]["run_scope"] is None
+
+    result, _, harbor = _sample_chain_plan(
+        args, monkeypatch, tmp_path, capsys, STATUS.PLANNED
     )
-    monkeypatch.setattr(
-        WORKFLOW, "WorkflowExecutor", lambda **kwargs: SimpleNamespace(**kwargs)
+    assert result["confirmable"] is True
+    plan = result["plan"]
+    expected = override or SAMPLE_NAME
+    toolbox, runner = plan["toolbox"], plan["runner"]
+    assert plan["consumer_name"] == expected
+    assert plan["naming_conflicts"] == []
+    assert runner["reference"] == project
+    assert runner["repository"] == SAMPLE_PROJECT
+    assert runner["description"] == toolbox["repository"] == expected
+    assert toolbox["mode"] == "copy"
+    assert toolbox["origin"] == HARBOR_ORIGIN
+    assert toolbox["project"] == HARBOR_PROJECT
+    assert toolbox["source_image"] == harbor.image(REFERENCE_REPOSITORY, TOOLBOX_DIGEST)
+    assert runner["name"].startswith(expected.replace("_", "-") + "-")
+    if legacy_spec:
+        assert toolbox["tag"] == LEGACY_TOOLBOX_TAG
+        assert toolbox["namespace"] == LEGACY_BUILD_NAMESPACE
+        assert toolbox["app"] == LEGACY_BUILD_APP
+        assert runner["labels"] == [expected, "podman"]
+        assert runner["run_scope"]["namespace"] == CALLER_NAMESPACE
+        assert runner["scope_observations"][0]["uid"] == CALLER_NAMESPACE_UID
+        assert spec_path.read_text(encoding="utf-8") == LEGACY_SPEC_BASELINE
+    else:
+        assert toolbox["tag"] == expected
+        assert runner["labels"] == [expected]
+        assert runner["run_scope"]["namespace"].startswith(
+            expected.replace("_", "-") + "-"
+        )
+
+
+@pytest.mark.parametrize(
+    "field", ("runner.description", "runner.labels", "toolbox.repository")
+)
+def test_chain_live_plan_reports_explicit_naming_conflict_without_mutation(
+    field: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vary one explicit name from the immutable valid planning baseline.
+
+    :param field: Sole naming field changed in this case.
+    :param monkeypatch: Isolate registry and cluster provider access.
+    :param tmp_path: Directory holding the isolated ToolboxSpec copy.
+    :param capsys: Capture complete blocked plan evidence.
+    """
+    args = _args(project_name=None)
+    args.project = SAMPLE_PROJECT
+    args.runner_description = SAMPLE_NAME
+    args.runner_label = [SAMPLE_NAME]
+    spec = json.loads(LEGACY_SPEC_BASELINE)
+    conflicting = "other-name"
+    explicit: str | list[str] = conflicting
+    if field == "runner.description":
+        args.runner_description = conflicting
+    elif field == "runner.labels":
+        explicit = [conflicting]
+        args.runner_label = explicit
+    else:
+        spec["spec"]["image"]["repository"] = conflicting
+    spec_path = tmp_path / "toolbox.json"
+    spec_before = json.dumps(spec)
+    spec_path.write_text(spec_before, encoding="utf-8")
+    args.toolbox_spec = str(spec_path)
+
+    result, _, harbor = _sample_chain_plan(
+        args, monkeypatch, tmp_path, capsys, STATUS.BLOCKED
     )
-    callbacks = CHAIN.workflow(action).callbacks
-    authentication = next(
-        callback for callback in callbacks if isinstance(callback, KUBERNETES.K8SAuth)
+
+    assert result["confirmable"] is False
+    assert result["plan"]["naming_conflicts"] == [
+        {"field": field, "explicit": explicit, "expected": SAMPLE_NAME}
+    ]
+    assert any(
+        "consumer_naming_conflict" in error["reason"] for error in result["errors"]
     )
-    authentication.bind(action.state)
-    action.state.kubernetes_target = action.target
-    monkeypatch.setattr(
-        KUBERNETES.KubernetesService, "verify", lambda _service: "unit-builder"
-    )
-    authentication.run()
-    service = action.state.kubernetes
-    elapsed = [0.0]
-    completed = {"status": {"phase": "Complete"}}
-
-    def advance(seconds: float) -> None:
-        """Advance the fake clock without waiting.
-
-        :param seconds: Poll interval selected by the real Build waiter.
-        :returns: None after advancing simulated elapsed time.
-        """
-        elapsed[0] += seconds
-
-    def read_build(kind: str, name: str, namespace: str) -> JSONObject:
-        """Keep the selected Build running until its 35-second completion.
-
-        :param kind: Native resource kind requested by the waiter.
-        :param name: Exact toolbox Build selected by the caller.
-        :param namespace: Caller-owned Build namespace.
-        :returns: Running or complete provider read-back at the fake clock time.
-        """
-        assert (kind, name, namespace) == ("build", "toolbox-1", CALLER_NAMESPACE)
-        return completed if elapsed[0] >= 35 else {"status": {"phase": "Running"}}
-
-    monkeypatch.setattr(
-        KUBERNETES,
-        "time",
-        SimpleNamespace(monotonic=lambda: elapsed[0], sleep=advance),
-    )
-    monkeypatch.setattr(service, "read", read_build)
-
-    assert service.wait_build("toolbox-1", CALLER_NAMESPACE) is completed
-    assert elapsed[0] == 35
+    assert harbor.reads == []
+    assert spec_path.read_text(encoding="utf-8") == spec_before
 
 
 @pytest.mark.parametrize(
@@ -453,19 +704,20 @@ def test_chain_plan_requires_only_runner_delivery_inputs(
     "confirmation", ("", "sha256:stale"), ids=("absent", "mismatched")
 )
 def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
-    confirmation: str,
+    confirmation: str, tmp_path: Path
 ) -> None:
-    """Stop the shared executor before build, publication, or manager writes.
+    """Stop the shared executor before publication or manager writes.
 
     :param confirmation: Missing or stale confirmation supplied by the caller.
+    :param tmp_path: Test directory for the registry authfile stub.
     :returns: None; the mutation callback remains unentered after confirmation fails.
     """
     action = _prepared_action(apply=True)
     action.args.confirm_plan = confirmation
     action.state.selected_node = NODE
     action.state.kubernetes = ChainCluster()
-    action.state.harbor = _harbor()
     mutations: list[str] = []
+    action.state.harbor = ChainHarbor(tmp_path, mutations)
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
         [
             CALLBACKS.ResolveChainPlan(action),
@@ -480,11 +732,6 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     assert mutations == []
     assert not hasattr(action.state, "run_scope")
     assert not hasattr(action.state, "created_runner_id")
-    candidate = action.toolbox.build_candidate
-    assert candidate is not None
-    assert candidate.candidate_reference.startswith(
-        action.repository_identity.name + TOOLBOX.BUILD_TAG_SEPARATOR
-    )
 
 
 @pytest.mark.parametrize("outer_run_id", (None, "caller-chain-run"))
@@ -593,15 +840,6 @@ def _lifecycle_executor(
     selected_namespace_uid = uuid4().hex
     selected_run_id = uuid4().hex
     action.args.namespace = selected_namespace
-    action.args.runner_description = uuid4().hex
-    action.args.runner_label = [uuid4().hex, uuid4().hex]
-    action.resolved_description = IDENTITY.ResolvedName(
-        action.args.runner_description, IDENTITY.NameSource.EXPLICIT
-    )
-    action.toolbox.spec.namespace = selected_namespace
-    action.toolbox.runner = replace(
-        action.toolbox.runner, namespace=selected_namespace, name=uuid4().hex
-    )
     state = action.state
     kubernetes = ChainCluster()
     state.kubernetes = kubernetes
@@ -635,7 +873,11 @@ def _lifecycle_executor(
     monkeypatch.setattr(
         runner_manager.GITLAB_API, "_lock_root", lambda: tmp_path / "locks"
     )
-    state.harbor = _harbor()
+    stages: list[str] = []
+    cleanup: list[str] = []
+    state.harbor = ChainHarbor(tmp_path, stages)
+    _mock_chain_auth(action, monkeypatch, stages)
+    _mock_chain_targets(monkeypatch)
     state.runner_runtime = runner_manager.CALLBACKS.RunnerRuntime(
         init_command=("/bin/true",),
         command=("gitlab-runner",),
@@ -646,35 +888,21 @@ def _lifecycle_executor(
     state.runner_auth_plan = action._runner_auth_plan()
     action.manager_scope = state.run_scope
     action.mode = PODMAN.ProbeMode.LIVE_PLAN
+    # The read-only plan pins the source before the apply workflow can publish.
+    source = WORKFLOW.ConfirmWorkflow(action.toolbox)
+    source.bind(state)
+    source.run()
     planner = CALLBACKS.ResolveChainPlan(action)
     planner.bind(state)
     planner.run()
     action.mode = PODMAN.ProbeMode.APPLY
     action.args.confirm_plan = state.chain_plan_digest
-    stages: list[str] = []
-    cleanup: list[str] = []
-
-    def toolbox(current: ImageBuildChainState) -> None:
-        """Check selected inputs at the toolbox provider boundary.
-
-        :param current: Shared state retaining selected placement and scope.
-        """
-        assert current.selected_node == NODE
-        assert current.run_scope.namespace == selected_namespace
-
-    def publish(current: ImageBuildChainState) -> None:
-        """Retain the immutable image from the Harbor provider boundary.
-
-        :param current: Shared state receiving the publication output.
-        """
-        current.published_image = TOOLBOX_IMAGE
 
     def manager(current: ImageBuildChainState) -> None:
-        """Retain manager inputs and the provider-created runner identity.
+        """Stand in for a verified native GitLab runner creation.
 
-        :param current: Shared state receiving runner and manager inputs.
+        :param current: Shared state receiving runner identity and one-time token.
         """
-        assert current.published_image == TOOLBOX_IMAGE
         current.created_runner_id = RUNNER_ID
         current.runner_create_plan = replace(
             _runner_plan(), body={FIELD_DESCRIPTION: action.args.runner_description}
@@ -682,21 +910,16 @@ def _lifecycle_executor(
         current.token_directory = tmp_path / uuid4().hex
         current.token_directory.mkdir()
         current.token_path = current.token_directory / uuid4().hex
-        current.token_path.write_text("private-unit-value\n", encoding="utf-8")
-        selected = runner_manager._action(apply=True)
-        selected.context = current
-        selected.candidate_scope = current.run_scope
-        selected.repository_identity = action.repository_identity
-        selected.resolved_runner_name = action.resolved_runner_name
-        selected.args.description = action.args.runner_description
-        selected.args.tag = list(action.args.runner_label)
-        selected.explicit_tags = tuple(selected.args.tag)
-        selected.args.image = TOOLBOX_IMAGE
-        selected.args.run_id = current.run_scope.run_id
-        selected.args.namespace = current.run_scope.namespace
-        current.manager_action = selected
+        current.token_path.write_text("glrt-unit-only\n", encoding="utf-8")
+        current.token_path.chmod(0o600)
+
+    def grant_scc(current: ImageBuildChainState) -> None:
+        """Retain the existing SCC fixture for the real manager action.
+
+        :param current: Shared state with the selected manager and run scope.
+        """
         binding = runner_manager.SCC_ACCESS.role_binding_document(
-            selected.scc_access(), current.run_scope
+            current.manager_action.scc_access(), current.run_scope
         )
         kubernetes.objects[
             (
@@ -769,36 +992,22 @@ def _lifecycle_executor(
     monkeypatch.setattr(VERIFICATION, "workload_action", lambda _manager: action)
     monkeypatch.setattr(VERIFICATION, "_delete_runner_record", delete_runner)
     monkeypatch.setattr(kubernetes, "wait_rollout", deploy)
-    for name in (
-        "K8SAuth",
-        "HarborAuth",
-        "ConfirmWorkflow",
-        "EnsureNamespace",
-        "ObserveGitLabRunner",
-        "EnsureSCCAccess",
-        "GitLabRunnerRuntime",
+    for component, stage, transition in (
+        ("ObserveGitLabRunner", "runner-observe", None),
+        ("GitLabRunnerRuntime", "runner-runtime", None),
+        ("CreateRunnerRecord", STAGE_MANAGER, manager),
+        ("EnsureSCCAccess", STAGE_SCC, grant_scc),
     ):
         monkeypatch.setattr(
             WORKFLOW,
-            name,
-            lambda *_a, name=name, **_k: JournalCallback(action, stages, name),
-        )
-    transitions = {
-        "ScopedGitLabAuth": ("runner-auth", None),
-        "HarborBuild": ("toolbox", toolbox),
-        "HarborPush": ("harbor-push", publish),
-        "CreateRunnerRecord": ("manager", manager),
-        "PrepareRunnerManager": ("manager-prepare", None),
-    }
-    for name, (stage, transition) in transitions.items():
-        monkeypatch.setattr(
-            WORKFLOW,
-            name,
+            component,
             lambda *_a, stage=stage, transition=transition, **_k: JournalCallback(
                 action, stages, stage, transition
             ),
         )
     for name in (
+        "EnsureNamespace",
+        "HarborBuild",
         "StartBuildPipeline",
         "WatchBuildPipeline",
         "ResolvePipelineStart",
@@ -865,7 +1074,7 @@ def test_chain_retains_delivery_and_cleans_failures_timeouts_and_signals(
             executor.run()
     state = action.state
     assert stages.count("runner-auth") == 1
-    assert stages.index("toolbox") < stages.index("harbor-push")
+    assert stages.index("harbor-auth") < stages.index("harbor-push")
     assert stages.index("harbor-push") < stages.index("manager")
     assert stages.index("manager") < stages.index("manager-deploy")
     assert cleanup == ([] if outcome == "success" else ["manager", "scc", "runner"])
@@ -884,7 +1093,26 @@ def test_chain_retains_delivery_and_cleans_failures_timeouts_and_signals(
         }
         assert kubernetes.deleted == []
         assert state.runner_gitlab is state.gitlab
-        assert state.toolbox_harbor is state.harbor
+        assert state.manager_action.args.image == TOOLBOX_IMAGE
+        deployment = next(
+            value
+            for (kind, _namespace, _name), value in kubernetes.objects.items()
+            if kind == "deployment"
+        )
+        containers = deployment["spec"]["template"]["spec"]["containers"]
+        assert {container["image"] for container in containers} == {TOOLBOX_IMAGE}
+        assert {pod["image_id"] for pod in state.deployment_result["pods"]} == {
+            TOOLBOX_IMAGE
+        }
+        harbor = state.harbor
+        source = harbor.image(REFERENCE_REPOSITORY, TOOLBOX_DIGEST)
+        destination = harbor.image(DEFAULT_CONSUMER, DEFAULT_CONSUMER)
+        assert harbor.copies == [(source, destination)]
+        assert (destination, TOOLBOX_DIGEST) in harbor.reads
+        assert all(
+            kind not in {"build", "buildconfig"}
+            for kind, _namespace, _name in kubernetes.objects
+        )
     else:
         scope_cleanup = next(
             item
@@ -1058,9 +1286,10 @@ def test_chain_runner_cleanup_uses_delete_plan_and_restores_execution_context(
     assert api.calls == expected_calls
 
 
-def _verified_project_access() -> JSONObject:
+def _verified_project_access(project: str = PROJECT_PATH) -> JSONObject:
     """Reuse the native project receipt shape for chain/manager identity binding.
 
+    :param project: Verified provider project path for this fixture.
     :returns: Fresh verified target mapping matching the selected numeric project.
     """
     return {
@@ -1068,7 +1297,7 @@ def _verified_project_access() -> JSONObject:
         IDENTITY.ACCESS_TARGET: {
             **runner_lifecycle.VERIFIED_TARGET,
             IDENTITY.TARGET_ID: PROJECT_ID,
-            IDENTITY.TARGET_PATH: PROJECT_PATH,
+            IDENTITY.TARGET_PATH: project,
         },
     }
 
@@ -1084,6 +1313,7 @@ def test_numeric_project_chain_prepares_inner_manager_from_verified_access(
     """
     action = _prepared_action(apply=True)
     action.args.project = str(PROJECT_ID)
+    action.args.project_name = None
     action.args.namespace = None
     action.gitlab_selection = (IDENTITY.TARGET_PROJECT, str(PROJECT_ID))
     action.repository_identity = IDENTITY.RepositoryIdentity(

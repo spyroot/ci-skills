@@ -44,7 +44,8 @@ its preparation and cleanup, and the reusable callback's inputs.
 The result reports the exact Job-owned Pod exit, marker rows, and cleanup read-back. It proves nested container
 execution, bind-mount read-back, exit propagation, no remaining run-labeled containers, and owned
 Job/ConfigMap/Namespace absence. A caller-supplied namespace remains. This probe does not prove a GitLab runner,
-an image build, or a Harbor push; the separate [chain operation](image-build-chain.md) links those observations.
+or registry publication. The separate [chain operation](image-build-chain.md) publishes a prepared toolbox
+and configures its runner.
 The [result schema](../schemas/results/image-build-readiness.schema.json),
 also linked by `--describe`, defines the report and its `$defs/markers` shape.
 
