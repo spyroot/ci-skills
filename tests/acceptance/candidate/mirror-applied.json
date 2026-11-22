@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-21T20:39:57.370448+00:00",
+  "captured_at": "2026-11-22T11:31:38.226305+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "00763fbc10bdfcad9546a79c1dfd8aed1f77405d635c79f2d6f8457b5c60b87f",
+  "plan_digest": "ac3089056e6494637cfcf4708c88e34ada7c68345cc39ead8baad58436b092be",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1466936504,
+        "id": 1467491120,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 26,
+        "id": 34,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-21T20:39:24.207Z",
+        "last_successful_update_at": "2026-11-22T11:31:04.658Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -83,7 +83,7 @@
     "gitlab": "gitlab_private",
     "harbor": "harbor",
     "kubernetes": "kubernetes",
-    "selected_by": "argv:--gitlab=private"
+    "selected_by": "default"
   },
   "schema_version": "1.1",
   "skill": {
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "21d6d5ad9ce8f24a471ecd1a383de8d4c2f93f414ab5a5502b896e00f4e18601",
-    "file_count": 315,
-    "functional_digest": "aea30daf19eb30478da883c6900e042a80d570c13e794f3fa8f2240ace9356b8",
+    "digest": "451c998b289e6c46f3e929267f0f4103ffbbdc68708d8c1c45d61d3cd1a2447b",
+    "file_count": 277,
+    "functional_digest": "77a6643a80fc523be6d618d2ccf095b1a0f59914b12cf29f634f0f88d3b270a7",
     "revision": {
       "source": "installer_record",
-      "value": "36f9e943c9dd0cdb5ce356fa73e86d8fe56f7cd8",
+      "value": "e0c93c643b2bf1b500d3dcadd9a9187139517aa7",
       "verified": true
     }
   },
@@ -107,6 +107,6 @@
     "record_count": 1
   },
   "target": "https://gitlab.dcloud.run",
-  "target_source": "env:CI_SKILLS_TARGET;argv:--gitlab=private",
-  "tested_revision": "36f9e943c9dd0cdb5ce356fa73e86d8fe56f7cd8"
+  "target_source": "user",
+  "tested_revision": "e0c93c643b2bf1b500d3dcadd9a9187139517aa7"
 }

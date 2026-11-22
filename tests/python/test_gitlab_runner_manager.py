@@ -2053,3 +2053,53 @@ def test_runner_runtime_identities_preserve_manager_cleanup_order() -> None:
             RUNNER_DESCRIPTION + RUNNER_RUNTIME.REGISTRY_SECRET_SUFFIX,
         ),
     )
+
+
+@pytest.mark.parametrize(
+    "drift", ("deployment-before-apply", "secret-in-other-namespace")
+)
+def test_manager_absence_confirmation_never_authorizes_writes_on_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    drift: str,
+) -> None:
+    """Apply a borrowed-namespace absence plan against a changed native baseline."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    runtime = _absent_manager_runtime(cluster, capsys, borrowed=True)
+    if drift == "secret-in-other-namespace":
+        alternate = f"{NAMESPACE}-alternate"
+        borrowed = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+        borrowed["metadata"].update(name=alternate, uid=ABSENCE_REPLACEMENT_UID)
+        cluster.objects[("namespace", "", alternate)] = borrowed
+        cluster.caller_namespace = alternate
+    code, plan = _manager_cli_report(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, plan[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
+
+    kind = "deployment" if drift == "deployment-before-apply" else "secret"
+    identity = next(key for key in runtime if key[0] == kind)
+    replacement = json.loads(runtime[identity])
+    if kind == "deployment":
+        replacement["metadata"]["uid"] = ABSENCE_REPLACEMENT_UID
+    cluster.objects[identity] = replacement
+    survivors = deepcopy(cluster.objects)
+
+    code, result = _manager_cli_report(
+        cluster,
+        capsys,
+        action=DELETE_ACTION,
+        run_id=RUN_ID,
+        flags=(APPLY_ARGUMENT, CONFIRM_ARGUMENT, plan[FIELD_PLAN_DIGEST]),
+    )
+    assert (code, result[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    ), (code, result[FIELD_STATUS], tuple(cluster.deleted))
+    assert cluster.objects == survivors
+    assert cluster.applied == cluster.deleted == []
+    assert not cluster.guard_held
