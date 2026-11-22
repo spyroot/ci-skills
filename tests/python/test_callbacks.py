@@ -1418,6 +1418,265 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
     assert harbor.lookups[-1] == (Spec.image_repository, candidate_tag)
 
 
+@pytest.mark.parametrize("preexisting", (False, True), ids=("created", "borrowed"))
+def test_failed_toolbox_build_preserves_successful_interleaved_build_namespace(
+    preexisting: bool,
+) -> None:
+    """Keep a successful consumer's native resources after another build fails.
+
+    :param preexisting: Whether the shared configured namespace predates both builds.
+    :returns: None after real callback cleanup preserves B and removes A's children.
+    """
+    namespace = "shared-toolbox-builds"
+    resolved_base = "registry.example.test/base@sha256:" + "b" * 64
+    produced_digest = "sha256:" + "d" * 64
+    failure = "interleaved_first_build_failed"
+    events: MutableSequence[str] = []
+    registry: MutableMapping[str, str] = {}
+
+    @dataclass(frozen=True)
+    class Spec:
+        """Supply independent apps using the same configured build namespace.
+
+        :param namespace: Existing configured namespace shared by the builds.
+        :param app: Independent BuildConfig application identity.
+        :param fingerprint: Immutable content fingerprint for this application.
+        """
+
+        namespace: str
+        app: str
+        fingerprint: str
+
+        def render(self, directory: Path, resolved_base_image: str) -> None:
+            """Accept the actual temporary context without invoking a build engine.
+
+            :param directory: Real temporary directory allocated by BuildToolbox.
+            :param resolved_base_image: Immutable image passed by the real callback.
+            :returns: None after checking the build's selected context and image.
+            """
+            assert directory.is_dir()
+            assert resolved_base_image == resolved_base
+
+        def _node_selector(self) -> None:
+            """Retain the existing fixture's unrestricted build placement.
+
+            :returns: None so the native BuildConfig has no node selector.
+            """
+            return
+
+    first_spec = Spec(namespace, "toolbox-first", "a" * 64)
+    second_spec = Spec(namespace, "toolbox-second", "c" * 64)
+    second_reference = "candidate-second"
+    second_state = DELIVERY_STATE.DeliveryState()
+
+    class InterleavingCluster(MemoryCluster):
+        """Model native UID stability, namespace cascading and two build waits."""
+
+        def __init__(self) -> None:
+            """Initialize native storage and observations captured before A fails."""
+            super().__init__()
+            self.first_children: tuple[tuple[str, str, str], ...] = ()
+            self.second_temporary: tuple[tuple[str, str, str], ...] = ()
+            self.namespace_uid: Optional[str] = None
+            self.second_buildconfig: Optional[JSONObject] = None
+
+        def apply(self, document: JSONObject) -> JSONObject:
+            """Preserve existing UIDs when native objects are updated.
+
+            :param document: Desired native object submitted by a real callback.
+            :returns: Detached native read-back with a stable UID across updates.
+            """
+            metadata = JSON_TYPES.json_object(document["metadata"])
+            kind = str(document["kind"])
+            name = str(metadata["name"])
+            selected_namespace = str(metadata.get("namespace", ""))
+            previous = self.read(kind, name, selected_namespace)
+            observed = super().apply(document)
+            if previous is not None:
+                observed_metadata = dict(JSON_TYPES.json_object(observed["metadata"]))
+                observed_metadata["uid"] = JSON_TYPES.json_object(previous["metadata"])[
+                    "uid"
+                ]
+                observed = {**observed, "metadata": observed_metadata}
+                self.objects[(kind.casefold(), selected_namespace, name)] = deepcopy(
+                    observed
+                )
+            return observed
+
+        def delete(
+            self,
+            kind: str,
+            name: str,
+            namespace: str,
+            *,
+            expected_uid: Optional[str] = None,
+        ) -> None:
+            """Make a namespace DELETE remove its children as the native API does.
+
+            :param kind: Exact native kind selected by real cleanup.
+            :param name: Exact resource identity selected by real cleanup.
+            :param namespace: Resource scope; empty for the namespace itself.
+            :param expected_uid: Native UID precondition supplied by the callback.
+            :returns: None after the existing deletion and any namespace cascade.
+            :raises KubernetesError: Existing native deletion or UID check fails.
+            """
+            super().delete(kind, name, namespace, expected_uid=expected_uid)
+            if kind.casefold() == "namespace":
+                for key in tuple(self.objects):
+                    if key[1] == name:
+                        del self.objects[key]
+
+        def command(self, *args: str, openshift: bool = False) -> RUNTIME.CommandResult:
+            """Create the native Build selected by the real start-build invocation.
+
+            :param *args: Start-build arguments generated by BuildToolbox.
+            :param openshift: Whether the callback selected the OpenShift client.
+            :returns: Native Build reference for the independent JSON read-back.
+            """
+            assert openshift is True
+            assert args[:3] == ("--namespace", namespace, "start-build")
+            app = args[3].removeprefix("buildconfig/")
+            assert app in (first_spec.app, second_spec.app)
+            name = app + "-1"
+            self.apply(
+                {
+                    "apiVersion": TOOLBOX.BUILD_API_VERSION,
+                    "kind": "Build",
+                    "metadata": {"name": name, "namespace": namespace},
+                }
+            )
+            return RUNTIME.CommandResult(
+                tuple(args), 0, f"build.build.openshift.io/{name}\n", ""
+            )
+
+        def json(self, *args: str, openshift: bool = False) -> JSONObject:
+            """Read the exact started Build from native in-memory storage.
+
+            :param *args: Independent Build read generated by BuildToolbox.
+            :param openshift: Whether the JSON read selects the OpenShift client.
+            :returns: Stored Build with its actual native identity.
+            """
+            assert openshift is False
+            assert args[:3] == ("--namespace", namespace, "get")
+            assert args[4:] == ("-o", "json")
+            observed = self.read("Build", args[3].rsplit("/", 1)[-1], namespace)
+            assert observed is not None
+            return observed
+
+        def wait_build(self, name: str, selected_namespace: str) -> JSONObject:
+            """Complete B inside A's wait, then expose A's independent build failure.
+
+            :param name: Exact Build identity started by the corresponding callback.
+            :param selected_namespace: Shared configured build namespace.
+            :returns: B's completed native output and independently readable digest.
+            :raises ToolboxError: A fails only after B's entire callback lifecycle succeeds.
+            """
+            assert selected_namespace == namespace
+            if name == second_spec.app + "-1":
+                events.append("second.wait")
+                config = self.read("BuildConfig", second_spec.app, namespace)
+                assert config is not None
+                secret = config["spec"]["output"]["pushSecret"]["name"]
+                self.second_temporary = (
+                    ("build", namespace, name),
+                    ("secret", namespace, str(secret)),
+                )
+                registry[second_reference] = produced_digest
+                return {"status": {"output": {"to": {"imageDigest": produced_digest}}}}
+            assert name == first_spec.app + "-1"
+            events.append("first.wait")
+            self.first_children = tuple(
+                key for key in self.objects if key[1] == namespace
+            )
+            observed_namespace = self.read("Namespace", namespace, "")
+            assert observed_namespace is not None
+            self.namespace_uid = str(observed_namespace["metadata"]["uid"])
+            _run_callbacks(second_callbacks, context=second_state)
+            self.second_buildconfig = self.read(
+                "BuildConfig", second_spec.app, namespace
+            )
+            assert self.second_buildconfig is not None
+            assert second_state.build_result.verified is True
+            assert second_state.build_result.reused is False
+            events.append("second.completed")
+            raise TOOLBOX.ToolboxError(failure)
+
+    cluster = InterleavingCluster()
+    if preexisting:
+        cluster.apply(
+            {
+                "apiVersion": "v1",
+                "kind": "Namespace",
+                "metadata": {"name": namespace, "labels": {}},
+            }
+        )
+    first_state = DELIVERY_STATE.DeliveryState()
+    first_state.kubernetes = second_state.kubernetes = cluster
+    callbacks = []
+    for spec, reference in (
+        (first_spec, "candidate-first"),
+        (second_spec, second_reference),
+    ):
+        workflow = TOOLBOX_ACTIONS.WorkflowAction(Namespace(action="create"))
+        workflow.spec = spec
+        workflow.runner = TOOLBOX_ACTIONS.RunnerAction(
+            namespace=namespace,
+            name=spec.app,
+            source_root="",
+            labels=(),
+            timeout=1,
+        )
+        build = TOOLBOX.BuildAction(
+            spec=spec,
+            resolved_base_image=resolved_base,
+            candidate_repository=f"registry.example.test/unit/{spec.app}",
+            candidate_reference=reference,
+            dockerconfig=b'{"auths":{"registry.example.test":{}}}',
+            digest_lookup=registry.get,
+        )
+        callbacks.append(
+            (
+                TOOLBOX_ACTIONS.EnsureNamespace(workflow),
+                TOOLBOX.BuildToolbox(build),
+            )
+        )
+    first_callbacks, second_callbacks = callbacks
+
+    with pytest.raises(TOOLBOX.ToolboxError, match=failure):
+        _run_callbacks(first_callbacks, context=first_state)
+
+    assert events == ["first.wait", "second.wait", "second.completed"]
+    assert first_state.failed is True
+    assert second_state.failed is False
+    assert second_callbacks[0].result["namespaces"] == [
+        {"name": namespace, "uid": cluster.namespace_uid, "action": STATUS.NO_OP}
+    ]
+    assert {key[0] for key in cluster.first_children} == {
+        "build",
+        "buildconfig",
+        "secret",
+    }
+    for kind, selected_namespace, name in (
+        *cluster.first_children,
+        *cluster.second_temporary,
+    ):
+        assert cluster.read(kind, name, selected_namespace) is None
+    assert set(cluster.first_children).issubset(cluster.deleted)
+    retained_config = cluster.read("BuildConfig", second_spec.app, namespace)
+    assert retained_config is not None, (
+        "A namespace cleanup cascaded B's successful BuildConfig"
+    )
+    assert retained_config == cluster.second_buildconfig
+    assert (
+        retained_config["metadata"]["uid"]
+        == cluster.second_buildconfig["metadata"]["uid"]
+    )
+    retained_namespace = cluster.read("Namespace", namespace, "")
+    assert retained_namespace is not None
+    assert retained_namespace["metadata"]["uid"] == cluster.namespace_uid
+    assert all(kind != "namespace" for kind, _, _ in cluster.deleted)
+
+
 def test_resource_set_recovers_prior_owned_state_after_downstream_failure() -> None:
     """Recovery reapplies the first owned state after a later callback fails.
     :returns: None; assertions in the body validate the regression.
