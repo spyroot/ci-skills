@@ -43,19 +43,21 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import runpy
 import sys
-import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+TOOLS = Path(__file__).resolve().parent
+sys.path.insert(0, str(TOOLS))
+runpy.run_path(str(TOOLS.parent / "ci-skills" / "bin" / "_bootstrap.py"))
 
+from lib.python.core.target import TargetError, load_gitlab_target
 from skillkit.live_smoke import (
     DEFAULT_GITHUB_OWNER,
     DEFAULT_GITHUB_TOKEN_FILE,
     DEFAULT_GITLAB_GROUP,
-    DEFAULT_GITLAB_TOKEN_FILE,
     GITHUB_API_HOST,
     GITHUB_TOKEN_VARIABLES,
     GITLAB_TOKEN_VARIABLES,
@@ -108,18 +110,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--gitlab-token-file",
         type=Path,
         default=None,
-        help="GitLab token file; overrides environment and filed defaults.",
+        help="GitLab token file; overrides the selected target credential and environment.",
     )
     parser.add_argument(
         "--target-file",
         type=Path,
         default=DEFAULT_TARGET_FILE,
-        help=f"Target file holding the GitLab URL (default {DEFAULT_TARGET_FILE}).",
+        help=f"Target file selecting the GitLab route and credential (default {DEFAULT_TARGET_FILE}).",
     )
     parser.add_argument(
         "--gitlab-url",
         default=None,
-        help="GitLab base URL overriding the target file.",
+        help="GitLab base URL overriding the target; requires an explicit or environment token.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -150,25 +152,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_gitlab_url(argument: Optional[str], target_file: Path) -> str:
-    """Resolve the GitLab base URL from the flag or the target file.
+def resolve_gitlab_binding(arguments: argparse.Namespace) -> tuple[str, Optional[Path]]:
+    """Select the GitLab server and its credential source together.
 
-    :param argument: Explicit ``--gitlab-url`` value.
-    :param target_file: Target file whose ``[gitlab] url`` is read.
-    :returns: Base URL without a trailing slash.
-    :raises SmokeError: If neither source provides a URL.
+    :param arguments: Parsed GitLab target and credential options.
+    :returns: GitLab base URL and selected token file, if any.
+    :raises SmokeError: The configured GitLab route cannot be loaded.
     """
-    if argument:
-        return argument.rstrip("/")
+    if arguments.gitlab_url:
+        return arguments.gitlab_url.rstrip("/"), arguments.gitlab_token_file
     try:
-        document = tomllib.loads(target_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise SmokeError("target_unreadable", str(target_file)) from exc
-    gitlab = document.get("gitlab")
-    url = gitlab.get("url") if isinstance(gitlab, dict) else None
-    if not isinstance(url, str) or not url:
-        raise SmokeError("gitlab_url_missing", str(target_file))
-    return url.rstrip("/")
+        target = load_gitlab_target(arguments.target_file)
+    except TargetError as exc:
+        raise SmokeError("gitlab_target_invalid", str(arguments.target_file)) from exc
+    return target.gitlab.url, arguments.gitlab_token_file or target.gitlab.token_file
 
 
 def build_smoke(arguments: argparse.Namespace) -> LiveSmoke:
@@ -185,14 +182,14 @@ def build_smoke(arguments: argparse.Namespace) -> LiveSmoke:
         os.environ,
         "github",
     )
+    gitlab_url, gitlab_token_file = resolve_gitlab_binding(arguments)
     gitlab_token, _ = resolve_token(
-        arguments.gitlab_token_file,
+        gitlab_token_file,
         GITLAB_TOKEN_VARIABLES,
-        DEFAULT_GITLAB_TOKEN_FILE,
+        None,
         os.environ,
         "gitlab",
     )
-    gitlab_url = resolve_gitlab_url(arguments.gitlab_url, arguments.target_file)
     github_client = RestClient(
         f"https://{GITHUB_API_HOST}",
         {

@@ -34,8 +34,8 @@ never deleted by the tool.
 tools/live-smoke.py plan --phase ci14 --case mirror
 
 # Creates both fixtures; aborts when either name already exists.
-tools/live-smoke.py apply --phase ci14 --case mirror --run-id r20261122a \
-    --github-token-file ~/.ci-skills/github.com.token.env
+tools/live-smoke.py --github-token-file ~/.ci-skills/github.com.token.env \
+    apply --phase ci14 --case mirror --run-id r20261122a
 
 # Deletes exactly what apply created; verifies absence by path and by ID.
 tools/live-smoke.py cleanup --run-id r20261122a
@@ -44,21 +44,32 @@ tools/live-smoke.py cleanup --run-id r20261122a
 tools/live-smoke.py cleanup --run-id r20261122a --reconcile
 ```
 
-`apply` opens `<state-dir>/<run_id>.json` (default `.internal/scratch/live-smoke`) before creating fixtures.
-It saves each created native ID before the next provider request. Cleanup requires the
-recorded GitLab server before contacting either provider. Older ledgers without a server binding require manual reconciliation.
-`cleanup` re-reads every object, requires the recorded native ID, deletes, proves
-absence by path and by native ID, and repeats the absence read-back. GitLab answers
-project deletion with HTTP 202 and removes asynchronously; the tool polls to 404.
-Exit codes: `0` success, `2` with the stable reason on stderr.
+One mutation at a time holds the lock for `<state-dir>/<run_id>.json`, which
+`apply` creates in `.internal/scratch/live-smoke` by default. The ledger records
+intent before each create request and saves the returned native ID before the
+next provider request. An unknown create outcome keeps the ledger open for
+manual investigation. Cleanup requires the recorded GitLab server before
+contacting either provider.
+
+`cleanup` verifies absence twice by path and by native ID, including with
+`--reconcile`. If a self-managed GitLab project enters delayed deletion, cleanup
+can request permanent removal after verifying the recorded ID and the path GitLab
+assigned to that run-owned project. Cleanup also verifies that path is absent.
+Exit status `0` indicates success. Status `2` carries a stable reason on stderr.
 
 ## Credentials
 
-Read order per system: an explicit `--github-token-file` / `--gitlab-token-file`
-wins, then the environment (`GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`), then the
-filed defaults `~/.ci-skills/github.com.token.env` and
-`~/.ci-skills/gitlab.dcloud.run.token.env`. Token values are never printed or
-recorded; the ledger stores identities and IDs only.
+GitHub reads `--github-token-file`, then `GH_TOKEN` or `GITHUB_TOKEN`, then
+`~/.ci-skills/github.com.token.env`. The token login must match `--owner`
+before GitHub can create a repository.
+
+GitLab reads its server and configured token file from the same `--target-file`
+(default `~/.ci-skills/target.toml`). That file's `[gitlab_routing]` section
+selects the route, and the legacy `[gitlab]` table is supported. Relative token
+paths resolve beside the selected target file. `--gitlab-token-file` overrides
+the selected token file. If no file is selected, GitLab reads `GITLAB_TOKEN` or
+`GITLAB_PRIVATE_TOKEN`. An explicit `--gitlab-url` uses the explicit token file
+or environment credential. Token values stay out of output and ledgers.
 
 - GitHub token: a fine-grained PAT (resource owner `spyroot`, all repositories)
   with **Administration: write** and **Contents: write**. GitHub offers no API to

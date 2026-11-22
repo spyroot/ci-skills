@@ -27,9 +27,7 @@ needs no credentials and mutates nothing. Deletion is identity-guarded and verif
 absent by path and by native ID, then repeated once; GitLab project removal is
 asynchronous (HTTP 202) and is polled to absence.
 
-This module imports nothing from ``lib``: it stays importable before any installed
-copy puts its ``lib`` package first on ``sys.path``, which is what lets the
-wrapper and the tests bind either side.
+The checkout provides the shared provider resource lock.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -44,7 +42,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
@@ -74,10 +73,6 @@ GITLAB_TOKEN_VARIABLES: Final = ("GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN")
 DEFAULT_GITHUB_TOKEN_FILE: Final = Path(
     "~/.ci-skills/github.com.token.env"
 ).expanduser()
-DEFAULT_GITLAB_TOKEN_FILE: Final = Path(
-    "~/.ci-skills/gitlab.dcloud.run.token.env"
-).expanduser()
-
 GITHUB_API_HOST: Final = "api.github.com"
 DEFAULT_GITHUB_OWNER: Final = "spyroot"
 DEFAULT_GITLAB_GROUP: Final = "ci-skills-smoke"
@@ -91,6 +86,7 @@ JSONValue: TypeAlias = (
 )
 JSONObject: TypeAlias = MutableMapping[str, JSONValue]
 CreationObserver: TypeAlias = Callable[[JSONObject], None]
+BeforeCreate: TypeAlias = Callable[[], None]
 
 TOKEN_KIND_FINE_PREFIX: Final = "github_pat_"
 TOKEN_KIND_OAUTH_PREFIX: Final = "gho_"
@@ -155,7 +151,7 @@ def read_token_file(path: Path) -> str:
 def resolve_token(
     explicit_file: Optional[Path],
     variable_names: Sequence[str],
-    default_file: Path,
+    default_file: Optional[Path],
     environment: Mapping[str, str],
     purpose: str,
 ) -> tuple[str, str]:
@@ -177,7 +173,7 @@ def resolve_token(
             if not value:
                 raise SmokeError(f"{name}_empty")
             return value, f"env:{name}"
-    if default_file.is_file():
+    if default_file is not None and default_file.is_file():
         return read_token_file(default_file), f"file:{default_file.resolve()}"
     raise SmokeError(f"{purpose}_token_unresolved")
 
@@ -396,6 +392,18 @@ class GitHubSmoke:
             raise SmokeError("identity_login_missing")
         return login
 
+    def require_owner(self, owner: str) -> None:
+        """Check that GitHub creates fixtures under the selected owner.
+
+        :param owner: Requested repository owner.
+        :raises SmokeError: The authenticated login differs from the selected owner.
+        """
+        if (
+            owner.casefold() != self._owner.casefold()
+            or owner.casefold() != self.login().casefold()
+        ):
+            raise SmokeError("github_owner_mismatch", owner)
+
     def repository(self, path: str) -> Optional[JSONObject]:
         """Read one repository by ``owner/name``.
 
@@ -432,17 +440,22 @@ class GitHubSmoke:
         name: str,
         private: bool = True,
         *,
+        before_create: Optional[BeforeCreate] = None,
         on_created: Optional[CreationObserver] = None,
     ) -> JSONObject:
         """Create one disposable repository and read it back.
 
         :param name: Repository name for the authenticated owner.
         :param private: Whether the fixture stays private.
+        :param before_create: Persist intent immediately before sending the create.
         :param on_created: Record the create response before the read-back.
         :returns: The created repository record with its native ID.
         :raises SmokeError: With ``permission_missing`` when the token cannot
             create repositories (fine-grained PAT without Administration write).
         """
+        self.require_owner(self._owner)
+        if before_create is not None:
+            before_create()
         try:
             response = self._client.request(
                 "POST",
@@ -464,7 +477,14 @@ class GitHubSmoke:
         created = dict(response.body)
         if on_created is not None:
             on_created(created)
-        readback = self.repository(f"{self._owner}/{name}")
+        path = f"{self._owner}/{name}"
+        actual_path = created.get("full_name")
+        if (
+            not isinstance(actual_path, str)
+            or actual_path.casefold() != path.casefold()
+        ):
+            raise SmokeError("repository_readback_mismatch", path)
+        readback = self.repository(path)
         if readback is None or readback.get("id") != created.get("id"):
             raise SmokeError("repository_readback_mismatch", name)
         return created
@@ -498,31 +518,41 @@ class GitHubSmoke:
         current = self.repository(path)
         if current is None:
             raise SmokeError("repository_absent_before_delete", path)
-        if current.get("id") != expected_id:
-            raise SmokeError(
-                "identity_changed", f"{path} id {current.get('id')} != {expected_id}"
-            )
+        current_path = current.get("full_name")
+        if (
+            current.get("id") != expected_id
+            or not isinstance(current_path, str)
+            or current_path.casefold() != path.casefold()
+        ):
+            raise SmokeError("identity_changed", path)
         self._client.request(
             "DELETE", f"/repos/{encode_path(path)}", expected=(HTTPStatus.NO_CONTENT,)
         )
-        after_path = self.repository(path) is None
-        after_id = not self.repository_present_by_id(expected_id)
-        repeat_path = self.repository(path) is None
-        repeat_id = not self.repository_present_by_id(expected_id)
-        if not (after_path and after_id and repeat_path and repeat_id):
-            raise SmokeError(
-                "repository_absence_unproven",
-                f"path={after_path and repeat_path} id={after_id and repeat_id}",
-            )
-        evidence: JSONObject = {
-            "path": path,
-            "repository_id": expected_id,
+        return {
             "http_status": int(HTTPStatus.NO_CONTENT),
-            "absent_by_path": after_path and repeat_path,
-            "absent_by_id": after_id and repeat_id,
+            **self.verify_absence(path, expected_id),
             "mutated": True,
         }
-        return evidence
+
+    def verify_absence(self, path: str, expected_id: int) -> JSONObject:
+        """Independently verify path and ID absence twice.
+
+        :param path: Ledger repository path.
+        :param expected_id: Native repository ID.
+        :returns: Verified absence evidence.
+        :raises SmokeError: Either selector still resolves.
+        """
+        for _ in range(2):
+            absent_by_path = self.repository(path) is None
+            absent_by_id = not self.repository_present_by_id(expected_id)
+            if not (absent_by_path and absent_by_id):
+                raise SmokeError("repository_absence_unproven", path)
+        return {
+            "path": path,
+            "repository_id": expected_id,
+            "absent_by_path": True,
+            "absent_by_id": True,
+        }
 
 
 class GitLabSmoke:
@@ -593,16 +623,21 @@ class GitLabSmoke:
             raise SmokeError("group_not_object", full_path)
         return dict(response.body)
 
-    def ensure_group(self, name: str, full_path: str) -> tuple[JSONObject, bool]:
+    def ensure_group(
+        self, name: str, full_path: str, *, before_create: Optional[BeforeCreate] = None
+    ) -> tuple[JSONObject, bool]:
         """Return the smoke group, creating it only when absent.
 
         :param name: Group display name.
         :param full_path: Group path to create or read.
+        :param before_create: Persist intent immediately before sending the create.
         :returns: Group record and whether this call created it.
         """
         existing = self.group(full_path)
         if existing is not None:
             return existing, False
+        if before_create is not None:
+            before_create()
         try:
             response = self._client.request(
                 "POST",
@@ -628,10 +663,9 @@ class GitLabSmoke:
         :param full_path: Project path with namespace.
         :returns: Project record, or ``None`` when absent.
         """
+        encoded = urllib.parse.quote(full_path, safe="")
         try:
-            response = self._client.request(
-                "GET", f"/api/v4/projects/{encode_path(full_path)}"
-            )
+            response = self._client.request("GET", f"/api/v4/projects/{encoded}")
         except SmokeError as exc:
             if exc.reason == f"unexpected_status_{HTTPStatus.NOT_FOUND}":
                 return None
@@ -645,15 +679,19 @@ class GitLabSmoke:
         group_id: int,
         name: str,
         *,
+        before_create: Optional[BeforeCreate] = None,
         on_created: Optional[CreationObserver] = None,
     ) -> JSONObject:
         """Create one disposable project inside the smoke group and read it back.
 
         :param group_id: Native group ID the project is created under.
         :param name: Project name; GitLab derives the path from it.
+        :param before_create: Persist intent immediately before sending the create.
         :param on_created: Record the create response before the read-back.
         :returns: The created project record with its native ID.
         """
+        if before_create is not None:
+            before_create()
         try:
             response = self._client.request(
                 "POST",
@@ -700,49 +738,142 @@ class GitLabSmoke:
             raise SmokeError("project_not_object", str(project_id))
         return dict(response.body)
 
-    def delete_project(self, full_path: str, expected_id: int) -> JSONObject:
-        """Delete one project after re-reading and matching its exact ID.
+    def _cleanup_project(
+        self, full_path: str, expected_id: int, *, allow_marked: bool
+    ) -> Optional[JSONObject]:
+        """Read both selectors and verify the exact project before any mutation.
 
-        The project is re-read by path; a missing object or any ID mismatch aborts
-        with ``identity_changed`` and deletes nothing. GitLab answers project
-        deletion with HTTP 202 and removes asynchronously, so absence is polled
-        to 404, then the absence is verified once more by ID.
-
-        :param full_path: Full project path recorded in the ledger.
-        :param expected_id: Native ID the run created.
-        :returns: Cleanup evidence with statuses for the ledger.
+        :param full_path: Ledger project path.
+        :param expected_id: Native project ID.
+        :param allow_marked: Recognize GitLab's pending-deletion rename.
+        :returns: The verified project, or None if both selectors are absent.
+        :raises SmokeError: The selectors resolve to inconsistent identities.
         """
-        current = self.project(full_path)
-        if current is None:
-            raise SmokeError("project_absent_before_delete", full_path)
-        if current.get("id") != expected_id:
-            raise SmokeError(
-                "identity_changed",
-                f"{full_path} id {current.get('id')} != {expected_id}",
-            )
-        self._client.request(
-            "DELETE",
-            f"/api/v4/projects/{expected_id}",
-            expected=(HTTPStatus.ACCEPTED,),
-        )
-        deadline = time.monotonic() + PROJECT_DELETE_POLL_SECONDS
-        absent = False
-        while time.monotonic() < deadline:
-            if self.project(full_path) is None:
-                absent = True
-                break
-            time.sleep(PROJECT_DELETE_POLL_INTERVAL)
-        repeat = self.project(full_path) is None
-        if not (absent and repeat):
+        by_path = self.project(full_path)
+        by_id = self.project(str(expected_id))
+        if by_path is None and by_id is None:
+            return None
+        if by_path is not None and by_path.get("id") != expected_id:
+            raise SmokeError("identity_changed", full_path)
+        if by_id is None or by_id.get("id") != expected_id:
+            raise SmokeError("identity_changed", full_path)
+        actual_path = by_id.get("path_with_namespace")
+        if actual_path == full_path and by_path is not None:
+            if by_path.get("path_with_namespace") == full_path:
+                return by_id
+            raise SmokeError("identity_changed", full_path)
+        if (
+            allow_marked
+            and by_id.get("marked_for_deletion_on")
+            and isinstance(actual_path, str)
+            and actual_path
+            in {
+                f"{full_path}-deletion_scheduled-{expected_id}",
+                f"{full_path}-deleted-{expected_id}",
+            }
+        ):
+            marked = self.project(actual_path)
+            if (
+                marked is not None
+                and marked.get("id") == expected_id
+                and marked.get("path_with_namespace") == actual_path
+                and marked.get("marked_for_deletion_on")
+            ):
+                return by_id
+        if by_path is None:
             raise SmokeError("project_absence_unproven", full_path)
+        raise SmokeError("identity_changed", full_path)
+
+    def verify_absence(
+        self, full_path: str, expected_id: int, *, deletion_path: Optional[str] = None
+    ) -> JSONObject:
+        """Independently verify path and ID absence twice.
+
+        :param full_path: Ledger project path.
+        :param expected_id: Native project ID.
+        :param deletion_path: Provider-generated path observed when marked.
+        :returns: Verified absence evidence.
+        :raises SmokeError: A selector still resolves.
+        """
+        paths = (full_path, deletion_path) if deletion_path else (full_path,)
+        for _ in range(2):
+            absent_paths = [self.project(path) is None for path in paths]
+            absent_by_id = self.project(str(expected_id)) is None
+            if not (all(absent_paths) and absent_by_id):
+                raise SmokeError("project_absence_unproven", full_path)
         evidence: JSONObject = {
             "path": full_path,
             "project_id": expected_id,
-            "http_status": int(HTTPStatus.ACCEPTED),
-            "absent_by_path": absent and repeat,
-            "mutated": True,
+            "absent_by_path": True,
+            "absent_by_id": True,
         }
+        if deletion_path:
+            evidence["deletion_path"] = deletion_path
+            evidence["absent_by_deletion_path"] = True
         return evidence
+
+    def delete_project(
+        self, full_path: str, expected_id: int, *, allow_permanent: bool = False
+    ) -> JSONObject:
+        """Delete the exact project and verify absence by path and native ID.
+
+        :param full_path: Full project path recorded in the ledger.
+        :param expected_id: Native ID the run created.
+        :param allow_permanent: Permit final removal of a verified marked project.
+        :returns: Cleanup evidence with statuses for the ledger.
+        :raises SmokeError: If identity or absence cannot be verified.
+        """
+        allow_marked = (
+            allow_permanent
+            and urllib.parse.urlsplit(self.server).hostname != "gitlab.com"
+        )
+        current = self._cleanup_project(
+            full_path, expected_id, allow_marked=allow_marked
+        )
+        if current is None:
+            raise SmokeError("project_absent_before_delete", full_path)
+        endpoint = f"/api/v4/projects/{expected_id}"
+        if not current.get("marked_for_deletion_on"):
+            self._client.request("DELETE", endpoint, expected=(HTTPStatus.ACCEPTED,))
+        permanent = False
+        deletion_path: Optional[str] = None
+        deadline = time.monotonic() + PROJECT_DELETE_POLL_SECONDS
+        while time.monotonic() < deadline:
+            current = (
+                None
+                if permanent
+                else self._cleanup_project(
+                    full_path, expected_id, allow_marked=allow_marked
+                )
+            )
+            if current is None:
+                try:
+                    absence = self.verify_absence(
+                        full_path, expected_id, deletion_path=deletion_path
+                    )
+                except SmokeError as exc:
+                    if not permanent or exc.reason != "project_absence_unproven":
+                        raise
+                else:
+                    return {
+                        "http_status": int(HTTPStatus.ACCEPTED),
+                        **absence,
+                        "permanently_removed": permanent,
+                        "mutated": True,
+                    }
+            elif allow_marked and current.get("marked_for_deletion_on"):
+                native_path = str(current["path_with_namespace"])
+                if native_path != full_path:
+                    deletion_path = native_path
+                query = urllib.parse.urlencode(
+                    {"permanently_remove": "true", "full_path": native_path}
+                )
+                self._client.request(
+                    "DELETE", f"{endpoint}?{query}", expected=(HTTPStatus.ACCEPTED,)
+                )
+                permanent = True
+            time.sleep(PROJECT_DELETE_POLL_INTERVAL)
+        raise SmokeError("project_absence_unproven", full_path)
 
 
 def classify_github_token(token: str) -> str:
@@ -826,6 +957,7 @@ def create_test_github_repo(
     owner: str,
     name: str,
     *,
+    before_create: Optional[BeforeCreate] = None,
     on_created: Optional[CreationObserver] = None,
 ) -> JSONObject:
     """Create the disposable GitHub repository for one smoke run.
@@ -833,9 +965,12 @@ def create_test_github_repo(
     :param github: Client carrying the GitHub credential.
     :param owner: Repository owner, recorded for the ledger.
     :param name: Deterministic fixture name.
+    :param before_create: Persist fixture creation intent before its provider request.
     :param on_created: Persist the ownership record before provider read-back.
     :returns: Created object record for the ledger.
     """
+
+    github.require_owner(owner)
 
     def ownership(created: JSONObject) -> JSONObject:
         return {
@@ -843,7 +978,7 @@ def create_test_github_repo(
             "kind": REPOSITORY_KIND,
             "id": _record_identifier(created),
             "name": name,
-            "path": f"{owner}/{name}",
+            "path": created.get("full_name") or f"{owner}/{name}",
             "created": True,
         }
 
@@ -851,7 +986,9 @@ def create_test_github_repo(
         if on_created is not None:
             on_created(ownership(created))
 
-    return ownership(github.create_repository(name, on_created=observe))
+    return ownership(
+        github.create_repository(name, before_create=before_create, on_created=observe)
+    )
 
 
 def create_test_gitlab_repo(
@@ -859,7 +996,9 @@ def create_test_gitlab_repo(
     group_full_path: str,
     name: str,
     *,
+    before_create: Optional[BeforeCreate] = None,
     on_created: Optional[CreationObserver] = None,
+    before_group_create: Optional[BeforeCreate] = None,
     on_group_created: Optional[CreationObserver] = None,
 ) -> tuple[JSONObject, JSONObject]:
     """Create the disposable GitLab project for one smoke run.
@@ -867,11 +1006,15 @@ def create_test_gitlab_repo(
     :param gitlab: Client carrying the GitLab credential.
     :param group_full_path: Smoke group the project lives under.
     :param name: Deterministic fixture name.
+    :param before_create: Persist fixture creation intent before its provider request.
     :param on_created: Persist the project ownership record before read-back.
+    :param before_group_create: Persist group creation intent before its provider request.
     :param on_group_created: Persist a newly created infrastructure group's ID.
     :returns: Created object record and the group record (created or existing).
     """
-    group, group_created = gitlab.ensure_group(group_full_path, group_full_path)
+    group, group_created = gitlab.ensure_group(
+        group_full_path, group_full_path, before_create=before_group_create
+    )
     group_id = _record_identifier(group)
     if group_created and on_group_created is not None:
         on_group_created({"id": group_id, "path": group_full_path})
@@ -894,7 +1037,11 @@ def create_test_gitlab_repo(
         if on_created is not None:
             on_created(ownership(created))
 
-    return ownership(gitlab.create_project(group_id, name, on_created=observe)), group
+    return ownership(
+        gitlab.create_project(
+            group_id, name, before_create=before_create, on_created=observe
+        )
+    ), group
 
 
 @dataclass
@@ -912,6 +1059,7 @@ class SmokeLedger:
     cleanup: MutableMapping[str, JSONObject] = field(default_factory=dict)
     gitlab_server: Optional[str] = None
     gitlab_group: Optional[JSONObject] = None
+    pending_create: Optional[str] = None
 
     def to_json(self) -> JSONObject:
         """Serialize the ledger in its on-disk shape.
@@ -932,6 +1080,7 @@ class SmokeLedger:
             "cleanup": dict(self.cleanup),
             "gitlab_server": self.gitlab_server,
             "gitlab_group": self.gitlab_group,
+            "pending_create": self.pending_create,
         }
         return document
 
@@ -966,6 +1115,13 @@ class SmokeLedger:
             raise SmokeError("ledger_invalid", "gitlab_server")
         if group is not None and not isinstance(group, Mapping):
             raise SmokeError("ledger_invalid", "gitlab_group")
+        pending = document.get("pending_create")
+        if pending is not None and pending not in (
+            GITHUB_SYSTEM,
+            GITLAB_SYSTEM,
+            GROUP_KIND,
+        ):
+            raise SmokeError("ledger_invalid", "pending_create")
         ledger = cls(
             run_id=run_id,
             phase=phase,
@@ -976,6 +1132,7 @@ class SmokeLedger:
             created_at=created_at,
             gitlab_server=server,
             gitlab_group=dict(group) if group is not None else None,
+            pending_create=pending if isinstance(pending, str) else None,
         )
         closed = document.get("closed_at")
         ledger.closed_at = str(closed) if closed is not None else None
@@ -1030,6 +1187,29 @@ class SmokeLedger:
         if not isinstance(document, Mapping):
             raise SmokeError("ledger_invalid", "root")
         return cls.from_json(document)
+
+
+@contextmanager
+def _locked_run(state_dir: Path, run_id: str) -> Iterator[Path]:
+    """Serialize local mutations for one canonical ledger path.
+
+    :param state_dir: Directory for ownership ledgers and their private locks.
+    :param run_id: Identifier normalized the same way as its ledger filename.
+    :yields: Canonical state directory while the run lock is held.
+    :raises SmokeError: If the run lock cannot be acquired safely.
+    """
+    from lib.python.core.cli_api import APIError
+    from lib.python.core.resource_guard import locked_resource
+
+    try:
+        directory = state_dir.expanduser().resolve()
+        identity = ("live-smoke", sanitize_segment(run_id, "run_id"))
+        with locked_resource(directory / ".locks", identity):
+            yield directory
+    except APIError as exc:
+        raise SmokeError(exc.reason) from exc
+    except OSError as exc:
+        raise SmokeError("run_lock_io_error", str(state_dir)) from exc
 
 
 class LiveSmoke:
@@ -1118,9 +1298,25 @@ class LiveSmoke:
         :raises SmokeError: If a ledger for ``run_id`` already exists, if either
             fixture is already present, or if a provider step fails.
         """
+        with _locked_run(state_dir, run_id) as directory:
+            return self._apply(phase, case, run_id, directory)
+
+    def _apply(
+        self, phase: str, case: str, run_id: str, state_dir: Path
+    ) -> SmokeLedger:
+        """Create a fixture pair while holding the run lock.
+
+        :param phase: Fixture phase.
+        :param case: Fixture case.
+        :param run_id: Operation ID.
+        :param state_dir: Canonical ledger directory.
+        :returns: The open ledger.
+        :raises SmokeError: If a fixture or ledger already exists or creation fails.
+        """
         name = fixture_name(phase, case, run_id)
         if SmokeLedger.path_for(state_dir, run_id).is_file():
             raise SmokeError("run_already_open", run_id)
+        self._github.require_owner(self._owner)
         github_path = f"{self._owner}/{name}"
         gitlab_path = f"{self._group_path}/{name}"
         if self._github.repository(github_path) is not None:
@@ -1136,23 +1332,35 @@ class LiveSmoke:
         )
         ledger.write(state_dir)
 
+        def record_intent(kind: str) -> None:
+            ledger.pending_create = kind
+            ledger.write(state_dir)
+
         def record_fixture(record: JSONObject) -> None:
             system = str(record["system"])
             ledger.objects[system] = record
+            ledger.pending_create = None
             ledger.write(state_dir)
 
         def record_group(record: JSONObject) -> None:
             ledger.gitlab_group = record
+            ledger.pending_create = None
             ledger.write(state_dir)
 
         create_test_github_repo(
-            self._github, self._owner, name, on_created=record_fixture
+            self._github,
+            self._owner,
+            name,
+            before_create=lambda: record_intent(GITHUB_SYSTEM),
+            on_created=record_fixture,
         )
         create_test_gitlab_repo(
             self._gitlab,
             self._group_path,
             name,
             on_created=record_fixture,
+            before_create=lambda: record_intent(GITLAB_SYSTEM),
+            before_group_create=lambda: record_intent(GROUP_KIND),
             on_group_created=record_group,
         )
         return ledger
@@ -1174,6 +1382,18 @@ class LiveSmoke:
         :raises SmokeError: If the ledger is missing, already closed, an object
             identity changed, or an absence read-back fails.
         """
+        with _locked_run(state_dir, run_id) as directory:
+            return self._cleanup(directory, run_id, reconcile)
+
+    def _cleanup(self, state_dir: Path, run_id: str, reconcile: bool) -> SmokeLedger:
+        """Close a verified ledger while holding its run lock.
+
+        :param state_dir: Canonical ledger directory.
+        :param run_id: Operation ID.
+        :param reconcile: Verify prior absences as cleanup evidence.
+        :returns: Closed ledger.
+        :raises SmokeError: If ownership or absence cannot be verified.
+        """
         ledger = SmokeLedger.read(state_dir, run_id)
         if ledger.status != LEDGER_STATUS_OPEN:
             raise SmokeError("run_already_closed", run_id)
@@ -1181,6 +1401,8 @@ class LiveSmoke:
             raise SmokeError(
                 "gitlab_server_mismatch", "select the original GitLab server"
             )
+        if ledger.pending_create is not None:
+            raise SmokeError("create_outcome_unknown", ledger.pending_create)
         for key in sorted(ledger.objects):
             record = ledger.objects[key]
             system = record.get("system")
@@ -1190,23 +1412,30 @@ class LiveSmoke:
                 system not in (GITHUB_SYSTEM, GITLAB_SYSTEM)
                 or not isinstance(path, str)
                 or type(raw_id) is not int
+                or record.get("created") is not True
             ):
                 raise SmokeError("ledger_invalid", f"objects.{key}")
+            provider = self._github if system == GITHUB_SYSTEM else self._gitlab
             try:
                 if system == GITHUB_SYSTEM:
                     evidence = self._github.delete_repository(path, raw_id)
                 else:
-                    evidence = self._gitlab.delete_project(path, raw_id)
+                    evidence = self._gitlab.delete_project(
+                        path, raw_id, allow_permanent=True
+                    )
             except SmokeError as exc:
-                if reconcile and exc.reason in (
+                if not reconcile or exc.reason not in (
                     "repository_absent_before_delete",
                     "project_absent_before_delete",
                 ):
-                    evidence = {"path": path, "already_absent": True, "mutated": False}
-                else:
-                    ledger.write(state_dir)
                     raise
+                evidence = {
+                    **provider.verify_absence(path, raw_id),
+                    "already_absent": True,
+                    "mutated": False,
+                }
             ledger.cleanup[key] = evidence
+            ledger.write(state_dir)
         ledger.status = LEDGER_STATUS_CLOSED
         ledger.closed_at = utc_now()
         ledger.write(state_dir)

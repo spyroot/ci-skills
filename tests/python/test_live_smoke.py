@@ -24,9 +24,10 @@ from pathlib import Path
 from typing import Self
 
 import pytest
-from conftest import REPO_ROOT
+from conftest import REPO_ROOT, load_module
 
 sys.path.insert(0, str(REPO_ROOT / "tools"))
+sys.path.insert(0, str(REPO_ROOT / "ci-skills"))
 live_smoke = import_module("skillkit.live_smoke")
 
 GITHUB_HOST = "api.github.test"
@@ -169,6 +170,8 @@ class FakeGitLab:
         self.projects: dict[str, dict[str, object]] = {}
         self.next_group_id = 5001
         self.next_project_id = 6001
+        self.delayed = False
+        self.permanent_removals: list[tuple[int, str]] = []
 
     def __call__(self, request: object, timeout_seconds: float = 0) -> FakeResponse:
         """Route one urllib request by method and path."""
@@ -212,8 +215,15 @@ class FakeGitLab:
             self.projects[full] = record
             return self._json(HTTPStatus.CREATED, record)
         if path.startswith("/api/v4/projects/") and method == "GET":
-            key = urllib.parse.unquote(path[len("/api/v4/projects/") :])
-            record = self.projects.get(key)
+            identifier = path[len("/api/v4/projects/") :]
+            if "/" in identifier:
+                return self._error(HTTPStatus.NOT_FOUND, "404 Project Not Found")
+            key = urllib.parse.unquote(identifier)
+            record = (
+                self._find_project(int(key))
+                if key.isdigit()
+                else self.projects.get(key)
+            )
             if record is None:
                 return self._error(HTTPStatus.NOT_FOUND, "404 Project Not Found")
             return self._json(HTTPStatus.OK, record)
@@ -229,7 +239,23 @@ class FakeGitLab:
             record = self._find_project(project_id)
             if record is None:
                 return self._error(HTTPStatus.NOT_FOUND, "404 Project Not Found")
-            del self.projects[str(record["path_with_namespace"])]
+            full_path = str(record["path_with_namespace"])
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            if self.delayed and not query:
+                marked_path = f"{full_path}-deletion_scheduled-{project_id}"
+                record["marked_for_deletion_on"] = "2027-01-01"
+                record["path_with_namespace"] = marked_path
+                del self.projects[full_path]
+                self.projects[marked_path] = record
+                return self._json(HTTPStatus.ACCEPTED, None)
+            if query:
+                assert record["marked_for_deletion_on"]
+                assert query == {
+                    "permanently_remove": ["true"],
+                    "full_path": [full_path],
+                }
+                self.permanent_removals.append((project_id, full_path))
+            del self.projects[full_path]
             return self._json(HTTPStatus.ACCEPTED, None)
         return self._error(HTTPStatus.NOT_FOUND, f"unrouted {method} {path}")
 
@@ -498,9 +524,188 @@ def test_apply_journals_native_id_before_next_provider_call(
         with pytest.raises(live_smoke.SmokeError, match="injected_provider_failure"):
             session.apply("ci14", "mirror", "run1", tmp_path)
 
+    if method == "POST":
+        with pytest.raises(live_smoke.SmokeError, match="create_outcome_unknown"):
+            session.cleanup(tmp_path, "run1", reconcile=True)
+        assert github.repositories
+        return
+
     assert session.cleanup(tmp_path, "run1", reconcile=True).status == "closed"
     assert not github.repositories
     assert not gitlab.projects
+
+
+@pytest.mark.parametrize(("action", "during"), [("apply", "GET"), ("cleanup", "POST")])
+def test_same_run_mutation_is_exclusive(
+    smoke, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, during: str
+) -> None:
+    """Reject a second mutation while the same run is already in progress."""
+    session, _, _ = smoke
+    lock = import_module("lib.python.core.resource_guard")
+    monkeypatch.setattr(lock, "RESOURCE_LOCK_WAIT_SECONDS", 0)
+    transport = live_smoke._urlopen
+    attempted = False
+
+    def overlap(request, timeout_seconds):
+        nonlocal attempted
+        if not attempted and request.get_method() == during:
+            attempted = True
+            with pytest.raises(live_smoke.SmokeError, match="resource_lock_timeout"):
+                if action == "apply":
+                    session.apply("ci14", "mirror", "run1", tmp_path)
+                else:
+                    session.cleanup(tmp_path, "run1", reconcile=True)
+        return transport(request, timeout_seconds)
+
+    with monkeypatch.context() as overlap_test:
+        overlap_test.setattr(live_smoke, "_urlopen", overlap)
+        assert set(session.apply("ci14", "mirror", "run1", tmp_path).objects) == {
+            "github",
+            "gitlab",
+        }
+    assert attempted
+
+
+@pytest.mark.parametrize("provider", [GITHUB_HOST, GITLAB_HOST])
+def test_unknown_create_cannot_close_ledger(
+    smoke, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
+    """Retain an unresolved create if the provider applied it without a usable response."""
+    session, github, gitlab = smoke
+    transport = live_smoke._urlopen
+
+    def lose_create_response(request, timeout_seconds):
+        url = urllib.parse.urlsplit(request.full_url)
+        response = transport(request, timeout_seconds)
+        if (
+            url.netloc == provider
+            and request.get_method() == "POST"
+            and url.path in {"/user/repos", "/api/v4/projects"}
+        ):
+            raise live_smoke.SmokeError("response_not_json")
+        return response
+
+    with monkeypatch.context() as failure:
+        failure.setattr(live_smoke, "_urlopen", lose_create_response)
+        with pytest.raises(live_smoke.SmokeError, match="response_not_json"):
+            session.apply("ci14", "mirror", "run1", tmp_path)
+    with pytest.raises(live_smoke.SmokeError, match="create_outcome_unknown"):
+        session.cleanup(tmp_path, "run1", reconcile=True)
+    assert live_smoke.SmokeLedger.read(tmp_path, "run1").status == "open"
+    assert github.repositories if provider == GITHUB_HOST else gitlab.projects
+
+
+@pytest.mark.parametrize("provider", ["github", "gitlab"])
+def test_reconcile_refuses_missing_path_when_id_remains(
+    smoke, tmp_path: Path, provider: str
+) -> None:
+    """A fixture moved from the old path still resolves by its recorded ID."""
+    session, github, gitlab = smoke
+    ledger = session.apply("ci14", "mirror", "run1", tmp_path)
+    path = str(ledger.objects[provider]["path"])
+    moved = f"{path}-moved"
+    if provider == "github":
+        repo = github.repositories.pop(path)
+        repo["full_name"] = moved
+        github.repositories[moved] = repo
+        github.by_id[repo["id"]] = moved
+    else:
+        project = gitlab.projects.pop(path)
+        project["path_with_namespace"] = moved
+        gitlab.projects[moved] = project
+    with pytest.raises(live_smoke.SmokeError, match="absence_unproven"):
+        session.cleanup(tmp_path, "run1", reconcile=True)
+    assert live_smoke.SmokeLedger.read(tmp_path, "run1").status == "open"
+
+
+def test_delayed_project_is_removed_and_verified_by_both_selectors(
+    smoke, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Permanently remove the exact marked project, then verify two absences."""
+    session, _, gitlab = smoke
+    gitlab.delayed = True
+    monkeypatch.setattr(live_smoke, "PROJECT_DELETE_POLL_SECONDS", 0.03)
+    monkeypatch.setattr(live_smoke, "PROJECT_DELETE_POLL_INTERVAL", 0.001)
+    applied = session.apply("ci14", "mirror", "run1", tmp_path)
+    project = applied.objects["gitlab"]
+    result = session.cleanup(tmp_path, "run1")
+    marked_path = f"{project['path']}-deletion_scheduled-{project['id']}"
+    assert gitlab.permanent_removals == [(project["id"], marked_path)]
+    assert result.cleanup["gitlab"]["deletion_path"] == marked_path
+    assert result.cleanup["gitlab"]["absent_by_deletion_path"] is True
+    assert result.cleanup["gitlab"]["absent_by_path"] is True
+    assert result.cleanup["gitlab"]["absent_by_id"] is True
+
+
+def test_apply_refuses_github_owner_mismatch_before_creating(
+    smoke, tmp_path: Path
+) -> None:
+    """A token for another account cannot create under that account by accident."""
+    _, github, gitlab = smoke
+    session = live_smoke.LiveSmoke(
+        live_smoke.GitHubSmoke(
+            live_smoke.RestClient(f"https://{GITHUB_HOST}", {}), "other"
+        ),
+        live_smoke.GitLabSmoke(live_smoke.RestClient(f"https://{GITLAB_HOST}", {})),
+        "other",
+        "ci-skills-smoke",
+    )
+    with pytest.raises(live_smoke.SmokeError, match="github_owner_mismatch"):
+        session.apply("ci14", "mirror", "run1", tmp_path)
+    assert not github.repositories
+    assert not gitlab.projects
+
+
+@pytest.mark.parametrize("route", ["private", "public", "legacy"])
+def test_cli_binds_gitlab_route_and_its_credential(
+    smoke, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    """Use the selected target URL and matching relative token file as a pair."""
+    cli = load_module(
+        "ci160_test_live_smoke_cli", REPO_ROOT / "tools" / "live-smoke.py"
+    )
+    target = tmp_path / "target.toml"
+    for tier in ("private", "public", "legacy"):
+        (tmp_path / f"{tier}.env").write_text(f"GITLAB_TOKEN=dummy-{tier}\n")
+    if route == "legacy":
+        target.write_text(
+            '[gitlab]\nurl="https://legacy.example"\ntoken_file="legacy.env"\n'
+        )
+    else:
+        contract = import_module("lib.python.core.endpoints")
+        routing = contract.GITLAB_ROUTING_TABLE
+        instances = {
+            "private": contract.GITLAB_PRIVATE_TABLE,
+            "public": contract.GITLAB_PUBLIC_TABLE,
+        }
+        content = [
+            f"[{routing}]",
+            f'{contract.GITLAB_ROUTING_DEFAULT_KEY}="{instances[route]}"',
+        ]
+        for tier, table in instances.items():
+            content.extend(
+                [
+                    f"[{table}]",
+                    f'url="https://{tier}.example"',
+                    f'token_file="{tier}.env"',
+                    f"[{routing}.{table}]",
+                ]
+            )
+        target.write_text("\n".join(content) + "\n")
+    monkeypatch.setenv("GH_TOKEN", "dummy-github")
+    monkeypatch.setenv("GITLAB_TOKEN", "dummy-unrelated")
+    observed = []
+
+    def provider(request, timeout_seconds):
+        observed.append((request.full_url, request.get_header("Private-token")))
+        return FakeResponse(200, b'{"username":"smoke"}', {})
+
+    monkeypatch.setattr(live_smoke, "_urlopen", provider)
+    args = cli.build_parser().parse_args(
+        ["--target-file", str(target), "cleanup", "--run-id", "run1"]
+    )
+    cli.build_smoke(args)._gitlab.identity()
+    assert observed == [(f"https://{route}.example/api/v4/user", f"dummy-{route}")]
 
 
 def test_create_fine_grained_reports_without_token(
@@ -618,6 +823,7 @@ def test_github_permission_error_names_administration(
             {},
         )
 
+    assert github.login() == "spyroot"
     monkeypatch.setattr(live_smoke, "_urlopen", forbidden)
     with pytest.raises(live_smoke.SmokeError) as excinfo:
         github.create_repository("smoke-ci14-mirror-x")
