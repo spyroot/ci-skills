@@ -44,12 +44,15 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import Final, Optional, TypeAlias
+
+from skillkit.mirror_qualification import QualificationError
+from skillkit.mirror_qualification import _write as _write_ledger
 
 SCHEMA_VERSION: Final = 1
 LEDGER_KIND: Final = "ci_skills_live_smoke_ledger"
@@ -87,6 +90,7 @@ JSONValue: TypeAlias = (
     None | bool | int | float | str | Sequence["JSONValue"] | Mapping[str, "JSONValue"]
 )
 JSONObject: TypeAlias = MutableMapping[str, JSONValue]
+CreationObserver: TypeAlias = Callable[[JSONObject], None]
 
 TOKEN_KIND_FINE_PREFIX: Final = "github_pat_"
 TOKEN_KIND_OAUTH_PREFIX: Final = "gho_"
@@ -247,6 +251,11 @@ class RestClient:
         self._base_url = base_url.rstrip("/")
         self._headers = dict(headers)
         self._timeout = timeout_seconds
+
+    @property
+    def base_url(self) -> str:
+        """Return the bound URL without its trailing slash."""
+        return self._base_url
 
     def request(
         self,
@@ -418,11 +427,18 @@ class GitHubSmoke:
             raise
         return True
 
-    def create_repository(self, name: str, private: bool = True) -> JSONObject:
+    def create_repository(
+        self,
+        name: str,
+        private: bool = True,
+        *,
+        on_created: Optional[CreationObserver] = None,
+    ) -> JSONObject:
         """Create one disposable repository and read it back.
 
         :param name: Repository name for the authenticated owner.
         :param private: Whether the fixture stays private.
+        :param on_created: Record the create response before the read-back.
         :returns: The created repository record with its native ID.
         :raises SmokeError: With ``permission_missing`` when the token cannot
             create repositories (fine-grained PAT without Administration write).
@@ -446,6 +462,8 @@ class GitHubSmoke:
         if not isinstance(response.body, MutableMapping):
             raise SmokeError("repository_not_object", name)
         created = dict(response.body)
+        if on_created is not None:
+            on_created(created)
         readback = self.repository(f"{self._owner}/{name}")
         if readback is None or readback.get("id") != created.get("id"):
             raise SmokeError("repository_readback_mismatch", name)
@@ -516,6 +534,36 @@ class GitLabSmoke:
         :param client: REST client already carrying the GitLab credential.
         """
         self._client = client
+        self._server = self._validated_server(client.base_url)
+
+    @staticmethod
+    def _validated_server(url: str) -> str:
+        """Validate the URL before storing it as a ledger authority.
+
+        :param url: Configured GitLab base URL, including any relative root.
+        :returns: The exact credential-free base URL used for requests.
+        :raises SmokeError: The URL is invalid or contains private components.
+        """
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            valid = (
+                parsed.scheme in {"http", "https"}
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+                and not parsed.fragment
+                and not parsed.query
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise SmokeError("gitlab_server_invalid")
+        return url
+
+    @property
+    def server(self) -> str:
+        """Return the GitLab server this client is bound to."""
+        return self._server
 
     def identity(self) -> JSONObject:
         """Read the authenticated GitLab user.
@@ -592,11 +640,18 @@ class GitLabSmoke:
             raise SmokeError("project_not_object", full_path)
         return dict(response.body)
 
-    def create_project(self, group_id: int, name: str) -> JSONObject:
+    def create_project(
+        self,
+        group_id: int,
+        name: str,
+        *,
+        on_created: Optional[CreationObserver] = None,
+    ) -> JSONObject:
         """Create one disposable project inside the smoke group and read it back.
 
         :param group_id: Native group ID the project is created under.
         :param name: Project name; GitLab derives the path from it.
+        :param on_created: Record the create response before the read-back.
         :returns: The created project record with its native ID.
         """
         try:
@@ -621,6 +676,8 @@ class GitLabSmoke:
         if not isinstance(response.body, MutableMapping):
             raise SmokeError("project_not_object", name)
         created = dict(response.body)
+        if on_created is not None:
+            on_created(created)
         path_with_namespace = created.get("path_with_namespace")
         if not isinstance(path_with_namespace, str):
             raise SmokeError("project_path_missing", name)
@@ -764,52 +821,80 @@ def detach_fine_grained_to_repo(github: GitHubSmoke, path: str) -> JSONObject:
     }
 
 
-def create_test_github_repo(github: GitHubSmoke, owner: str, name: str) -> JSONObject:
+def create_test_github_repo(
+    github: GitHubSmoke,
+    owner: str,
+    name: str,
+    *,
+    on_created: Optional[CreationObserver] = None,
+) -> JSONObject:
     """Create the disposable GitHub repository for one smoke run.
 
     :param github: Client carrying the GitHub credential.
     :param owner: Repository owner, recorded for the ledger.
     :param name: Deterministic fixture name.
+    :param on_created: Persist the ownership record before provider read-back.
     :returns: Created object record for the ledger.
     """
-    created = github.create_repository(name)
-    record: JSONObject = {
-        "system": GITHUB_SYSTEM,
-        "kind": REPOSITORY_KIND,
-        "id": _record_identifier(created),
-        "name": name,
-        "path": f"{owner}/{name}",
-        "created": True,
-    }
-    return record
+
+    def ownership(created: JSONObject) -> JSONObject:
+        return {
+            "system": GITHUB_SYSTEM,
+            "kind": REPOSITORY_KIND,
+            "id": _record_identifier(created),
+            "name": name,
+            "path": f"{owner}/{name}",
+            "created": True,
+        }
+
+    def observe(created: JSONObject) -> None:
+        if on_created is not None:
+            on_created(ownership(created))
+
+    return ownership(github.create_repository(name, on_created=observe))
 
 
 def create_test_gitlab_repo(
-    gitlab: GitLabSmoke, group_full_path: str, name: str
+    gitlab: GitLabSmoke,
+    group_full_path: str,
+    name: str,
+    *,
+    on_created: Optional[CreationObserver] = None,
+    on_group_created: Optional[CreationObserver] = None,
 ) -> tuple[JSONObject, JSONObject]:
     """Create the disposable GitLab project for one smoke run.
 
     :param gitlab: Client carrying the GitLab credential.
     :param group_full_path: Smoke group the project lives under.
     :param name: Deterministic fixture name.
+    :param on_created: Persist the project ownership record before read-back.
+    :param on_group_created: Persist a newly created infrastructure group's ID.
     :returns: Created object record and the group record (created or existing).
     """
     group, group_created = gitlab.ensure_group(group_full_path, group_full_path)
     group_id = _record_identifier(group)
-    created = gitlab.create_project(group_id, name)
-    path_with_namespace = created.get("path_with_namespace")
-    record: JSONObject = {
-        "system": GITLAB_SYSTEM,
-        "kind": PROJECT_KIND,
-        "id": _record_identifier(created),
-        "name": name,
-        "path": path_with_namespace if isinstance(path_with_namespace, str) else name,
-        "created": True,
-        "group_id": group_id,
-        "group_path": group_full_path,
-        "group_created": group_created,
-    }
-    return record, group
+    if group_created and on_group_created is not None:
+        on_group_created({"id": group_id, "path": group_full_path})
+
+    def ownership(created: JSONObject) -> JSONObject:
+        path = created.get("path_with_namespace")
+        return {
+            "system": GITLAB_SYSTEM,
+            "kind": PROJECT_KIND,
+            "id": _record_identifier(created),
+            "name": name,
+            "path": path if isinstance(path, str) else f"{group_full_path}/{name}",
+            "created": True,
+            "group_id": group_id,
+            "group_path": group_full_path,
+            "group_created": group_created,
+        }
+
+    def observe(created: JSONObject) -> None:
+        if on_created is not None:
+            on_created(ownership(created))
+
+    return ownership(gitlab.create_project(group_id, name, on_created=observe)), group
 
 
 @dataclass
@@ -825,6 +910,8 @@ class SmokeLedger:
     created_at: str = field(default_factory=utc_now)
     closed_at: Optional[str] = None
     cleanup: MutableMapping[str, JSONObject] = field(default_factory=dict)
+    gitlab_server: Optional[str] = None
+    gitlab_group: Optional[JSONObject] = None
 
     def to_json(self) -> JSONObject:
         """Serialize the ledger in its on-disk shape.
@@ -843,6 +930,8 @@ class SmokeLedger:
             "closed_at": self.closed_at,
             "objects": dict(self.objects),
             "cleanup": dict(self.cleanup),
+            "gitlab_server": self.gitlab_server,
+            "gitlab_group": self.gitlab_group,
         }
         return document
 
@@ -871,6 +960,12 @@ class SmokeLedger:
             if not isinstance(value, MutableMapping):
                 raise SmokeError("ledger_invalid", f"objects.{key}")
             objects[str(key)] = dict(value)
+        server = document.get("gitlab_server")
+        group = document.get("gitlab_group")
+        if server is not None and not isinstance(server, str):
+            raise SmokeError("ledger_invalid", "gitlab_server")
+        if group is not None and not isinstance(group, Mapping):
+            raise SmokeError("ledger_invalid", "gitlab_group")
         ledger = cls(
             run_id=run_id,
             phase=phase,
@@ -879,6 +974,8 @@ class SmokeLedger:
             objects=objects,
             status=status,
             created_at=created_at,
+            gitlab_server=server,
+            gitlab_group=dict(group) if group is not None else None,
         )
         closed = document.get("closed_at")
         ledger.closed_at = str(closed) if closed is not None else None
@@ -900,17 +997,18 @@ class SmokeLedger:
         return state_dir / f"{sanitize_segment(run_id, 'run_id')}.json"
 
     def write(self, state_dir: Path) -> Path:
-        """Write the ledger atomically enough for a fixture tool.
+        """Replace the ledger after syncing its new contents to disk.
 
         :param state_dir: Directory that holds smoke ledgers.
         :returns: The ledger path written.
+        :raises SmokeError: The ledger cannot be saved.
         """
-        state_dir.mkdir(parents=True, exist_ok=True)
         path = self.path_for(state_dir, self.run_id)
-        path.write_text(
-            json.dumps(self.to_json(), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            _write_ledger(path, self.to_json())
+        except (OSError, QualificationError) as exc:
+            raise SmokeError("ledger_write_failed", str(path)) from exc
         return path
 
     @classmethod
@@ -1034,13 +1132,29 @@ class LiveSmoke:
             phase=sanitize_segment(phase, "phase"),
             case=sanitize_segment(case, "case"),
             name=name,
+            gitlab_server=self._gitlab.server,
         )
-        ledger.objects[GITHUB_SYSTEM] = create_test_github_repo(
-            self._github, self._owner, name
-        )
-        gitlab_record, _ = create_test_gitlab_repo(self._gitlab, self._group_path, name)
-        ledger.objects[GITLAB_SYSTEM] = gitlab_record
         ledger.write(state_dir)
+
+        def record_fixture(record: JSONObject) -> None:
+            system = str(record["system"])
+            ledger.objects[system] = record
+            ledger.write(state_dir)
+
+        def record_group(record: JSONObject) -> None:
+            ledger.gitlab_group = record
+            ledger.write(state_dir)
+
+        create_test_github_repo(
+            self._github, self._owner, name, on_created=record_fixture
+        )
+        create_test_gitlab_repo(
+            self._gitlab,
+            self._group_path,
+            name,
+            on_created=record_fixture,
+            on_group_created=record_group,
+        )
         return ledger
 
     def cleanup(
@@ -1063,6 +1177,10 @@ class LiveSmoke:
         ledger = SmokeLedger.read(state_dir, run_id)
         if ledger.status != LEDGER_STATUS_OPEN:
             raise SmokeError("run_already_closed", run_id)
+        if ledger.gitlab_server != self._gitlab.server:
+            raise SmokeError(
+                "gitlab_server_mismatch", "select the original GitLab server"
+            )
         for key in sorted(ledger.objects):
             record = ledger.objects[key]
             system = record.get("system")

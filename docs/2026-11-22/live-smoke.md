@@ -44,7 +44,9 @@ tools/live-smoke.py cleanup --run-id r20261122a
 tools/live-smoke.py cleanup --run-id r20261122a --reconcile
 ```
 
-`apply` writes `<state-dir>/<run_id>.json` (default `.internal/scratch/live-smoke`).
+`apply` opens `<state-dir>/<run_id>.json` (default `.internal/scratch/live-smoke`) before creating fixtures.
+It saves each created native ID before the next provider request. Cleanup requires the
+recorded GitLab server before contacting either provider. Older ledgers without a server binding require manual reconciliation.
 `cleanup` re-reads every object, requires the recorded native ID, deletes, proves
 absence by path and by native ID, and repeats the absence read-back. GitLab answers
 project deletion with HTTP 202 and removes asynchronously; the tool polls to 404.

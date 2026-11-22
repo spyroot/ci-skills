@@ -15,19 +15,19 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import urllib.error
 import urllib.parse
 from http import HTTPStatus
+from importlib import import_module
 from pathlib import Path
 from typing import Self
 
 import pytest
-from conftest import REPO_ROOT, load_module
+from conftest import REPO_ROOT
 
-live_smoke = load_module(
-    "ci_skills_test_live_smoke_skillkit",
-    REPO_ROOT / "tools" / "skillkit" / "live_smoke.py",
-)
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+live_smoke = import_module("skillkit.live_smoke")
 
 GITHUB_HOST = "api.github.test"
 GITLAB_HOST = "gitlab.dcloud.test"
@@ -411,6 +411,96 @@ def test_cleanup_reconcile_finishes_partial(
     assert closed.cleanup["github"]["mutated"] is False
     assert closed.cleanup["gitlab"]["mutated"] is True
     assert closed.status == live_smoke.LEDGER_STATUS_CLOSED
+
+
+@pytest.mark.parametrize("wrong_server", [None, "https://different.example"])
+def test_cleanup_checks_recorded_gitlab_server_before_provider_calls(
+    smoke: tuple[live_smoke.LiveSmoke, FakeGitHub, FakeGitLab],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    wrong_server: str | None,
+) -> None:
+    """Block legacy unbound or mismatched ledgers before making any requests."""
+    session, _, _ = smoke
+    session.apply("ci14", "mirror", "run1", tmp_path)
+    path = tmp_path / "run1.json"
+    document = json.loads(path.read_text())
+    if wrong_server is None:
+        document.pop("gitlab_server", None)
+    else:
+        document["gitlab_server"] = wrong_server
+    path.write_text(json.dumps(document))
+    before = path.read_bytes()
+
+    def refuse_request(request: object, timeout_seconds: float) -> object:
+        pytest.fail("cleanup contacted a provider with an unverified GitLab server")
+
+    monkeypatch.setattr(live_smoke, "_urlopen", refuse_request)
+    with pytest.raises(live_smoke.SmokeError, match="gitlab_server_mismatch"):
+        session.cleanup(tmp_path, "run1", reconcile=True)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("provider", "method", "route", "objects", "group_recorded"),
+    [
+        (GITHUB_HOST, "GET", "/repos/", ("github",), False),
+        (GITLAB_HOST, "GET", "/api/v4/groups/", ("github",), False),
+        (GITLAB_HOST, "POST", "/api/v4/projects", ("github",), True),
+        (GITLAB_HOST, "GET", "/api/v4/projects/", ("github", "gitlab"), True),
+    ],
+)
+def test_apply_journals_native_id_before_next_provider_call(
+    smoke: tuple[live_smoke.LiveSmoke, FakeGitHub, FakeGitLab],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    method: str,
+    route: str,
+    objects: tuple[str, ...],
+    group_recorded: bool,
+) -> None:
+    """Persist each creation before read-back or a later provider failure."""
+    session, github, gitlab = smoke
+    transport = live_smoke._urlopen
+
+    def fail_after_create(request: object, timeout_seconds: float) -> object:
+        url = urllib.parse.urlsplit(request.full_url)
+        if (
+            github.repositories
+            and url.netloc == provider
+            and request.get_method() == method
+            and url.path.startswith(route)
+            and (not route.startswith("/api/v4/projects/") or gitlab.projects)
+        ):
+            ledger = live_smoke.SmokeLedger.read(tmp_path, "run1").to_json()
+            assert set(ledger["objects"]) == set(objects)
+            assert ledger["gitlab_server"] == f"https://{GITLAB_HOST}"
+            assert (
+                ledger["objects"]["github"]["id"]
+                == next(iter(github.repositories.values()))["id"]
+            )
+            if "gitlab" in objects:
+                assert (
+                    ledger["objects"]["gitlab"]["id"]
+                    == next(iter(gitlab.projects.values()))["id"]
+                )
+            group = ledger["gitlab_group"]
+            if group_recorded:
+                assert group["id"] == next(iter(gitlab.groups.values()))["id"]
+            else:
+                assert group is None
+            raise live_smoke.SmokeError("injected_provider_failure")
+        return transport(request, timeout_seconds)
+
+    with monkeypatch.context() as failure:
+        failure.setattr(live_smoke, "_urlopen", fail_after_create)
+        with pytest.raises(live_smoke.SmokeError, match="injected_provider_failure"):
+            session.apply("ci14", "mirror", "run1", tmp_path)
+
+    assert session.cleanup(tmp_path, "run1", reconcile=True).status == "closed"
+    assert not github.repositories
+    assert not gitlab.projects
 
 
 def test_create_fine_grained_reports_without_token(
