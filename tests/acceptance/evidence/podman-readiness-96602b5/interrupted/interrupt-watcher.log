@@ -26,7 +26,7 @@ NAME                                      STATUS    COMPLETIONS   DURATION   AGE
 ci-skills-podman-probe-a6d3cc7f51a081ed   Running   0/1           4s         5s    podman-probe   quay.io/podman/stable@sha256:5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3   batch.kubernetes.io/controller-uid=9fe6ca10-f37a-4ee7-803e-84eb7e2e6b81
 == selected payload pid: 9025 (wrapper 8784) ==
 == SIGINT to payload 9025 at 2026-11-22T10:22:11Z ==
-!! payload still alive 3s after SIGINT; state: S   
+!! payload still alive 3s after SIGINT; state: S
 == second SIGINT ==
 2026-11-22T10:22:17Z poll=21 new_job='ci-skills-a6d3cc7f51a081edc1d4      ci-skills-podman-probe-a6d3cc7f51a081ed                           <none>'
 2026-11-22T10:22:19Z poll=22 new_job='ci-skills-a6d3cc7f51a081edc1d4      ci-skills-podman-probe-a6d3cc7f51a081ed                           <none>'

@@ -1,11 +1,11 @@
 {
-  "captured_at": "2026-11-22T11:24:43.095409+00:00",
+  "captured_at": "2026-11-22T13:52:29.936898+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
   },
   "errors": [],
-  "execution_host": "johnnys-mbp.localdomain",
+  "execution_host": "spyroots-macbook-pro.local",
   "filters": {
     "create_if_absent": true,
     "destination": "spyroot/test-mirror-push",
@@ -15,14 +15,14 @@
   "kind": "gitlab_mirror",
   "mutated": false,
   "operation": "sync",
-  "plan_digest": "9c03c0aee7474836f3f6b112e833d85abb3932502834c523bcb6e67d037fd8e2",
+  "plan_digest": "e4160fdbcd93c2fa883d9a4fd49b71632fd6c7ab72c059b4f1fb7ccf36e0f8fb",
   "records": [
     {
       "action": "NO_OP",
       "before": {
         "destination": {
           "host": "github.com",
-          "id": 1467484939,
+          "id": 1467607660,
           "path": "spyroot/test-mirror-push"
         },
         "destination_refs": {
@@ -32,10 +32,10 @@
         "mirror": {
           "auth_method": "password",
           "enabled": true,
-          "id": 33,
+          "id": 38,
           "keep_divergent_refs": true,
           "last_error_present": false,
-          "last_successful_update_at": "2026-11-22T11:23:18.504Z",
+          "last_successful_update_at": "2026-11-22T13:50:46.877Z",
           "only_protected_branches": false,
           "update_status": "finished"
         },
@@ -56,7 +56,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1467484939,
+        "id": 1467607660,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -66,10 +66,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 33,
+        "id": 38,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-22T11:23:18.504Z",
+        "last_successful_update_at": "2026-11-22T13:50:46.877Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -89,10 +89,10 @@
     }
   ],
   "routing": {
-    "gitlab": "gitlab_private",
-    "harbor": "harbor",
-    "kubernetes": "kubernetes",
-    "selected_by": "default"
+    "gitlab": "gitlab",
+    "harbor": null,
+    "kubernetes": null,
+    "selected_by": "argv:--gitlab=private"
   },
   "schema_version": "1.1",
   "skill": {
@@ -106,7 +106,7 @@
     "functional_digest": "aeb18420744470875ea7e357869c05cc16fb49ac9270322c87b593f0925acfca",
     "revision": {
       "source": "installer_record",
-      "value": "5db056fb985bb908279ddfedf1a919cd0995bb74",
+      "value": "fec7858cb8c58ef1e215d14558e4661f18292895",
       "verified": true
     }
   },
@@ -124,22 +124,22 @@
     "before": {
       "destination": {
         "host": "github.com",
-        "id": 1467484939,
+        "id": 1467607660,
         "path": "spyroot/test-mirror-push"
       },
-      "mirror_id": 33,
+      "mirror_id": 38,
       "source": {
         "host": "gitlab.dcloud.run",
         "id": 261,
         "path": "hott/test-mirror-push"
       }
     },
-    "captured_at": "2026-11-22T11:25:43.223677+00:00",
+    "captured_at": "2026-11-22T13:53:54.200842+00:00",
     "delete": {
       "destination_http_status": 204,
       "mirror_http_status": 204
     },
-    "execution_host": "johnnys-mbp.localdomain",
+    "execution_host": "spyroots-macbook-pro.local",
     "kind": "gitlab_mirror_smoke_cleanup",
     "repeat": {
       "destination_http_status": 404,
@@ -154,7 +154,7 @@
     },
     "skill_digest": "2522bff6e0991ad4fd691101a0e9bbfc051ac2de41b14371e01565360210e321",
     "status": "PASS",
-    "tested_revision": "5db056fb985bb908279ddfedf1a919cd0995bb74"
+    "tested_revision": "fec7858cb8c58ef1e215d14558e4661f18292895"
   },
   "status": "PASS",
   "summary": {
@@ -162,6 +162,6 @@
     "record_count": 1
   },
   "target": "https://gitlab.dcloud.run",
-  "target_source": "user",
-  "tested_revision": "5db056fb985bb908279ddfedf1a919cd0995bb74"
+  "target_source": "user;argv:--gitlab=private",
+  "tested_revision": "fec7858cb8c58ef1e215d14558e4661f18292895"
 }
