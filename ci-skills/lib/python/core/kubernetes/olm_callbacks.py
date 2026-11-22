@@ -71,7 +71,15 @@ def _catalogs_for(service, package: str) -> dict[CatalogSourceRef, JSONObject]:
     :returns: Mapping of catalog source identity to its PackageManifest.
     :raises KubernetesError: If the list call fails.
     """
-    document = service.json("get", PACKAGEMANIFEST_RESOURCE, "-A", "-o", "json")
+    document = service.json(
+        "get",
+        PACKAGEMANIFEST_RESOURCE,
+        "-A",
+        "--field-selector",
+        f"metadata.name={package}",
+        "-o",
+        "json",
+    )
     found: dict[CatalogSourceRef, JSONObject] = {}
     items = document.get("items", []) if isinstance(document, dict) else []
     for item in items:
@@ -102,6 +110,36 @@ def _channel_entry(manifest: JSONObject, channel: str) -> Optional[JSONObject]:
     return None
 
 
+def _supported_modes(
+    manifest: JSONObject, csv: Optional[JSONObject]
+) -> tuple[str, ...]:
+    """List install modes the cluster evidences for the resolved channel.
+
+    The installed CSV carries ``spec.installModes`` once the package is
+    enabled; some clusters also list modes on the PackageManifest channel
+    entry. When neither states any, the result is empty and the caller's
+    choice or ``OwnNamespace`` stands unverified.
+
+    :param manifest: Selected PackageManifest.
+    :param csv: Installed CSV when present, else ``None``.
+    :returns: Supported install-mode names in cluster order.
+    """
+    candidates = None
+    if csv is not None:
+        candidates = csv.get("spec", {}).get("installModes")
+    if not candidates:
+        status = manifest.get("status", {})
+        for entry in status.get("channels", []):
+            if entry.get("installModes"):
+                candidates = entry["installModes"]
+                break
+    supported: list[str] = []
+    for mode in candidates or []:
+        if mode.get("supported") is not False:
+            supported.append(str(mode.get("type")))
+    return tuple(supported)
+
+
 def _resolve_plan(
     action: OLMAction, service
 ) -> tuple[OperatorPlan, list[OperatorNeed]]:
@@ -109,16 +147,18 @@ def _resolve_plan(
 
     :param action: Prepared OLM action with caller overrides.
     :param service: Verified Kubernetes service retained by the workflow.
-    :returns: The resolved plan and the needs list; exactly one is non-empty.
+    :returns: The resolved plan and the needs list; needs may be non-empty
+        while the plan still carries every resolved evidence field.
     """
     needs: list[OperatorNeed] = []
+    placeholder_catalog = CatalogSourceRef("", "")
     if not _olm_available(service):
         return (
             OperatorPlan(
                 action.package,
                 action.namespace,
                 "",
-                CatalogSourceRef("", ""),
+                placeholder_catalog,
                 INSTALL_MODE_OWN_NAMESPACE,
                 APPROVAL_AUTOMATIC,
             ),
@@ -132,62 +172,61 @@ def _resolve_plan(
         )
     catalogs = _catalogs_for(service, action.package)
     if not catalogs:
-        needs.append(
-            OperatorNeed(
-                need=NEED_PACKAGE_UNKNOWN,
-                evidence=f"no PackageManifest named {action.package}",
-                supply="pass --package with a name the cluster catalog serves",
-            )
+        return (
+            OperatorPlan(
+                action.package,
+                action.namespace,
+                "",
+                placeholder_catalog,
+                INSTALL_MODE_OWN_NAMESPACE,
+                APPROVAL_AUTOMATIC,
+            ),
+            [
+                OperatorNeed(
+                    need=NEED_PACKAGE_UNKNOWN,
+                    evidence=f"no PackageManifest named {action.package}",
+                    supply="pass --package with a name the cluster catalog serves",
+                )
+            ],
         )
-    selected: Optional[CatalogSourceRef] = None
-    if catalogs:
-        override_key = None
-        if action.overrides.source is not None:
-            override_key = CatalogSourceRef(
-                action.overrides.source,
-                action.overrides.source_namespace or "openshift-marketplace",
-            )
-        candidates = [override_key] if override_key is not None else list(catalogs)
-        selected = next((key for key in candidates if key in catalogs), None)
-        if selected is None:
-            needs.append(
+    override_key = None
+    if action.overrides.source is not None:
+        override_key = CatalogSourceRef(
+            action.overrides.source,
+            action.overrides.source_namespace or "openshift-marketplace",
+        )
+    candidates = [override_key] if override_key is not None else list(catalogs)
+    selected = next((key for key in candidates if key in catalogs), None)
+    if selected is None or (override_key is None and len(catalogs) > 1):
+        return (
+            OperatorPlan(
+                action.package,
+                action.namespace,
+                "",
+                placeholder_catalog,
+                INSTALL_MODE_OWN_NAMESPACE,
+                APPROVAL_AUTOMATIC,
+            ),
+            [
                 OperatorNeed(
                     need=NEED_SOURCE_AMBIGUOUS,
                     evidence="catalog sources: "
                     + ", ".join(f"{key.name}/{key.namespace}" for key in catalogs),
                     supply="pass --source and --source-namespace matching one listed source",
                 )
-            )
-        elif override_key is None and len(catalogs) > 1:
-            needs.append(
-                OperatorNeed(
-                    need=NEED_SOURCE_AMBIGUOUS,
-                    evidence="several catalog sources serve the package: "
-                    + ", ".join(f"{key.name}/{key.namespace}" for key in catalogs),
-                    supply="pass --source and --source-namespace to select one",
-                )
-            )
-    if needs:
-        placeholder = CatalogSourceRef("", "")
-        return (
-            OperatorPlan(
-                action.package,
-                action.namespace,
-                "",
-                placeholder,
-                INSTALL_MODE_OWN_NAMESPACE,
-                APPROVAL_AUTOMATIC,
-            ),
-            needs,
+            ],
         )
     manifest = catalogs[selected]
     status = manifest.get("status", {})
-    default_channel = str(status.get("defaultChannel", ""))
     existing = service.read(SUBSCRIPTION_RESOURCE, action.package, action.namespace)
     existing_channel = (
         existing.get("spec", {}).get("channel") if existing is not None else None
     )
-    channel = action.overrides.channel or existing_channel or default_channel
+    channel = (
+        action.overrides.channel
+        or existing_channel
+        or str(status.get("defaultChannel", ""))
+    )
     entry = _channel_entry(manifest, channel)
     if entry is None:
         listed = ", ".join(str(item.get("name")) for item in status.get("channels", []))
@@ -208,56 +247,35 @@ def _resolve_plan(
                 )
             ],
         )
-    install_mode = action.overrides.install_mode or INSTALL_MODE_OWN_NAMESPACE
-    modes = [str(mode.get("type")) for mode in entry.get("installModes", [])]
-    if install_mode not in modes:
-        return (
-            OperatorPlan(
-                action.package,
-                action.namespace,
-                channel,
-                selected,
-                install_mode,
-                APPROVAL_AUTOMATIC,
-            ),
-            [
-                OperatorNeed(
-                    need=NEED_MODE_UNSUPPORTED,
-                    evidence=f"install mode {install_mode!r} not in channel modes: {', '.join(modes)}",
-                    supply="pass --install-mode with one of the listed modes",
-                )
-            ],
-        )
-    approval = action.overrides.approval or APPROVAL_AUTOMATIC
-    if approval not in APPROVALS:
-        return (
-            OperatorPlan(
-                action.package,
-                action.namespace,
-                channel,
-                selected,
-                install_mode,
-                approval,
-            ),
-            [
-                OperatorNeed(
-                    need=NEED_APPROVAL_INVALID,
-                    evidence=f"approval {approval!r} not one of {', '.join(APPROVALS)}",
-                    supply="pass --approval Automatic or Manual",
-                )
-            ],
-        )
-    subscription = existing
     installed_csv: Optional[str] = None
-    csv_phase: Optional[str] = None
-    if subscription is not None:
-        installed_csv = subscription.get("status", {}).get("installedCSV") or None
+    csv: Optional[JSONObject] = None
+    if existing is not None:
+        installed_csv = existing.get("status", {}).get("installedCSV") or None
         if installed_csv:
             csv = service.read(
                 CLUSTERSERVICEVERSION_RESOURCE, installed_csv, action.namespace
             )
-            if csv is not None:
-                csv_phase = csv.get("status", {}).get("phase")
+    csv_phase = csv.get("status", {}).get("phase") if csv is not None else None
+    install_mode = action.overrides.install_mode or INSTALL_MODE_OWN_NAMESPACE
+    supported = _supported_modes(manifest, csv)
+    if supported and install_mode not in supported:
+        needs.append(
+            OperatorNeed(
+                need=NEED_MODE_UNSUPPORTED,
+                evidence=f"install mode {install_mode!r} not in supported modes: "
+                + ", ".join(supported),
+                supply="pass --install-mode with one of the listed modes",
+            )
+        )
+    approval = action.overrides.approval or APPROVAL_AUTOMATIC
+    if approval not in APPROVALS:
+        needs.append(
+            OperatorNeed(
+                need=NEED_APPROVAL_INVALID,
+                evidence=f"approval {approval!r} not one of {', '.join(APPROVALS)}",
+                supply="pass --approval Automatic or Manual",
+            )
+        )
     if action.overrides.starting_csv is not None:
         csvs = {str(item.get("name")) for item in entry.get("entries", [])}
         if action.overrides.starting_csv not in csvs:
@@ -268,20 +286,7 @@ def _resolve_plan(
                     supply="pass --starting-csv with a CSV of the chosen channel",
                 )
             )
-    plan = OperatorPlan(
-        package=action.package,
-        namespace=action.namespace,
-        channel=channel,
-        catalog=selected,
-        install_mode=install_mode,
-        approval=approval,
-        starting_csv=action.overrides.starting_csv,
-        existing_subscription=subscription,
-        installed_csv=installed_csv,
-        csv_phase=csv_phase,
-    )
-    if subscription is not None and action.overrides.channel is not None:
-        existing_channel = subscription.get("spec", {}).get("channel")
+    if existing is not None and action.overrides.channel is not None:
         if existing_channel != channel:
             needs.append(
                 OperatorNeed(
@@ -290,7 +295,21 @@ def _resolve_plan(
                     supply="remove --channel or remove the existing Subscription first",
                 )
             )
-    return plan, needs
+    return (
+        OperatorPlan(
+            package=action.package,
+            namespace=action.namespace,
+            channel=channel,
+            catalog=selected,
+            install_mode=install_mode,
+            approval=approval,
+            starting_csv=action.overrides.starting_csv,
+            existing_subscription=existing,
+            installed_csv=installed_csv,
+            csv_phase=csv_phase,
+        ),
+        needs,
+    )
 
 
 def plan_evidence(plan: OperatorPlan) -> JSONObject:

@@ -66,11 +66,11 @@ class ResolveShippedResource(K8SCallback[OLMAction]):
             )
             examples = alm_examples(csv) if csv is not None else []
             document = next(
-                (item for item in examples if item.get("kind") == args.kind),
+                (item for item in examples if item.get("kind") == args.resource_kind),
                 None,
             )
             if document is None:
-                raise ValueError(f"operator_shipped_example_missing: {args.kind}")
+                raise ValueError(f"operator_shipped_example_missing: {args.resource_kind}")
         self.state.shipped_document = document
         metadata = document.get("metadata", {})
         return {

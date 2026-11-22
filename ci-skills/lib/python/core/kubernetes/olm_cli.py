@@ -102,9 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
     result.add_argument("--starting-csv", action=SingleValue, metavar="NAME")
     result.add_argument(
         "--kind",
+        dest="resource_kind",
         action=SingleValue,
         metavar="KIND",
-        help="shipped custom resource kind",
+        help="shipped custom resource kind to apply",
     )
     result.add_argument(
         "--shipped-default",
@@ -236,7 +237,7 @@ class OCPOperator:
             raise ValueError("operator_package_namespace_required")
         if mode == ActionMode.APPLY:
             raise ValueError(APPLY_NOT_DELIVERED)
-        if self.args.action == "apply" and not self.args.kind:
+        if self.args.action == "apply" and not self.args.resource_kind:
             raise ValueError("operator_kind_required")
         wait_for = None
         if self.args.wait_for:
@@ -336,12 +337,12 @@ class OCPOperator:
             }
         if (
             self.state.results
-            or self.state.cleanup_resources
+            or self.state.cleanup_results
             or self.state.cleanup_failures
         ):
             output["cleanup"] = {
                 "status": BLOCKED if self.state.cleanup_failures else PASS,
-                "resources": copy_json(self.state.cleanup_resources),
+                "resources": copy_json(self.state.cleanup_results),
                 "failures": copy_json(self.state.cleanup_failures),
             }
         return output
@@ -375,6 +376,7 @@ class OCPOperator:
                 executor = workflow(self.action)
                 executor.run()
                 output.update(status=PLANNED)
+                self._state_evidence(output)
             records = self._records()
         except (KeyboardInterrupt, SystemExit):
             output = (
