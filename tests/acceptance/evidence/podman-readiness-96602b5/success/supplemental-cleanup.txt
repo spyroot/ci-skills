@@ -1,0 +1,7 @@
+independent absence read-back at 2026-11-22T09:58:06Z
+namespace ci-skills-7b70b4f99a861d81cf8a:
+Error from server (NotFound): namespaces "ci-skills-7b70b4f99a861d81cf8a" not found
+job ci-skills-7b70b4f99a861d81 in ci-skills-7b70b4f99a861d81cf8a:
+Error from server (NotFound): namespaces "ci-skills-7b70b4f99a861d81cf8a" not found
+pods in ci-skills-7b70b4f99a861d81cf8a:
+No resources found in ci-skills-7b70b4f99a861d81cf8a namespace.

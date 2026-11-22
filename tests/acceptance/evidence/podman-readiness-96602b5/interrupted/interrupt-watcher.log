@@ -1,0 +1,43 @@
+== starting probe apply on node-125 at 2026-11-22T10:20:57Z ==
+2026-11-22T10:20:59Z poll=1 new_job=''
+2026-11-22T10:21:02Z poll=2 new_job=''
+2026-11-22T10:21:05Z poll=3 new_job=''
+2026-11-22T10:21:08Z poll=4 new_job=''
+2026-11-22T10:21:11Z poll=5 new_job=''
+E1122 10:21:17.430567   11243 memcache.go:381] "Couldn't get current server API group list" err="Get \"https://api.ww-cai-cisco-live.dcloud.local:6443/api?timeout=5s\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+2026-11-22T10:21:20Z poll=6 new_job=''
+2026-11-22T10:21:23Z poll=7 new_job=''
+2026-11-22T10:21:25Z poll=8 new_job=''
+2026-11-22T10:21:28Z poll=9 new_job=''
+2026-11-22T10:21:31Z poll=10 new_job=''
+2026-11-22T10:21:34Z poll=11 new_job=''
+2026-11-22T10:21:38Z poll=12 new_job=''
+2026-11-22T10:21:41Z poll=13 new_job=''
+2026-11-22T10:21:44Z poll=14 new_job=''
+E1122 10:21:50.258550   13428 memcache.go:381] "Couldn't get current server API group list" err="Get \"https://api.ww-cai-cisco-live.dcloud.local:6443/api?timeout=5s\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+2026-11-22T10:21:51Z poll=15 new_job=''
+2026-11-22T10:21:55Z poll=16 new_job=''
+2026-11-22T10:21:58Z poll=17 new_job=''
+2026-11-22T10:22:01Z poll=18 new_job=''
+2026-11-22T10:22:05Z poll=19 new_job=''
+2026-11-22T10:22:08Z poll=20 new_job='ci-skills-a6d3cc7f51a081edc1d4      ci-skills-podman-probe-a6d3cc7f51a081ed                           <none>'
+== new probe job seen at 2026-11-22T10:22:08Z: ci-skills-a6d3cc7f51a081edc1d4      ci-skills-podman-probe-a6d3cc7f51a081ed                           <none> ==
+NAME                                      STATUS    COMPLETIONS   DURATION   AGE   CONTAINERS     IMAGES                                                                                          SELECTOR
+ci-skills-podman-probe-a6d3cc7f51a081ed   Running   0/1           4s         5s    podman-probe   quay.io/podman/stable@sha256:5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3   batch.kubernetes.io/controller-uid=9fe6ca10-f37a-4ee7-803e-84eb7e2e6b81
+== selected payload pid: 9025 (wrapper 8784) ==
+== SIGINT to payload 9025 at 2026-11-22T10:22:11Z ==
+!! payload still alive 3s after SIGINT; state: S   
+== second SIGINT ==
+2026-11-22T10:22:17Z poll=21 new_job='ci-skills-a6d3cc7f51a081edc1d4      ci-skills-podman-probe-a6d3cc7f51a081ed                           <none>'
+2026-11-22T10:22:19Z poll=22 new_job='ci-skills-a6d3cc7f51a081edc1d4      ci-skills-podman-probe-a6d3cc7f51a081ed                           <none>'
+2026-11-22T10:22:22Z poll=23 new_job=''
+2026-11-22T10:22:25Z poll=24 new_job=''
+E1122 10:22:31.848221   16813 memcache.go:381] "Couldn't get current server API group list" err="Get \"https://api.ww-cai-cisco-live.dcloud.local:6443/api?timeout=5s\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+2026-11-22T10:22:33Z poll=25 new_job=''
+2026-11-22T10:22:38Z poll=26 new_job=''
+2026-11-22T10:22:41Z poll=27 new_job=''
+2026-11-22T10:22:45Z poll=28 new_job=''
+2026-11-22T10:22:50Z poll=29 new_job=''
+2026-11-22T10:22:56Z poll=30 new_job=''
+2026-11-22T10:23:01Z poll=31 new_job=''
+== wrapper exited at poll 31 ==

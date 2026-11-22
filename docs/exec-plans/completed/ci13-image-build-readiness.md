@@ -30,14 +30,20 @@ external live acceptance.
 - [x] Standalone probe and owned SCC cleanup passed in [PR81](https://github.com/spyroot/ci-skills/pull/81).
 - [x] Milestone 1 successful probe: [recorded final evidence][probe-final] shows all marker rows, exit 0 and
       owned permission/resource cleanup.
-- [ ] Milestone 1 interruption: genuinely interrupt the installed command while its Job runs, then prove
-      Job/namespace/run-owned permission absence. The recorded attempt sent no signal and does not satisfy this.
+- [x] Milestone 1 interruption: [established evidence](../../../tests/acceptance/evidence/podman-readiness-96602b5/interrupted/receipt.json)
+      shows `BLOCKED` with reason `interrupted` sent while the probe Job was `Running` (0/1), and the owned Job,
+      ConfigMap, RoleBinding and Namespace verified absent, with an independent `NotFound` read.
 - [x] CI13-R1: Milestone 2 code is present at `ff1fdc8`: the `chain` verb composes toolbox build, Harbor
       publication and runner configuration through `core/kubernetes/image_build_chain/workflow.py`.
 - [x] Historical chain `92713cc`: verified build/publication/deployment and independent online runner read-back
       are captured in [chain receipt][chain-927] and [runner read-back][runner-927].
-- [ ] Milestone 2 remaining proof: one current-candidate full-chain invocation with a linked external consumer
-      job and owned cleanup. The separate `bcf7d598` manager job is not proof of the whole chain command.
+- [x] Milestone 2 current-candidate proof: one full-chain invocation from the installed head `96602b5` published
+      `hott/ci13-chain-proof@sha256:974533d1…`, created GitLab runner `135` (`ci13-chain-proof`) and deployed the
+      manager `ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7`; evidence in
+      [chain receipt](../../../tests/acceptance/evidence/image-build-chain/96602b5/chain-receipt.json) and
+      [runner read-back](../../../tests/acceptance/evidence/image-build-chain/96602b5/runner-readback.json).
+      A linked external consumer job on that runner and its owned cleanup are recorded in
+      [consumer job evidence](../../../tests/acceptance/evidence/image-build-chain/96602b5/consumer-job.json).
 - [x] Open question 1 (command surface and default digests) answered by the owner.
 - [x] Open question 2 (gate wiring for this command's receipts) answered by the owner.
 - [x] Open question 4 answered: reuse existing permission or create, verify and clean one run-owned RoleBinding.
@@ -52,7 +58,18 @@ CI13-R1: the phase's unmerged chain label predates the implementation now presen
 receipt `92871b2` includes superseded probe/consumer callbacks and does not prescribe the current composition.
 The later `92713cc` and `ffeebba` receipts end at deployment; their narrow historical results remain evidence.
 The [probe evidence](../../../tests/acceptance/evidence/podman-readiness-final/README.md) explicitly records that
-its interruption attempt sent no signal, so interruption proof remains open.
+its interruption attempt sent no signal, so interruption proof remains open there. It is now established by the
+[current-candidate evidence](../../../tests/acceptance/evidence/podman-readiness-96602b5/interrupted/receipt.json).
+
+Closure findings (2026-11-22): three interruption attempts that sent SIGINT to the `conda run` wrapper or an
+intermediate shell completed normally, because the signal never reached the payload python process and
+`wait_job` blocks inside one `kubectl wait` call. The proof requires selecting the payload process whose command
+is the installed `bin/image_build_readiness.py` and signalling it directly while the Job is `Running`; on a
+warm node the Job window can shrink below the poll interval, so a cold-cache node gives a reliable window. The
+chain's default timeout is shorter than the Harbor-to-Harbor toolbox copy on this cluster; the successful run
+used `--timeout 3600`. The consumer branch must be cut from the project's actual default branch
+(`neroshige/ci-skills-job-list-smoke-20261007` on `hott/test`), which also carries a `.gitlab-ci.yml` the smoke
+branch updates rather than creates.
 
 ## Decision Log
 
@@ -86,13 +103,34 @@ its interruption attempt sent no signal, so interruption proof remains open.
   with no confirm callback; the mode rules are one shared validator in `core/action_modes.py` rather than a fourth
   copy, and the GitLab adapter switches to it in the same pull request.
 
+- DEC-CI13-R3: closure (2026-11-22). Both open proofs are established against one installed revision, `96602b5`
+  (functional digest `62176432`): the interruption proof ([receipt](../../../tests/acceptance/evidence/podman-readiness-96602b5/interrupted/receipt.json))
+  and the current-candidate chain with a linked external consumer job ([chain receipt](../../../tests/acceptance/evidence/image-build-chain/96602b5/chain-receipt.json),
+  [runner read-back](../../../tests/acceptance/evidence/image-build-chain/96602b5/runner-readback.json),
+  [consumer job](../../../tests/acceptance/evidence/image-build-chain/96602b5/consumer-job.json)). The successful
+  probe evidence at the same revision is [recorded here](../../../tests/acceptance/evidence/podman-readiness-96602b5/success/receipt.json).
+  The plan moves to `completed/`; findings that matter for reuse (payload-process signal delivery, the chain's
+  copy duration versus the default timeout, and the consumer branch's base ref) are recorded under
+  Surprises & Discoveries.
+
 ## Outcomes & Retrospective
 
 PR81 merged the standalone probe with [live proof](../../phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
-Interruption proof remains unestablished. Milestone 2's toolbox-backed runner chain is implemented at `ff1fdc8`;
-Historical `92713cc` records build/publication/deployment proof; current-chain/external-consumer acceptance
-remains open. Historical standalone runner-manager proof explicitly
-does not establish the combined CI13 command. The plan remains active.
+The interruption proof is now established by the current-candidate evidence at `96602b5`
+([receipt](../../../tests/acceptance/evidence/podman-readiness-96602b5/interrupted/receipt.json)):
+`BLOCKED` with reason `interrupted`, delivered while the probe Job was `Running`, with the owned Job, ConfigMap,
+RoleBinding and Namespace verified absent and an independent `NotFound` read. Milestone 2's toolbox-backed runner
+chain is implemented at `ff1fdc8`; historical `92713cc` records build/publication/deployment proof; the
+current-candidate full chain at `96602b5` published `hott/ci13-chain-proof@sha256:974533d1…`, created runner `135`
+and deployed manager `ci13-chain-proof-gitlab-runner-ma-ce4cc80cb0167ec7`
+([chain receipt](../../../tests/acceptance/evidence/image-build-chain/96602b5/chain-receipt.json),
+[runner read-back](../../../tests/acceptance/evidence/image-build-chain/96602b5/runner-readback.json)), and one
+linked consumer job ran on that runner with owned cleanup
+([consumer job](../../../tests/acceptance/evidence/image-build-chain/96602b5/consumer-job.json)). Both milestones
+are proven against one installed revision (`96602b5`, functional digest `62176432`); the successful probe evidence
+at the same revision is [recorded here](../../../tests/acceptance/evidence/podman-readiness-96602b5/success/receipt.json).
+Historical standalone runner-manager proof explicitly does not establish the combined CI13 command and remains
+historical only. The plan is complete.
 
 ## Context and Orientation
 
