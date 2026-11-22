@@ -678,14 +678,15 @@ class EnsureNamespace(K8SCallback[WorkflowAction]):
         self._created: MutableSequence[ResourceSet] = []
 
     def cleanup(self) -> JSONObject:
-        """Remove only namespaces created here after dependent failure cleanup.
+        """Remove newly created runner-only namespaces after dependent failure cleanup.
 
         :returns: Empty evidence after owned namespace cleanup verification.
         :raises KubernetesError: If a newly created namespace cannot be removed safely.
         """  # noqa: DOC502 - ResourceSet applies and verifies namespace lifecycle.
+        build_namespace = self.action.spec.namespace if self.action.spec else None
         for resources in reversed(self._created):
             names = {name for _, name in resources.created}
-            if self.state.failed:
+            if self.state.failed and build_namespace not in names:
                 expected_uids = {
                     (str(item["kind"]), str(item["name"])): str(item["uid"])
                     for item in resources.evidence
