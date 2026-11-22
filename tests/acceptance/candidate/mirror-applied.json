@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-22T16:33:20.652887+00:00",
+  "captured_at": "2026-11-22T21:20:23.351636+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "5dd5d30c404deac17343b472baf473eaca83952ec8096a216e76d4973ebdb1b5",
+  "plan_digest": "62331b73984f24516e5690a5033d8d0c575cd2e2bd179019b4a09c1ead99622e",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1467758933,
+        "id": 1467998784,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 44,
+        "id": 49,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-22T16:32:48.200Z",
+        "last_successful_update_at": "2026-11-22T21:19:50.311Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "374b09496a22e4e2f347004f8796d016d8bc39b1c61f9635ea478d4e965c3964",
-    "file_count": 316,
-    "functional_digest": "beefc15da98bf9b67bee41437e4cfac408d92836be4a183a5c02786a57f1a322",
+    "digest": "2e1d73b0f5958c663dd63ffdb809e495ed97a69b180d77e0fb33da2991ec3fb6",
+    "file_count": 322,
+    "functional_digest": "972c65ea78753cd4f95dae01d5f51cb4f5489096591b78e4a10ca6744525c6e0",
     "revision": {
       "source": "installer_record",
-      "value": "238ab846c44025d58ef9937db8c31d9b5d0ff706",
+      "value": "fd2d49af670216866e746ce4f4cf784f6b2eb458",
       "verified": true
     }
   },
@@ -108,5 +108,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user",
-  "tested_revision": "238ab846c44025d58ef9937db8c31d9b5d0ff706"
+  "tested_revision": "fd2d49af670216866e746ce4f4cf784f6b2eb458"
 }

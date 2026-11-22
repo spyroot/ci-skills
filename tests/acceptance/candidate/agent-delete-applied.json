@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-22T16:43:15.285366+00:00",
+  "captured_at": "2026-11-22T21:16:31.484478+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -13,12 +13,12 @@
     "operation": "delete",
     "project": "hott/test",
     "project_name": null,
-    "run_id": "4b30ebdb503d4c90a43819b3fd983385"
+    "run_id": "12e9b4765edb4c09a496a4ecd0894a64"
   },
   "kind": "gitlab_agent",
   "mutated": true,
   "operation": "delete",
-  "plan_digest": "908a633f8cb325980c6029c9dbbee2eacfc9b89f2dbc39c73ebdbd94f0b3cde5",
+  "plan_digest": "32b78fc10a5812dafba3ffb6440ea07edeb5e1f53ef33b8a40de30024b4bfe99",
   "records": [
     {
       "absence": {
@@ -32,15 +32,15 @@
       "action": "APPLIED",
       "after": {
         "agent_http_status": 404,
-        "agent_id": 12,
+        "agent_id": 15,
         "agent_name": "test",
         "connection_ids": [],
-        "namespace": "test-dd83de40632438857213",
+        "namespace": "test-be4c3749c86d29296361",
         "namespace_uid": null,
         "project_id": 123,
         "registration_credential_http_status": 404,
         "registration_credential_ids": [],
-        "release": "test-agent-dd83de4063243885",
+        "release": "test-agent-be4c3749c86d2929",
         "release_revision": null,
         "release_storage_uid": null,
         "resources": [
@@ -48,127 +48,127 @@
             "api_version": "v1",
             "created": true,
             "kind": "Namespace",
-            "name": "test-dd83de40632438857213",
+            "name": "test-be4c3749c86d29296361",
             "namespace": "",
             "state": "ABSENT",
-            "uid": "5fc3bb4f-5a33-4e78-9eb8-2a7f850f29e8"
+            "uid": "7e952466-4ca9-4e33-b4fa-03cad6254687"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "ConfigMap",
-            "name": "test-agent-recovery-dd83de4063243885",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-recovery-be4c3749c86d2929",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "81d1baa8-060c-4e95-9a62-bae15c47b1af"
+            "uid": "338d2628-b632-4e10-845e-2f3f5ed9c248"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Secret",
-            "name": "test-agent-token-dd83de4063243885",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-token-be4c3749c86d2929",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "557d994a-4642-448a-9a9c-4e2816adfb7f"
+            "uid": "58fe3362-1f7d-4d0c-9b79-d70ac5c828ea"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Secret",
-            "name": "sh.helm.release.v1.test-agent-dd83de4063243885.v1",
-            "namespace": "test-dd83de40632438857213",
+            "name": "sh.helm.release.v1.test-agent-be4c3749c86d2929.v1",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "0b3906ad-d83d-4298-9c8c-7e6b52cacca3"
+            "uid": "b2699a97-9f7d-4c8a-b68d-fb9a58e560d7"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "ServiceAccount",
-            "name": "test-agent-dd83de4063243885",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "665fb028-e70f-4522-965c-defa433e2c74"
+            "uid": "58ce9c9f-2e5b-400f-a6e3-5b1ef532f830"
           },
           {
             "api_version": "rbac.authorization.k8s.io/v1",
             "created": true,
             "kind": "ClusterRoleBinding",
-            "name": "test-dd83de40632438857213:test-agent-dd83de4063243885-cluster-admin",
+            "name": "test-be4c3749c86d29296361:test-agent-be4c3749c86d2929-cluster-admin",
             "namespace": "",
             "state": "ABSENT",
-            "uid": "33085967-7c69-4bc2-8e5a-e154e8d7addf"
+            "uid": "fcc06929-1a3c-44a0-ac0e-784f7079076e"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Service",
-            "name": "test-agent-dd83de4063243885-service",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-service",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "59bbba68-3acf-4c5b-b83c-2b8367ac379c"
+            "uid": "010558a6-1da7-4740-93af-09aa5242ec3c"
           },
           {
             "api_version": "apps/v1",
             "created": true,
             "kind": "Deployment",
-            "name": "test-agent-dd83de4063243885-v2",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "d27804c2-c837-4e8d-a942-aae6b6cb2cf1"
+            "uid": "f4c62b30-1f95-442e-a4ca-9d194d50d6f6"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Pod",
-            "name": "test-agent-dd83de4063243885-v2-758958c6df-5j9gv",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2-66965fc499-cxcbd",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "bfd7d833-eca3-46b7-b569-b60a2a8f3a3d"
+            "uid": "b65351b0-0237-4067-a125-9bc36df7b7bd"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Pod",
-            "name": "test-agent-dd83de4063243885-v2-758958c6df-cvrst",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2-66965fc499-vfqj6",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "80f32346-4baa-4e2d-adda-7b48ef9f5ee0"
+            "uid": "18624188-d187-48e6-88dc-b1ef074934d5"
           },
           {
             "api_version": "apps/v1",
             "created": true,
             "kind": "ReplicaSet",
-            "name": "test-agent-dd83de4063243885-v2-758958c6df",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2-66965fc499",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "786339c6-d07f-4037-98f0-093b70509609"
+            "uid": "c7783618-904b-4920-a7c1-3787fcb4cbc3"
           },
           {
             "api_version": "coordination.k8s.io/v1",
             "created": true,
             "kind": "Lease",
-            "name": "agent-12-lock",
-            "namespace": "test-dd83de40632438857213",
+            "name": "agent-15-lock",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "ABSENT",
-            "uid": "e7dd61e6-c020-4b86-9725-91d447249ba2"
+            "uid": "445fdfd7-4cd7-48c5-81b7-e5f907f0ee99"
           }
         ]
       },
       "before": {
         "agent_http_status": 200,
-        "agent_id": 12,
+        "agent_id": 15,
         "agent_name": "test",
         "connection_ids": [],
-        "namespace": "test-dd83de40632438857213",
-        "namespace_uid": "5fc3bb4f-5a33-4e78-9eb8-2a7f850f29e8",
+        "namespace": "test-be4c3749c86d29296361",
+        "namespace_uid": "7e952466-4ca9-4e33-b4fa-03cad6254687",
         "project_id": 123,
         "registration_credential_http_status": 200,
         "registration_credential_ids": [
-          12
+          15
         ],
-        "release": "test-agent-dd83de4063243885",
+        "release": "test-agent-be4c3749c86d2929",
         "release_revision": 1,
-        "release_storage_uid": "0b3906ad-d83d-4298-9c8c-7e6b52cacca3",
+        "release_storage_uid": "b2699a97-9f7d-4c8a-b68d-fb9a58e560d7",
         "resources": null
       },
       "callback": "GitLabAgent",
@@ -188,15 +188,15 @@
         "agent_credential": {
           "consumers": [],
           "created": false,
-          "id": 12,
-          "name": "test-agent-token-dd83de4063243885",
+          "id": 15,
+          "name": "test-agent-token-be4c3749c86d2929",
           "state": "ABSENT",
           "storage": {
             "key": "token",
             "kind": "Secret",
-            "name": "test-agent-token-dd83de4063243885",
-            "namespace": "test-dd83de40632438857213",
-            "uid": "557d994a-4642-448a-9a9c-4e2816adfb7f"
+            "name": "test-agent-token-be4c3749c86d2929",
+            "namespace": "test-be4c3749c86d29296361",
+            "uid": "58fe3362-1f7d-4d0c-9b79-d70ac5c828ea"
           }
         },
         "gitlab": {
@@ -222,7 +222,7 @@
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12",
+              "endpoint": "projects/123/cluster_agents/15",
               "method": "GET"
             },
             {
@@ -230,47 +230,47 @@
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12/tokens/12",
+              "endpoint": "projects/123/cluster_agents/15/tokens/15",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12/tokens",
+              "endpoint": "projects/123/cluster_agents/15/tokens",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12/tokens/12",
+              "endpoint": "projects/123/cluster_agents/15/tokens/15",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12/tokens/12",
+              "endpoint": "projects/123/cluster_agents/15/tokens/15",
               "method": "DELETE"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12/tokens/12",
+              "endpoint": "projects/123/cluster_agents/15/tokens/15",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12",
+              "endpoint": "projects/123/cluster_agents/15",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12/tokens",
+              "endpoint": "projects/123/cluster_agents/15/tokens",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12",
+              "endpoint": "projects/123/cluster_agents/15",
               "method": "DELETE"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12",
+              "endpoint": "projects/123/cluster_agents/15",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12",
+              "endpoint": "projects/123/cluster_agents/15",
               "method": "GET"
             },
             {
-              "endpoint": "projects/123/cluster_agents/12/tokens/12",
+              "endpoint": "projects/123/cluster_agents/15/tokens/15",
               "method": "GET"
             },
             {
@@ -293,15 +293,15 @@
         "chart_version": "2.20.1",
         "image_digest": "sha256:748ca8c9e9f9f8ea4e777ce42c19a462a3cc3813795338c43f8e19d1f6bb87c5",
         "image_reference": "registry.gitlab.com/gitlab-org/cluster-integration/gitlab-agent/agentk:v18.5.2@sha256:748ca8c9e9f9f8ea4e777ce42c19a462a3cc3813795338c43f8e19d1f6bb87c5",
-        "namespace": "test-dd83de40632438857213",
-        "namespace_uid": "5fc3bb4f-5a33-4e78-9eb8-2a7f850f29e8",
+        "namespace": "test-be4c3749c86d29296361",
+        "namespace_uid": "7e952466-4ca9-4e33-b4fa-03cad6254687",
         "observed_image_ids": [],
-        "release": "test-agent-dd83de4063243885",
+        "release": "test-agent-be4c3749c86d2929",
         "release_revision": 1,
-        "release_storage_uid": "0b3906ad-d83d-4298-9c8c-7e6b52cacca3"
+        "release_storage_uid": "b2699a97-9f7d-4c8a-b68d-fb9a58e560d7"
       },
       "ownership": {
-        "agent_id": 12,
+        "agent_id": 15,
         "agent_name": "test",
         "app_version": "v18.5.2",
         "chart_sha256": "4d2214c73856533f27cefd2de673c7e0abbb7925352c0cb157458287eb591210",
@@ -315,135 +315,135 @@
           "registration_credential": true,
           "release": true
         },
-        "credential_resource_name": "test-agent-token-dd83de4063243885",
-        "credential_resource_uid": "557d994a-4642-448a-9a9c-4e2816adfb7f",
+        "credential_resource_name": "test-agent-token-be4c3749c86d2929",
+        "credential_resource_uid": "58fe3362-1f7d-4d0c-9b79-d70ac5c828ea",
         "image_digest": "sha256:748ca8c9e9f9f8ea4e777ce42c19a462a3cc3813795338c43f8e19d1f6bb87c5",
         "kind": "gitlab_agent_ownership",
-        "namespace": "test-dd83de40632438857213",
-        "namespace_uid": "5fc3bb4f-5a33-4e78-9eb8-2a7f850f29e8",
+        "namespace": "test-be4c3749c86d29296361",
+        "namespace_uid": "7e952466-4ca9-4e33-b4fa-03cad6254687",
         "origin": "https://gitlab.dcloud.run",
-        "ownership_record_name": "test-agent-recovery-dd83de4063243885",
-        "ownership_record_uid": "81d1baa8-060c-4e95-9a62-bae15c47b1af",
+        "ownership_record_name": "test-agent-recovery-be4c3749c86d2929",
+        "ownership_record_uid": "338d2628-b632-4e10-845e-2f3f5ed9c248",
         "preexisting_registration_credential_ids": [],
         "project_id": 123,
         "project_path": "hott/test",
-        "registration_credential_id": 12,
-        "registration_credential_name": "test-agent-token-dd83de4063243885",
-        "release": "test-agent-dd83de4063243885",
+        "registration_credential_id": 15,
+        "registration_credential_name": "test-agent-token-be4c3749c86d2929",
+        "release": "test-agent-be4c3749c86d2929",
         "release_revision": 1,
-        "release_storage_name": "sh.helm.release.v1.test-agent-dd83de4063243885.v1",
-        "release_storage_uid": "0b3906ad-d83d-4298-9c8c-7e6b52cacca3",
+        "release_storage_name": "sh.helm.release.v1.test-agent-be4c3749c86d2929.v1",
+        "release_storage_uid": "b2699a97-9f7d-4c8a-b68d-fb9a58e560d7",
         "resources": [
           {
             "api_version": "v1",
             "created": true,
             "kind": "Namespace",
-            "name": "test-dd83de40632438857213",
+            "name": "test-be4c3749c86d29296361",
             "namespace": "",
             "state": "PRESENT",
-            "uid": "5fc3bb4f-5a33-4e78-9eb8-2a7f850f29e8"
+            "uid": "7e952466-4ca9-4e33-b4fa-03cad6254687"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "ConfigMap",
-            "name": "test-agent-recovery-dd83de4063243885",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-recovery-be4c3749c86d2929",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "81d1baa8-060c-4e95-9a62-bae15c47b1af"
+            "uid": "338d2628-b632-4e10-845e-2f3f5ed9c248"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Secret",
-            "name": "test-agent-token-dd83de4063243885",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-token-be4c3749c86d2929",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "557d994a-4642-448a-9a9c-4e2816adfb7f"
+            "uid": "58fe3362-1f7d-4d0c-9b79-d70ac5c828ea"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Secret",
-            "name": "sh.helm.release.v1.test-agent-dd83de4063243885.v1",
-            "namespace": "test-dd83de40632438857213",
+            "name": "sh.helm.release.v1.test-agent-be4c3749c86d2929.v1",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "0b3906ad-d83d-4298-9c8c-7e6b52cacca3"
+            "uid": "b2699a97-9f7d-4c8a-b68d-fb9a58e560d7"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "ServiceAccount",
-            "name": "test-agent-dd83de4063243885",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "665fb028-e70f-4522-965c-defa433e2c74"
+            "uid": "58ce9c9f-2e5b-400f-a6e3-5b1ef532f830"
           },
           {
             "api_version": "rbac.authorization.k8s.io/v1",
             "created": true,
             "kind": "ClusterRoleBinding",
-            "name": "test-dd83de40632438857213:test-agent-dd83de4063243885-cluster-admin",
+            "name": "test-be4c3749c86d29296361:test-agent-be4c3749c86d2929-cluster-admin",
             "namespace": "",
             "state": "PRESENT",
-            "uid": "33085967-7c69-4bc2-8e5a-e154e8d7addf"
+            "uid": "fcc06929-1a3c-44a0-ac0e-784f7079076e"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Service",
-            "name": "test-agent-dd83de4063243885-service",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-service",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "59bbba68-3acf-4c5b-b83c-2b8367ac379c"
+            "uid": "010558a6-1da7-4740-93af-09aa5242ec3c"
           },
           {
             "api_version": "apps/v1",
             "created": true,
             "kind": "Deployment",
-            "name": "test-agent-dd83de4063243885-v2",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "d27804c2-c837-4e8d-a942-aae6b6cb2cf1"
+            "uid": "f4c62b30-1f95-442e-a4ca-9d194d50d6f6"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Pod",
-            "name": "test-agent-dd83de4063243885-v2-758958c6df-5j9gv",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2-66965fc499-cxcbd",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "bfd7d833-eca3-46b7-b569-b60a2a8f3a3d"
+            "uid": "b65351b0-0237-4067-a125-9bc36df7b7bd"
           },
           {
             "api_version": "v1",
             "created": true,
             "kind": "Pod",
-            "name": "test-agent-dd83de4063243885-v2-758958c6df-cvrst",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2-66965fc499-vfqj6",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "80f32346-4baa-4e2d-adda-7b48ef9f5ee0"
+            "uid": "18624188-d187-48e6-88dc-b1ef074934d5"
           },
           {
             "api_version": "apps/v1",
             "created": true,
             "kind": "ReplicaSet",
-            "name": "test-agent-dd83de4063243885-v2-758958c6df",
-            "namespace": "test-dd83de40632438857213",
+            "name": "test-agent-be4c3749c86d2929-v2-66965fc499",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "786339c6-d07f-4037-98f0-093b70509609"
+            "uid": "c7783618-904b-4920-a7c1-3787fcb4cbc3"
           },
           {
             "api_version": "coordination.k8s.io/v1",
             "created": true,
             "kind": "Lease",
-            "name": "agent-12-lock",
-            "namespace": "test-dd83de40632438857213",
+            "name": "agent-15-lock",
+            "namespace": "test-be4c3749c86d29296361",
             "state": "PRESENT",
-            "uid": "e7dd61e6-c020-4b86-9725-91d447249ba2"
+            "uid": "445fdfd7-4cd7-48c5-81b7-e5f907f0ee99"
           }
         ],
-        "run_id": "4b30ebdb503d4c90a43819b3fd983385",
+        "run_id": "12e9b4765edb4c09a496a4ecd0894a64",
         "schema_version": "1.0",
         "state": "CONNECTED"
       },
@@ -472,12 +472,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "374b09496a22e4e2f347004f8796d016d8bc39b1c61f9635ea478d4e965c3964",
-    "file_count": 316,
-    "functional_digest": "beefc15da98bf9b67bee41437e4cfac408d92836be4a183a5c02786a57f1a322",
+    "digest": "2e1d73b0f5958c663dd63ffdb809e495ed97a69b180d77e0fb33da2991ec3fb6",
+    "file_count": 322,
+    "functional_digest": "972c65ea78753cd4f95dae01d5f51cb4f5489096591b78e4a10ca6744525c6e0",
     "revision": {
       "source": "installer_record",
-      "value": "238ab846c44025d58ef9937db8c31d9b5d0ff706",
+      "value": "fd2d49af670216866e746ce4f4cf784f6b2eb458",
       "verified": true
     }
   },
@@ -488,5 +488,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user",
-  "tested_revision": "238ab846c44025d58ef9937db8c31d9b5d0ff706"
+  "tested_revision": "fd2d49af670216866e746ce4f4cf784f6b2eb458"
 }
