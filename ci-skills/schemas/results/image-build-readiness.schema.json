@@ -113,7 +113,32 @@
       "additionalProperties": false
     },
     "plan": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "consumer_name": {"type": ["string", "null"], "minLength": 1},
+        "naming_conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "explicit", "expected"],
+            "properties": {
+              "field": {"enum": ["runner.description", "runner.labels", "toolbox.repository"]},
+              "explicit": {"type": ["string", "array"], "items": {"type": "string"}},
+              "expected": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "toolbox": {
+          "type": "object",
+          "properties": {
+            "mode": {"const": "copy"},
+            "source_image": {"type": ["string", "null"], "minLength": 1},
+            "repository": {"type": ["string", "null"], "minLength": 1},
+            "tag": {"type": ["string", "null"], "minLength": 1}
+          }
+        }
+      }
     },
     "plan_digest": {
       "type": "string",

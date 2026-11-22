@@ -79,6 +79,16 @@ GITLAB_PROFILE_HELP: Final = (
     f"use {GITLAB_TARGET_OPTION} instead"
 )
 
+PROJECT_NAMING_OPTIONS: Final = MappingProxyType(
+    {
+        "--project-name": (
+            "optional consumer naming base; explicit object names take precedence; "
+            "omission uses the selected consumer repository; provider identity is unchanged"
+        ),
+    }
+)
+
+
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
     "--binding": "project-declared target and ordered kubeconfig source resolver",
@@ -371,11 +381,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "capabilities": ("namespaced",),
         "mutates": True,
         "options": {
+            **PROJECT_NAMING_OPTIONS,
             "--spec": "toolbox JSON following schemas/toolbox.schema.json",
-            "--name": "exact runner name; omission uses the known consumer repository, otherwise --name is required",
+            "--name": "exact runner name; omission uses --project-name, then the known consumer repository; otherwise --name is required",
             "--runner-root": "runner runtime directory inside the toolbox image",
-            "--label": "GitHub custom runner label; repeatable; omission uses the selected consumer repository; provider system labels are unchanged",
-            "--namespace": "exact existing caller namespace; omission reuses its unique owned namespace or plans a namespace from the selected consumer repository and an opaque hash",
+            "--label": "GitHub custom runner label; repeatable; omission uses --project-name, then the selected consumer repository; provider system labels are unchanged",
+            "--namespace": "exact existing caller namespace; omission reuses its unique owned namespace or plans a namespace from --project-name or the selected consumer repository and an opaque hash",
             "--apply": "perform the confirmed operation",
             "--confirm-plan": "exact fingerprint from the preceding plan",
             "--timeout": "operation timeout in seconds",
@@ -691,13 +702,14 @@ COMMANDS: Mapping[str, CommandDefinition] = {
     },
     "image_build_readiness.py": {
         "kind": "image_build_readiness",
-        "purpose": "Probe nested Podman or build and publish a toolbox for a running GitLab runner.",
+        "purpose": "Probe nested Podman or publish the configured Harbor toolbox for a GitLab runner.",
         "use_when": "Prove nested execution alone, or configure a GitLab runner with a published toolbox.",
         "requires": (KUBERNETES_AUTHORITY,),
         "capabilities": ("node_scoped", "namespaced"),
         "mutates": True,
         "options": {
-            "--namespace": "existing caller namespace; chain omission reuses its live scope or plans a repository-based owned namespace",
+            **PROJECT_NAMING_OPTIONS,
+            "--namespace": "existing caller namespace; chain omission reuses its live scope or plans an owned namespace from --project-name or the selected consumer repository",
             "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
             "--inner-image": "digest-pinned inner test image; default is Linux amd64",
             "--timeout": "maximum probe duration in seconds",
@@ -710,11 +722,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "run the confirmed operation and read back its result",
             "--confirm-plan": "exact fingerprint returned by the live plan",
             "--receipt-out": "write a sanitized operation receipt to this exact path",
-            "--toolbox-spec": "chain: existing toolbox specification with gitlab-runner, git and podman",
+            "--toolbox-spec": "chain: optional toolbox specification; explicit publication fields are preserved and naming conflicts block apply",
             "--project": "chain: GitLab project for a project runner",
             "--group": "chain: GitLab group for a group runner",
-            "--description": "chain: runner description; omission uses the known consumer repository, otherwise required",
-            "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label; omission uses the selected consumer repository",
+            "--description": "chain: runner description; omission uses --project-name, then the known consumer repository; otherwise required",
+            "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label; omission uses --project-name, then the selected consumer repository",
             "--protected": "chain: true for ref_protected, false for not_protected; omission preserves provider default",
         },
         "repeatable_options": ("--tag",),
@@ -734,13 +746,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "Job-owned Pod exit, probe rows and resource absence.",
             },
             "chain": {
-                "purpose": "Build and publish the toolbox, then configure a runner using that image.",
+                "purpose": "Copy the reference toolbox from the selected Harbor target into the consumer repository and deploy a runner using its published digest.",
                 "requires_authorities": (
                     KUBERNETES_AUTHORITY,
                     GITLAB_AUTHORITY,
                     HARBOR_AUTHORITY,
                 ),
-                "required_options": ("--toolbox-spec",),
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
                 "side_effects": "Publishes the toolbox image and retains the runner record, manager and "
@@ -748,6 +759,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "read_back": "Published toolbox digest and the configured runner deployment using that image.",
             },
         },
+        "examples": [
+            {
+                "description": "Preview the consumer toolbox copy and runner",
+                "command": "image_build_readiness.py chain --project team/sample_project --project-name sample_project --dry-run",
+            },
+        ],
         "related": (
             "toolbox.py",
             "harbor_pull.py",
@@ -1091,6 +1108,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--source-branch": "existing source branch for create",
             "--target-branch": "existing target branch for create",
             "--title": "MR title for create",
+            "--description-file": "file containing the requested MR description for create",
             "--mr-iid": "project-local MR number for update, not its global ID",
             "--milestone-id": "global milestone ID, not its project-local IID",
             "--apply": "perform the confirmed MR change",
@@ -1106,7 +1124,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "required_options": ["--source-branch", "--target-branch", "--title"],
                 "result_schema": GITLAB_ACTION_SCHEMA,
                 "mutates": True,
-                "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+                "read_back": "Read the exact MR IID, branches, title, requested description and milestone.",
             },
             "update": {
                 "required_options": ["--mr-iid", "--milestone-id"],
@@ -1118,7 +1136,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "examples": [
             {
                 "description": "Plan an MR",
-                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example"',
+                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example" --description-file description.md',
             },
             {
                 "description": "Plan its milestone assignment",
@@ -1180,22 +1198,25 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "requires": (GITLAB_AUTHORITY,),
         "capabilities": (),
         "mutates": True,
-        "side_effects": "Apply may create, assign, tag, or delete a runner record.",
+        "side_effects": "Apply may create, assign, update, or delete a runner record.",
         "options": {
+            **PROJECT_NAMING_OPTIONS,
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
-            "--runner-id": "numeric runner ID, required for assign, tag, and delete",
+            "--runner-id": "numeric runner ID; required for existing-runner mutations",
             "--job-id": "project job ID whose related runner get should inspect",
             "--runner-type": "project or group scope for creation",
-            "--description": "runner description and recovery key; create omission uses the known repository, otherwise required",
-            "--protected": "create: true for ref_protected, false for not_protected; omission preserves provider default",
+            "--description": "runner description for set-name, an exact selector for reads, or a create recovery key; create omission uses the consumer name",
+            "--protected": "create or set-protected: true for ref_protected, false for not_protected; create omission preserves provider default",
             "--limit": "maximum returned runner records for list (1-100, default 10)",
             "--filter": "repeatable runner state filter: protected, unprotected, online, offline, shared, dedicated, paused, active",
-            "--tag": "runner tag for create or tag; repeat for multiple tags; create omission uses the selected consumer repository",
+            "--tag": "runner tag for create or tag; repeat for multiple tags; create omission uses --project-name, then the selected consumer repository",
+            "--from-tag": "rename-tag: exact existing scheduling tag to replace",
+            "--to-tag": "rename-tag: replacement scheduling tag",
             "--token-out": "caller-selected 0600 file for the one-time runner token",
-            "--live-plan": "read pending repository defaults for project runner creation, group assignment or runner deletion identity and print an apply-ready plan without writes",
+            "--live-plan": "read defaults or runner state and print an apply-ready plan without writes",
             "--apply": "perform the validated change",
-            "--confirm-plan": "SHA-256 fingerprint from the live plan for pending project-create defaults, group assignment or delete, otherwise the dry-run plan",
+            "--confirm-plan": "SHA-256 fingerprint from the live plan for runner controls, delete, group assignment, or unresolved create defaults; otherwise use the dry-run plan",
             "--timeout": "maximum seconds for each external request",
             **persistence_options(
                 GITLAB_MODE_POLICY,
@@ -1243,6 +1264,38 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "side_effects": "Apply deletes the selected runner record.",
                 "read_back": "Require global 404 and absence from the selected scope.",
             },
+            "rename-tag": {
+                "required_options": ["--runner-id", "--from-tag", "--to-tag"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "purpose": "Replace one scheduling tag and preserve the remaining tags.",
+                "mutates": True,
+                "side_effects": "Apply updates only the runner tag list.",
+                "read_back": "Read the exact runner tags and unchanged project assignments.",
+            },
+            "bind-project": {
+                "required_options": ["--project", "--runner-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "purpose": "Lock a runner after verifying the selected project is its sole assignment.",
+                "mutates": True,
+                "side_effects": "Apply locks the runner. Additional assignments block the operation.",
+                "read_back": "Read the exact runner lock and sole project assignment.",
+            },
+            "set-name": {
+                "required_options": ["--runner-id", "--description"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "purpose": "Set the display name of one existing GitLab runner.",
+                "mutates": True,
+                "side_effects": "Apply updates only the runner description.",
+                "read_back": "Read the exact description and unchanged tags, protection, lock, and project assignments.",
+            },
+            "set-protected": {
+                "required_options": ["--runner-id", "--protected"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "purpose": "Set the exact runner access level.",
+                "mutates": True,
+                "side_effects": "Apply updates only the runner access level.",
+                "read_back": "Read the exact access level and unchanged tags and project assignments.",
+            },
             "tag": {
                 "required_options": ["--runner-id", "--tag"],
                 "result_schema": "schemas/results/gitlab-runner-tag.schema.json",
@@ -1252,6 +1305,32 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "read_back": "Read tags from a fresh runner GET and scoped listing.",
             },
         },
+        "examples": [
+            {
+                "description": "Plan a project runner",
+                "command": "gitlab_runner.py create --project team/sample_project --runner-type project --token-out runner.token --dry-run",
+            },
+            {
+                "description": "Plan adding a scheduling tag",
+                "command": "gitlab_runner.py tag --project team/sample_project --runner-id 42 --tag extra --dry-run",
+            },
+            {
+                "description": "Preview a scheduling tag rename",
+                "command": "gitlab_runner.py rename-tag --project team/sample_project --runner-id 42 --from-tag old --to-tag new --dry-run",
+            },
+            {
+                "description": "Preview an exclusive project lock",
+                "command": "gitlab_runner.py bind-project --project team/sample_project --runner-id 42 --dry-run",
+            },
+            {
+                "description": "Preview a runner display name change",
+                "command": "gitlab_runner.py set-name --project team/sample_project --runner-id 42 --description sample_custom --dry-run",
+            },
+            {
+                "description": "Preview protected-ref scheduling",
+                "command": "gitlab_runner.py set-protected --project team/sample_project --runner-id 42 --protected true --dry-run",
+            },
+        ],
         "returns": "Public runner fields, a sanitized plan, or verified before/after action evidence.",
     },
     "gitlab_runner_manager.py": {
@@ -1263,18 +1342,19 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "capabilities": ("namespaced", "node_scoped"),
         "mutates": True,
         "options": {
+            **PROJECT_NAMING_OPTIONS,
             "--project": "exact project path or numeric ID; otherwise use "
             "gitlab.project",
             "--group": "exact group path or numeric ID; otherwise use gitlab.group",
             "--runner-id": "positive ID returned by gitlab_runner.py create",
-            "--description": "exact runner description; deploy omission uses the known consumer repository, otherwise required",
+            "--description": "exact runner description; deploy omission uses --project-name, then the known consumer repository; otherwise required",
             "--protected": "deploy: verify true as ref_protected or false as not_protected; omission preserves the existing value",
             "--tag": "GitLab runner tag given to gitlab_runner.py create --tag; "
-            "repeat for multiple tags; --label is accepted as an alias; omission uses the selected consumer repository",
+            "repeat for multiple tags; --label is accepted as an alias; omission uses --project-name, then the selected consumer repository",
             "--image": "digest-pinned toolbox image containing gitlab-runner and "
             "podman",
             "--token-file": "one-time token file written by gitlab_runner.py create",
-            "--namespace": "existing caller namespace to preserve; omission reuses its live scope or plans a repository-based owned namespace",
+            "--namespace": "existing caller namespace to preserve; omission reuses its live scope or plans an owned namespace from --project-name or the selected consumer repository",
             "--node": "exact worker already verified by image_build_readiness.py",
             "--cpu-request": "runner CPU request; repeat the proven probe value",
             "--cpu-limit": "runner CPU limit; repeat the proven probe value",
@@ -1511,7 +1591,7 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
                 "required_options": ["--provider", "--endpoint"],
             },
         },
-        "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads.",
+        "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads. Once the host is selected, the stderr result event (PASS, DRY_RUN or BLOCKED) carries target_file, target_source, target_selection and credential_sources; target fields are null when no target table supplied the host.",
         "examples": [
             {
                 "description": "Read the configured GitLab identity",
@@ -1523,12 +1603,12 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
             },
         ],
         "output_modes": {
-            "json": "native JSON or selected content; default",
-            "yaml": "the same selected value as YAML",
-            "text": "raw endpoint text or one selected scalar",
+            "json": "native JSON or selected content; check adds the target and credential fields; default",
+            "yaml": "the same value as YAML",
+            "text": "raw endpoint text, one selected scalar, or the check identity name",
         },
         "usage": "Choose check or get and one provider. Target resolution is automatic; CI_SKILLS_TARGET and ci-skills-smoke support tests and live smoke.",
-        "returns": "Bounded JSON, YAML or selected text; dry-run returns a request plan.",
+        "returns": "get: the bounded provider value, unchanged. check: provider, host, authenticated, user and id plus target_file, target_source, target_selection and credential_sources. Dry-run: a request plan with the same four fields; credential_sources names the selected source without reading the token.",
         "read_only": True,
         "side_effects": "none",
         "execution_surface": "installed Python command and one caller-selected provider API",

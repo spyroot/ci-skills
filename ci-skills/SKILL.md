@@ -21,8 +21,21 @@ installation using the prepared `ci-skills` conda environment:
 
 ```bash
 CI_SKILLS_ROOT="${CODEX_HOME:-$HOME/.codex}/skills/ci-skills"
-conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" --json
 ```
+
+To plan a GitLab repository's toolbox and runner, pass the project path.
+The chain uses the selected target's prepared Harbor toolbox.
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py" \
+  chain --project GROUP/REPO --live-plan --json
+```
+
+For confirmation and digest evidence, read
+`reference.py get image-build-chain plan-and-apply --json`
+([chain reference](references/image-build-chain.md#plan-and-apply)).
+Use the chain command's `--describe --json` for machine-readable options
+and its result schema.
 
 This also applies to the extensionless `bin/ci-api` and `bin/ci-binary-build`.
 Use these commands for supported operations instead of rebuilding them with
@@ -41,12 +54,39 @@ dry-run and write only with `--apply` and the printed plan fingerprint.
 and verifies cleanup; its default invocation reads the selected node inventory
 and returns a plan.
 
+## Target selection
+
+Run from the consumer repository root. An explicit `--binding` selects the
+target first. Otherwise, use the first applicable source in this order:
+
+1. The file named by `CI_SKILLS_TARGET`. An empty or missing override blocks.
+2. The consumer repository's `./.ci-skills/target.toml`.
+3. The user's `~/.ci-skills/target.toml`, which holds their default targets.
+
+`K8S_ADMIN_DIAGNOSTICS_BINDING` can select a binding instead of
+`CI_SKILLS_TARGET`. Setting both environment selectors blocks. The selected
+file supplies all provider settings. Its GitLab routing row names the
+Kubernetes table that defines the context, API server, and kubeconfig.
+A relative GitLab `token_file` resolves beside that target file.
+
+For machine-readable precedence, run the selected command with
+`--describe --json` and read its `target_protocol` array. Follow the
+[access reference](references/access.md#where-the-target-file-comes-from)
+for binding and credential details.
+
 ## 1. Choose the command for the symptom
 
-Start at `bin/reference.py` and expand only the node you need: `reference.py [node]` answers with what
-you can run, the installed commands, and what you can read, the references, each a pointer to the next
-call; `get REF` lists one reference's sections and `get REF ANCHOR` reads one section. Known commands
-remain directly callable with `--help`. Target-backed commands
+For a known task, use the matching command and its relevant reference section.
+Use `--help` for flags or `--describe --json` for the machine contract.
+
+For debugging, use the reported error or missing prerequisite to choose a
+topic. For advanced configuration, use the setting or executor name. Start
+with `reference.py COMMAND` to see its related topics, then read the matching
+`reference.py get REF ANCHOR` section. `reference.py get REF --search TERM`
+finds candidate sections for a literal term. Stop reading once you can act.
+Use the root `reference.py` graph when the command is unknown.
+
+Target-backed commands
 resolve only their declared authority: GitLab for a job, or Kubernetes for
 storage, events, Cilium, and Ceph. Diagnostic reports use `access` to report the
 effective source and identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
@@ -114,7 +154,7 @@ Routing, in short:
 | Deploy or remove a toolbox-backed GitLab runner | `bin/gitlab_runner_manager.py` |
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
-| Probe Podman, or build/publish a toolbox and configure its runner | `bin/image_build_readiness.py probe\|chain` |
+| Probe Podman, or copy the prepared toolbox and configure its runner | `bin/image_build_readiness.py probe\|chain` |
 | Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | access to configured GitHub, GitLab and Kubernetes providers | `access_check.py` |
@@ -127,7 +167,7 @@ Routing, in short:
 | create, update, or adjust milestone dates | `gitlab_milestone.py` |
 | open a bug issue | `gitlab_issue.py open-bug` |
 | create or update a wiki page | `gitlab_wiki.py` |
-| inspect, filter, create, assign, tag, or delete a runner record | `gitlab_runner.py` |
+| inspect, create, tag, rename, bind, protect, or delete a runner record | `gitlab_runner.py` |
 | Ceph hierarchy and Pods | `ceph_cluster.py --namespace NAME` |
 | physical PCI NIC MTU mismatch across nodes | `k8s_verify_mtu_consistency.py` |
 | Cilium daemon and health on a selected node | `cilium_node.py` |
@@ -280,7 +320,14 @@ relative endpoint; host and token references resolve from the selected
 `check --provider PROVIDER` reads authenticated identity. For `get`, use
 `--field` for a dotted JSON field, `--decode-base64` for encoded file content,
 `--lines START:END` for a bounded text slice, and `--paginate` for array pages.
-Its output is the selected provider value, not an access-receipt envelope.
+`get` writes the selected provider value to stdout unchanged. `check` JSON or
+YAML and every `--dry-run` plan add `target_file`, `target_source`,
+`target_selection` and `credential_sources`, the fields `access_check.py`
+reports; a dry run names the credential source without reading the token. Once
+the host is selected, the stderr `result` event carries the same four fields, so
+read it for `get`; `--log-level warning` omits the PASS and DRY_RUN event. Target
+fields are null when `--host` names a host other than the target's or no target
+file exists.
 
 `reference.py gitlab_runner_manager.py` offers the focused runner-manager and
 SCC references. Use `--help` for arguments; read the focused reference when the

@@ -218,7 +218,8 @@ conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
   --recover --apply --confirm-recover --timeout 10s --json
 ```
 
-An upgrade preserves the previous copy or link as a hidden sibling and reads back the installed digest. Installation,
+An upgrade preserves the previous copy or link under `.ci-skills.backups/` inside the skills directory (so one-level
+skill scanners discover only the active `ci-skills/SKILL.md`) and reads back the installed digest. Installation,
 upgrade, and recovery default to dry-run. The installer requires a clean committed skill subtree; compare its reported
 digest with `skill.digest` in later reports. It accepts `--json`, `--yaml`, and `--help`.
 
@@ -374,8 +375,8 @@ The result's `trace_artifact` points to that file; smoke reports link the artifa
   state.
 - [Commit repository files](ci-skills/bin/gitlab_repository.py): take caller-supplied file actions, branch and message,
   then return the verified commit SHA and file digests.
-- [Manage merge requests](ci-skills/bin/gitlab_mr.py): create an MR from selected branches or assign an existing MR's
-  milestone, then read back its IDs and assignment.
+- [Manage merge requests](ci-skills/bin/gitlab_mr.py): create an MR from selected branches with an optional description
+  file, or assign an existing MR's milestone, then read back its IDs, description and assignment.
 - [Open bug issues](ci-skills/bin/gitlab_issue.py): create or reuse an issue with caller-supplied labels and an optional
   milestone.
 - [Write wiki pages](ci-skills/bin/gitlab_wiki.py): create or update a page from supplied content, including
@@ -586,8 +587,8 @@ paired JSON and text files; without that option no report file is written.
   `gitlab_issue.py open-bug|create-bug` creates or reuses a bug.
 - `gitlab_repository.py commit` accepts a selected GitLab project, branch, commit message and caller-supplied native
   file actions. Its confirmed apply returns the commit SHA, branch and independently verified file digests.
-- `gitlab_mr.py create|update` accepts selected branches and a title for creation, or an MR IID and milestone ID for
-  assignment. Its confirmed apply returns the verified MR ID, IID and milestone ID.
+- `gitlab_mr.py create|update` accepts selected branches, a title and an optional `--description-file` for creation, or
+  an MR IID and milestone ID for assignment. Its confirmed apply returns the verified MR ID, IID and milestone ID.
 - `gitlab_wiki.py create|update` manages one selected page; `gitlab_runner.py assign|create|tag|delete` changes a
   selected runner scope. These actions require a matching plan fingerprint to apply; `get|list` are live reads.
 - `prepare_tool_pod.py prepare|remove` accepts a tool specification or an existing run ID. Confirmed preparation

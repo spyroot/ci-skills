@@ -19,6 +19,7 @@ ID. Repeating these inputs looks up the owned manager in the selected cluster:
 conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_runner_manager.py" deploy \
   --project GROUP/PROJECT \
   --runner-id RUNNER_ID \
+  --namespace PROJECT_NAMESPACE \
   --description DESCRIPTION \
   --tag JOB_TAG \
   --image REGISTRY/PROJECT/TOOLBOX@sha256:DIGEST \
@@ -37,6 +38,7 @@ Repeat the same inputs with the confirmation:
 conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_runner_manager.py" deploy \
   --project GROUP/PROJECT \
   --runner-id RUNNER_ID \
+  --namespace PROJECT_NAMESPACE \
   --description DESCRIPTION \
   --tag JOB_TAG \
   --image REGISTRY/PROJECT/TOOLBOX@sha256:DIGEST \
@@ -56,12 +58,13 @@ above match that command's defaults.
 The shared runner lock serializes lookup, changes, and cleanup on the same
 execution host; it does not coordinate independent hosts.
 
-Add `--namespace EXISTING_NAMESPACE` to retain a caller-owned namespace. If it
-is omitted, confirmed apply reuses the resolved run-owned namespace or creates
-one when absent. Apply returns the namespace and run ID. Successful apply
-proves the exact Deployment placement, ServiceAccount, privilege,
-resources, Podman storage, immutable image ID, and exact GitLab runner online
-with contact evidence.
+Set `PROJECT_NAMESPACE` to the existing namespace owned by the project. Use
+the same namespace for planning and confirmed apply. Manager removal preserves
+that namespace. For a disposable bootstrap, omit `--namespace`. Confirmed apply
+reuses the resolved run-owned namespace or creates it when absent. Apply returns
+the namespace and run ID. Successful apply proves the exact Deployment
+placement, ServiceAccount, privilege, resources, Podman storage, immutable
+image ID, and exact GitLab runner online with contact evidence.
 
 ## Prove a real job
 

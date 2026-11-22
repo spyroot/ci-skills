@@ -57,6 +57,7 @@ from lib.python.core.endpoints import (
     ROUTING_SELECTED_BY_KEY,
     ROUTING_SELECTED_BY_LEGACY,
     TARGET_CONTRACT,
+    TARGET_REPORT_KEYS,
 )
 from lib.python.core.logging import bound_log_settings, log_event
 from lib.python.core.paths import SKILL_ROOT
@@ -143,6 +144,8 @@ class HarborTarget:
     :param credential_file: Combined credential file, or ``None`` when unconfigured.
     :param username_file: Separate username file, or ``None`` when unconfigured.
     :param password_file: Separate password file, or ``None`` when unconfigured.
+    :param reference_toolbox: Optional project-relative Harbor artifact used
+        as the runner chain's published source.
 
     .. attribute :: url
         :type: str
@@ -173,6 +176,11 @@ class HarborTarget:
         :type: Optional[Path]
 
         Separate password file, or ``None`` when unconfigured.
+
+    .. attribute :: reference_toolbox
+        :type: str | None
+
+        Published source within the configured project for the runner chain.
     """
 
     url: str
@@ -181,6 +189,7 @@ class HarborTarget:
     credential_file: Optional[Path] = None
     username_file: Optional[Path] = None
     password_file: Optional[Path] = None
+    reference_toolbox: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -852,6 +861,22 @@ class Target:
             either option, otherwise ``source`` unchanged.
         """
         return self.gitlab.selection_source(source) if self.gitlab else source
+
+    def selection_report(self) -> JSONObject:
+        """Report the target file, the source that selected it, and the selection.
+
+        ``access_check`` and ``ci-api`` write these fields into their results.
+
+        :returns: ``TARGET_REPORT_KEYS`` mapped to ``target_file`` as a string,
+            ``target_source`` from ``source_kind`` and ``target_selection`` from
+            ``target_reference``; each is ``None`` before source resolution.
+        """
+        values = (
+            str(self.source_file) if self.source_file else None,
+            self.source_kind,
+            self.target_reference,
+        )
+        return dict(zip(TARGET_REPORT_KEYS, values, strict=True))
 
     def require_github(self) -> GitHubTarget:
         """Select the concrete github settings required by a caller.
@@ -1560,7 +1585,15 @@ def _parse_harbor(
     ):
         raise TargetError("harbor_credential_selection_invalid")
     return HarborTarget(
-        url, host, _string(harbor, "project", HARBOR_AUTHORITY), **files
+        url,
+        host,
+        _string(harbor, "project", HARBOR_AUTHORITY),
+        reference_toolbox=(
+            _string(harbor, "reference_toolbox", HARBOR_AUTHORITY)
+            if "reference_toolbox" in harbor
+            else None
+        ),
+        **files,
     )
 
 
