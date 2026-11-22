@@ -57,6 +57,23 @@ def validate_run_id(value: str) -> str:
     return value
 
 
+def run_ownership_selector(run_id: str) -> str:
+    """Build the Kubernetes label selector shared by native run ownership reads.
+
+    :param run_id: Exact operation identifier returned by preparation.
+    :returns: Label selector for objects owned by this run.
+    :raises ValueError: The run identifier cannot be used for ownership.
+    """  # noqa: DOC502 - Shared run ID validation raises ValueError.
+    validate_run_id(run_id)
+    return ",".join(
+        (
+            f"{MANAGER_LABEL}={MANAGER_VALUE}",
+            f"{OPERATION_LABEL}={run_id}",
+            f"{RUN_ID_LABEL}={run_id}",
+        )
+    )
+
+
 def validate_namespace(value: str) -> str:
     """Require one native namespace name accepted by this workflow.
 
@@ -281,14 +298,7 @@ class RunScope:
         :raises KubernetesError: If a provider list or object is malformed.
         :raises ValueError: If the identifier is invalid.
         """  # noqa: DOC503 - validate_run_id raises the declared ValueError.
-        validate_run_id(run_id)
-        selector = ",".join(
-            (
-                f"{MANAGER_LABEL}={MANAGER_VALUE}",
-                f"{OPERATION_LABEL}={run_id}",
-                f"{RUN_ID_LABEL}={run_id}",
-            )
-        )
+        selector = run_ownership_selector(run_id)
         namespaces = _items(
             service.json("get", "namespaces", "-l", selector, "-o", "json"),
             "namespace",

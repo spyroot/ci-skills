@@ -76,6 +76,7 @@ BORROWED_NAMESPACE_UID: Final = "caller-namespace-uid"
 NAMESPACE_KEY: Final = ("namespace", "", NAMESPACE)
 ABSENCE_READ_FAILURE: Final = "unit_absence_read_failed"
 ABSENCE_REPLACEMENT_UID: Final = "concurrent-manager-uid"
+PREVIOUS_CONSUMER_NAME: Final = "earlier-consumer"
 SECRET_METADATA_COLUMNS: Final = (
     "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,UID:.metadata.uid"
 )
@@ -1905,7 +1906,7 @@ def test_manager_confirmed_absence_refuses_concurrent_runtime_without_mutation(
     (K8S_RUNNER.REGISTRATION_SECRET_SUFFIX, K8S_RUNNER.REGISTRY_SECRET_SUFFIX),
     ids=("registration", "registry"),
 )
-@pytest.mark.parametrize("previous_name", (None, "earlier-consumer"))
+@pytest.mark.parametrize("previous_name", (None, PREVIOUS_CONSUMER_NAME))
 def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1955,3 +1956,75 @@ def test_runner_runtime_identities_preserve_manager_cleanup_order() -> None:
             RUNNER_DESCRIPTION + RUNNER_RUNTIME.REGISTRY_SECRET_SUFFIX,
         ),
     )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "deployment-before-apply",
+        "secret-in-other-namespace",
+        "previous-name-secret-in-other-namespace",
+    ),
+)
+def test_manager_absence_confirmation_never_authorizes_writes_on_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    drift: str,
+) -> None:
+    """Apply a borrowed-namespace absence plan against a changed native baseline.
+
+    The previous-name case needs both the suffix match and the check under
+    ``--namespace``: the Secret keeps the run labels but not the current name,
+    and it is outside the selected namespace.
+    """
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    runtime = _absent_manager_runtime(cluster, capsys, borrowed=True)
+    if drift.endswith("secret-in-other-namespace"):
+        alternate = f"{NAMESPACE}-alternate"
+        borrowed = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+        borrowed["metadata"].update(name=alternate, uid=ABSENCE_REPLACEMENT_UID)
+        cluster.objects[("namespace", "", alternate)] = borrowed
+        cluster.caller_namespace = alternate
+    code, plan = _manager_cli_report(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, plan[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
+
+    kind = "deployment" if drift == "deployment-before-apply" else "secret"
+    identity = next(key for key in runtime if key[0] == kind)
+    replacement = json.loads(runtime[identity])
+    if kind == "deployment":
+        replacement["metadata"]["uid"] = ABSENCE_REPLACEMENT_UID
+    if drift == "previous-name-secret-in-other-namespace":
+        suffix = next(
+            suffix
+            for suffix in (
+                K8S_RUNNER.REGISTRATION_SECRET_SUFFIX,
+                K8S_RUNNER.REGISTRY_SECRET_SUFFIX,
+            )
+            if identity[2].endswith(suffix)
+        )
+        previous = PREVIOUS_CONSUMER_NAME + suffix
+        replacement["metadata"]["name"] = previous
+        identity = (identity[0], identity[1], previous)
+    cluster.objects[identity] = replacement
+    survivors = deepcopy(cluster.objects)
+
+    code, result = _manager_cli_report(
+        cluster,
+        capsys,
+        action=DELETE_ACTION,
+        run_id=RUN_ID,
+        flags=(APPLY_ARGUMENT, CONFIRM_ARGUMENT, plan[FIELD_PLAN_DIGEST]),
+    )
+    assert (code, result[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    ), (code, result[FIELD_STATUS], tuple(cluster.deleted))
+    assert cluster.objects == survivors
+    assert cluster.applied == cluster.deleted == []
+    assert not cluster.guard_held
