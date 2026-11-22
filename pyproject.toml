@@ -13,7 +13,7 @@ external = ["DOC"]
 # Callback contracts use explicit Optional and Union annotations.
 ignore = ["UP007", "UP045"]
 
-# Mutation testing, run by the `mutation` job in .github/workflows/validate.yml with
+# Mutation testing, run by the `mutation` job in .github/workflows/mutation.yml with
 # mutmut 2.5.1. mutmut mutates these modules in place and runs `runner` once per
 # mutant; the test modules the runner selects are listed once, in
 # tests/python/mutation-targets.txt. The job also reports coverage of these modules.

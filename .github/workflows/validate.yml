@@ -467,46 +467,6 @@ jobs:
           name: ci-evidence-test-install
           path: reports
 
-  # Mutation testing of the modules in pyproject.toml [tool.mutmut]. The job fails when a
-  # mutant survives or times out; required-result does not aggregate it.
-  mutation:
-    name: mutation
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    container:
-      image: *ci_runner_image
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ env.CI_SOURCE_SHA }}
-      - *trust_workspace
-      - name: Install mutation and coverage tools
-        run: python -m pip install -r requirements.txt mutmut==2.5.1 coverage==7.10.7
-      - name: Report coverage of the mutated modules
-        run: |
-          mkdir -p reports/raw
-          include=$(
-            python - <<'PY'
-          import tomllib
-          with open("pyproject.toml", "rb") as handle:
-              print(",".join(tomllib.load(handle)["tool"]["mutmut"]["paths_to_mutate"]))
-          PY
-          )
-          python -m coverage run --include="$include" -m pytest -q @tests/python/mutation-targets.txt
-          python -m coverage report --show-missing | tee reports/raw/mutation-coverage.txt
-      - name: Run mutmut on the selected modules
-        run: |
-          status=0
-          mutmut run --no-progress --simple-output || status=$?
-          mutmut results | tee reports/raw/mutation-results.txt
-          mutmut junitxml >reports/raw/mutation.xml
-          exit "$status"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ci-evidence-mutation
-          path: reports
-
   required-result:
     name: required-result
     if: always()
