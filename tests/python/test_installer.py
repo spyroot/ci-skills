@@ -431,17 +431,19 @@ def _stage_interrupted_upgrade(
     return skills_dir, destination, previous, old_digest, new_digest
 
 
+@pytest.mark.parametrize("upgrade", [False, True], ids=["install", "upgrade"])
 @pytest.mark.parametrize("dry_run", [True, False], ids=["dry-run", "apply"])
 @pytest.mark.parametrize(
     "unsafe_kind",
     ["symlink-dir", "broken-symlink", "regular-file"],
 )
-def test_upgrade_blocks_when_backup_directory_is_unsafe(
-    tmp_path: Path, dry_run: bool, unsafe_kind: str
+def test_install_blocks_when_backup_directory_is_unsafe(
+    tmp_path: Path, upgrade: bool, dry_run: bool, unsafe_kind: str
 ) -> None:
-    """Reject upgrade during preflight and apply when .ci-skills.backups is unsafe.
+    """Reject install and upgrade during preflight and apply when .ci-skills.backups is unsafe.
 
     :param tmp_path: Pytest directory holding source, destination, and unsafe backup path.
+    :param upgrade: Whether to test upgrading an installed skill or a fresh install.
     :param dry_run: Whether to run in preflight dry-run mode or apply mode.
     :param unsafe_kind: Kind of unsafe filesystem entry placed at ``.ci-skills.backups``.
 
@@ -450,11 +452,17 @@ def test_upgrade_blocks_when_backup_directory_is_unsafe(
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
-    first = installer.install(source, skills_dir, dry_run=False, require_verified=False)
-    assert first["status"] == "PASS"
     destination = skills_dir / installer.SKILL_NAME
-    before = (destination / "SKILL.md").read_bytes()
-    (source / "SKILL.md").write_text("new version\n", encoding="utf-8")
+    before: Optional[bytes] = None
+    if upgrade:
+        first = installer.install(
+            source, skills_dir, dry_run=False, require_verified=False
+        )
+        assert first["status"] == "PASS"
+        before = (destination / "SKILL.md").read_bytes()
+        (source / "SKILL.md").write_text("new version\n", encoding="utf-8")
+    else:
+        skills_dir.mkdir(parents=True)
     backup_path = skills_dir / installer.BACKUP_DIRECTORY_NAME
     escape = tmp_path / "outside"
     if unsafe_kind == "symlink-dir":
@@ -466,12 +474,15 @@ def test_upgrade_blocks_when_backup_directory_is_unsafe(
         backup_path.write_text("not a directory\n", encoding="utf-8")
 
     blocked = installer.install(
-        source, skills_dir, dry_run=dry_run, require_verified=False, upgrade=True
+        source, skills_dir, dry_run=dry_run, require_verified=False, upgrade=upgrade
     )
 
     assert blocked["status"] == "BLOCKED"
     assert blocked["reason"] == "install_recovery_unsafe"
-    assert (destination / "SKILL.md").read_bytes() == before
+    if upgrade:
+        assert (destination / "SKILL.md").read_bytes() == before
+    else:
+        assert not destination.exists()
     assert not (skills_dir / installer.JOURNAL_NAME).exists()
     if unsafe_kind == "symlink-dir":
         assert list(escape.iterdir()) == []

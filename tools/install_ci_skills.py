@@ -727,8 +727,7 @@ def _install_unlocked(
                 status="DRY_RUN" if dry_run else "PASS", already_installed=True
             )
             return result
-        if _present(destination):
-            _validate_backup_directory(_backup_directory(skills_dir))
+        _validate_backup_directory(_backup_directory(skills_dir))
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
