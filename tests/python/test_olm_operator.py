@@ -57,6 +57,9 @@ NAMESPACE = "nvidia-network-operator"
 CERTIFIED = olm_callbacks.CatalogSourceRef(
     "certified-operators", "openshift-marketplace"
 )
+CHANNEL = "v26.7"
+DEFAULT_CHANNEL = "stable"
+INSTALLED_CSV = f"{PACKAGE}.v26.7.0-1"
 
 
 class FakeResult:
@@ -82,8 +85,8 @@ class FakeService:
 
     def seed_manifest(
         self,
-        channel: str = "v26.7",
-        default_channel: str = "stable",
+        channel: str = CHANNEL,
+        default_channel: str = DEFAULT_CHANNEL,
         modes: tuple[str, ...] = ("OwnNamespace", "AllNamespaces"),
     ) -> None:
         """Add one PackageManifest for the package on the certified source."""
@@ -98,7 +101,7 @@ class FakeService:
                         {
                             "name": channel,
                             "installModes": [{"type": mode} for mode in modes],
-                            "entries": [{"name": f"{self.package}.v26.7.0-1"}],
+                            "entries": [{"name": INSTALLED_CSV}],
                         }
                     ],
                 },
@@ -106,10 +109,10 @@ class FakeService:
         )
 
     def seed_subscription(
-        self, channel: str = "v26.7", csv_name: str | None = None
+        self, channel: str = CHANNEL, csv_name: str | None = None
     ) -> None:
         """Add an existing Subscription with its installed CSV."""
-        installed = csv_name or f"{self.package}.v26.7.0-1"
+        installed = csv_name or INSTALLED_CSV
         self.subscription = {
             "metadata": {"name": self.package, "namespace": NAMESPACE},
             "spec": {"channel": channel},
@@ -189,19 +192,19 @@ def test_operatorgroup_document_install_modes() -> None:
 def test_subscription_document_overrides() -> None:
     """startingCSV is present only when the caller pinned one."""
     base = olm_models.subscription_document(
-        PACKAGE, NAMESPACE, "v26.7", CERTIFIED, "Automatic"
+        PACKAGE, NAMESPACE, CHANNEL, CERTIFIED, "Automatic"
     )
     assert base["spec"]["source"] == "certified-operators"
     assert "startingCSV" not in base["spec"]
     pinned = olm_models.subscription_document(
         PACKAGE,
         NAMESPACE,
-        "v26.7",
+        CHANNEL,
         CERTIFIED,
         "Manual",
-        "nvidia-network-operator.v26.7.0-1",
+        INSTALLED_CSV,
     )
-    assert pinned["spec"]["startingCSV"] == "nvidia-network-operator.v26.7.0-1"
+    assert pinned["spec"]["startingCSV"] == INSTALLED_CSV
     assert pinned["spec"]["installPlanApproval"] == "Manual"
 
 
@@ -224,40 +227,54 @@ def test_resolve_needs_package_unknown() -> None:
 def test_resolve_picks_default_channel_and_reports_enabled() -> None:
     """An existing Subscription counts as enabled whatever its channel."""
     service = FakeService()
-    service.seed_manifest(channel="v26.7", default_channel="stable")
-    service.seed_subscription(channel="v26.7")
+    service.seed_manifest(channel=CHANNEL, default_channel=DEFAULT_CHANNEL)
+    service.seed_subscription(channel=CHANNEL)
     plan, needs = olm_callbacks._resolve_plan(make_action(), service)
     assert needs == []
-    assert plan.channel == "v26.7"
+    assert plan.channel == CHANNEL
     assert plan.catalog == CERTIFIED
     assert plan.enabled
-    assert plan.installed_csv == f"{PACKAGE}.v26.7.0-1"
+    assert plan.installed_csv == INSTALLED_CSV
     assert plan.csv_phase == "Succeeded"
 
 
 def test_resolve_channel_override_conflict_with_existing() -> None:
     """A conflicting --channel against the existing Subscription stops with a need."""
     service = FakeService()
-    service.seed_manifest(channel="stable", default_channel="stable")
-    service.seed_subscription(channel="v26.7")
-    _, needs = olm_callbacks._resolve_plan(make_action(channel="stable"), service)
+    service.seed_manifest(channel=DEFAULT_CHANNEL, default_channel=DEFAULT_CHANNEL)
+    service.seed_subscription(channel=CHANNEL)
+    _, needs = olm_callbacks._resolve_plan(
+        make_action(channel=DEFAULT_CHANNEL), service
+    )
     assert any(item.need == "override_conflict" for item in needs)
 
 
 def test_resolve_channel_override_matching_existing_has_no_conflict() -> None:
     """A --channel equal to the existing Subscription's channel is not a conflict."""
     service = FakeService()
-    service.seed_manifest(channel="v26.7", default_channel="stable")
-    service.seed_subscription(channel="v26.7")
-    _, needs = olm_callbacks._resolve_plan(make_action(channel="v26.7"), service)
+    service.seed_manifest(channel=CHANNEL, default_channel=DEFAULT_CHANNEL)
+    service.seed_subscription(channel=CHANNEL)
+    _, needs = olm_callbacks._resolve_plan(make_action(channel=CHANNEL), service)
     assert needs == []
+
+
+def test_resolve_channel_override_without_existing_has_no_conflict() -> None:
+    """A --channel on a fresh install selects that channel and is not a conflict."""
+    service = FakeService()
+    service.seed_manifest(channel=CHANNEL, default_channel=DEFAULT_CHANNEL)
+    plan, needs = olm_callbacks._resolve_plan(make_action(channel=CHANNEL), service)
+    assert needs == []
+    assert plan.channel == CHANNEL
+    assert not plan.enabled
 
 
 def test_resolve_install_mode_and_approval_checked() -> None:
     """Unsupported install mode and bad approval each produce their need."""
     service = FakeService()
     service.seed_manifest(
-        channel="stable", default_channel="stable", modes=("OwnNamespace",)
+        channel=DEFAULT_CHANNEL,
+        default_channel=DEFAULT_CHANNEL,
+        modes=("OwnNamespace",),
     )
     _, needs = olm_callbacks._resolve_plan(
         make_action(install_mode="AllNamespaces"), service
@@ -270,7 +287,7 @@ def test_resolve_install_mode_and_approval_checked() -> None:
 def test_plan_evidence_binds_digest() -> None:
     """The digest changes when any bound plan field changes."""
     service = FakeService()
-    service.seed_manifest(channel="stable", default_channel="stable")
+    service.seed_manifest(channel=DEFAULT_CHANNEL, default_channel=DEFAULT_CHANNEL)
     first, _ = olm_callbacks._resolve_plan(make_action(), service)
     second, _ = olm_callbacks._resolve_plan(make_action(approval="Manual"), service)
     digest_one = olm_callbacks.plan_digest(olm_callbacks.plan_evidence(first))
