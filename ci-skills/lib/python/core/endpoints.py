@@ -41,6 +41,7 @@ BARE_TOML_KEY: Final = re.compile(r"[A-Za-z0-9_-]+\Z")
 # Authority names: each is the top-level table of that authority in TARGET_CONTRACT.
 GITHUB_AUTHORITY: Final = "github"
 HARBOR_AUTHORITY: Final = "harbor"
+REGISTRY_AUTHORITY: Final = "registry"
 KUBERNETES_AUTHORITY: Final = "kubernetes"
 # The one GitLab authority and its two instance tables. `--gitlab` choices are
 # the keys of GITLAB_SELECTORS; each value is the table that choice reads.
@@ -445,6 +446,18 @@ TARGET_CONTRACT = TargetContract(
             + Field.of(
                 Role.ACCESS, "credential_file", "username_file", "password_file"
             ),
+        ),
+        # Pull-registry credentials for operator images that need a login
+        # (CI16). One named child table per registry, with the keys and rules
+        # of [harbor]; presence of a matching table is the caller's consent
+        # for the command to create a pull Secret in the package namespace.
+        Table(
+            REGISTRY_AUTHORITY,
+            Field.of(Role.ENDPOINT, "url")
+            + Field.of(
+                Role.ACCESS, "credential_file", "username_file", "password_file"
+            ),
+            named_profiles=True,
         ),
         Table(
             KUBERNETES_AUTHORITY,

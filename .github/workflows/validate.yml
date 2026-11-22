@@ -175,6 +175,13 @@ jobs:
             --skip-checking-private-functions=True --check-class-attributes=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True ci-skills/lib/python/core/target.py
+          pydoclint --style=sphinx --skip-checking-short-docstrings=False \
+            --arg-type-hints-in-docstring=False --check-return-types=False \
+            --allow-init-docstring=True \
+            ci-skills/lib/python/core/kubernetes/olm_models.py \
+            ci-skills/lib/python/core/kubernetes/olm_callbacks.py \
+            ci-skills/lib/python/core/kubernetes/olm_resources.py \
+            ci-skills/lib/python/core/kubernetes/olm_cli.py
       - name: Check manifests and schemas
         id: schema
         run: |
@@ -192,6 +199,7 @@ jobs:
             ci-skills/schemas/results/gitlab-pipeline-watch.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
             ci-skills/schemas/results/image-build-readiness.schema.json \
+            ci-skills/schemas/results/olm-operator.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
             ci-skills/schemas/results/gitlab-runner-delete.schema.json \

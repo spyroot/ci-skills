@@ -155,6 +155,7 @@ Routing, in short:
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
 | Probe Podman, or copy the prepared toolbox and configure its runner | `bin/image_build_readiness.py probe\|chain` |
+| Enable an OLM operator and apply its shipped resource | `bin/ocp_operator.py install\|apply\|remove` |
 | Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | access to configured GitHub, GitLab and Kubernetes providers | `access_check.py` |
