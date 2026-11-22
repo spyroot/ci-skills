@@ -40,6 +40,7 @@ RESOURCE_TOKEN_LENGTH: Final = 16
 RESOURCE_NAME_SEPARATOR_COUNT: Final = 2
 MIN_NAME_COMPONENT_LENGTH: Final = 1
 RESOURCE_NAME_LIMIT_INVALID: Final = "run_scope_resource_name_limit_invalid"
+RUN_SCOPE_KIND_INVALID: Final = "run_scope_kind_invalid"
 _RUN_ID = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _DNS_LABEL = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _KIND_TOKEN = re.compile(r"[^a-z0-9-]+")
@@ -96,7 +97,7 @@ def dns_token(value: str, *, limit: int) -> str:
     """
     token = _KIND_TOKEN.sub("-", value.casefold()).strip("-")[:limit].rstrip("-")
     if not token:
-        raise ValueError("run_scope_kind_invalid")
+        raise ValueError(RUN_SCOPE_KIND_INVALID)
     return token
 
 

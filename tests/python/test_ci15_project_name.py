@@ -461,7 +461,7 @@ def test_project_name_build_candidate_tag_rejects_base_without_dns_token(
     :param legacy_toolbox_spec: Existing explicit toolbox inputs and fingerprint.
     :param name_prefix: Consumer base with no DNS-safe characters.
     """
-    with pytest.raises(ValueError, match="run_scope_kind_invalid"):
+    with pytest.raises(ValueError, match=probe_tests.RUN_SCOPE.RUN_SCOPE_KIND_INVALID):
         callback_tests.TOOLBOX.build_candidate_reference(
             legacy_toolbox_spec.fingerprint, name_prefix=name_prefix
         )
