@@ -331,17 +331,10 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
             owned = scope.resources(self.kubernetes)
             if any(
                 owned.owned_objects(kind)
-                for kind in ("Deployment", "Secret", "RoleBinding")
-            ):
-                raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
-        _require_manager_resources_absent(self.kubernetes, self.action, scope)
-        if namespace is not None:
-            owned = scope.resources(self.kubernetes)
-            if any(
-                owned.owned_objects(kind)
                 for kind in (DEPLOYMENT_KIND, SECRET_KIND, ROLE_BINDING_KIND)
             ):
                 raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
+        _require_manager_resources_absent(self.kubernetes, self.action, scope)
         if namespace is None and scope.owns_namespace:
             state.runner_scopes[scope_key(ScopePurpose.MANAGER, scope.namespace)] = (
                 ScopeObservation(
