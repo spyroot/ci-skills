@@ -30,9 +30,12 @@ from typing import TYPE_CHECKING, Optional, TypeAlias, Union
 
 import pytest
 from conftest import SKILL_ROOT, import_script_module
+from lib.python.core.catalog import GITHUB_TOKEN_VARIABLES
 from lib.python.core.endpoints import (
+    CREDENTIAL_SOURCES_KEY,
     GITHUB_AUTHORITY,
     GITLAB_AUTHORITY,
+    TARGET_REPORT_KEYS,
 )
 from test_tool_pod import MemoryCluster
 
@@ -1835,11 +1838,25 @@ def test_api_read_names_the_rejected_endpoint_form(
     assert absent not in str(failure.value)
 
 
-def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
+def test_api_dry_run_plans_keep_legacy_blank_transform_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Serialize absent selectors as the existing empty-string plan fields.
 
+    Without a target table and token variable, the plan reports null target
+    fields and the native credential store it would use.
+
+    :param monkeypatch: Pytest fixture removing ambient GitHub token variables.
     :returns: None; assertions in the body validate the regression.
     """
+    for name in GITHUB_TOKEN_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    selected = {
+        **dict.fromkeys(TARGET_REPORT_KEYS),
+        CREDENTIAL_SOURCES_KEY: {
+            GITHUB_AUTHORITY: "gh-credential-store:github.example.test"
+        },
+    }
     context = API_READ.ApiReadState()
     context.selection = API_READ.ApiProviderSelection(
         API_READ.GitProvider.GITHUB, "github.example.test"
@@ -1863,6 +1880,7 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
         "decodeBase64": False,
         "lines": "",
         "paginate": False,
+        **selected,
     }
 
     EXECUTOR.WorkflowExecutor(
@@ -1879,6 +1897,7 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
         "decodeBase64": False,
         "lines": "",
         "paginate": False,
+        **selected,
     }
 
 
@@ -1893,6 +1912,8 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
                 "authenticated": True,
                 "user": "octo",
                 "id": 7,
+                **dict.fromkeys(TARGET_REPORT_KEYS),
+                CREDENTIAL_SOURCES_KEY: {GITHUB_AUTHORITY: "fixture"},
             },
         ),
         (API_READ.ApiOutput.TEXT, "octo"),
@@ -1939,6 +1960,9 @@ def test_check_api_preserves_identity_json_and_text_outputs(
 
     client = Client()
     context = API_READ.ApiReadState()
+    context.selection = API_READ.ApiProviderSelection(
+        API_READ.GitProvider.GITHUB, "github.example.test"
+    )
     context.service = API_READ.ApiReadService(
         client, API_READ.ReadSession("github.example.test", {}, "fixture")
     )

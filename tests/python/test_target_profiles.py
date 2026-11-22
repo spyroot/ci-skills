@@ -22,6 +22,7 @@ import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final, Optional
 from urllib.parse import urlsplit
 
@@ -48,9 +49,13 @@ from lib.python.core.catalog import (
     GITLAB_PROFILE_OPTION,
     GITLAB_TARGET_OPTION,
     GITLAB_VARIABLES,
+    PROJECT_DIR,
     ROUTED_RESULT_SCHEMA_VERSION,
+    TARGET_FILENAME,
+    TARGET_PROTOCOL,
 )
 from lib.python.core.endpoints import (
+    CREDENTIAL_SOURCES_KEY,
     GITHUB_AUTHORITY,
     GITLAB_AUTHORITY,
     GITLAB_DEFAULT_INSTANCE,
@@ -80,6 +85,10 @@ from lib.python.core.endpoints import (
     ROUTING_SELECTED_BY_DEFAULT,
     ROUTING_SELECTED_BY_KEY,
     ROUTING_SELECTED_BY_LEGACY,
+    TARGET_FILE_KEY,
+    TARGET_REPORT_KEYS,
+    TARGET_SELECTION_KEY,
+    TARGET_SOURCE_KEY,
 )
 from lib.python.core.project_binding import (
     BINDING_ENV,
@@ -87,6 +96,7 @@ from lib.python.core.project_binding import (
     TARGET_ENV,
     resolve_target,
 )
+from lib.python.core.read_tools import ReadExit
 from lib.python.core.schema import specification_validator
 from lib.python.core.target import (
     GITLAB_INSTANCE_ADVICE,
@@ -179,6 +189,13 @@ OPEN_BUG: Final = ("open-bug", "--project", "team/app", "--title", "t", "--json"
 DEPLOY_PROJECT: Final = ("--project", "team/app")
 # Removes the entry at a path in `edited`.
 REMOVED: Final = object()
+# Relative GET endpoint ci-api reads from the fake provider.
+API_ENDPOINT: Final = ("--endpoint", "projects/1")
+# A host that no fixture instance declares.
+OTHER_HOST: Final = "other.example.test"
+# Identity the fake `glab api` returns for any request.
+FAKE_USER_ID: Final = 1
+FAKE_USER: Final = "unit"
 # Journals every call with the token the caller exported, then answers any
 # `glab api` request with an identity on the host it was asked for.
 FAKE_PROVIDER: Final = f"""#!{sys.executable}
@@ -190,7 +207,8 @@ with open(os.environ["FAKE_JOURNAL"], "a", encoding="utf-8") as journal:
     journal.write(json.dumps({{"tool": tool, "argv": args, "token": token}}) + "\\n")
 if tool == "glab" and args[:1] == ["api"]:
     host = args[args.index("--hostname") + 1]
-    print(json.dumps({{"id": 1, "username": "unit", "web_url": "https://" + host + "/unit"}}))
+    print(json.dumps({{"id": {FAKE_USER_ID}, "username": {json.dumps(FAKE_USER)},
+                      "web_url": "https://" + host + "/" + {json.dumps(FAKE_USER)}}}))
     raise SystemExit(0)
 raise SystemExit(98)
 """
@@ -1448,7 +1466,7 @@ def test_api_command_sends_the_selected_host_and_token(
     :returns: None; assertions compare the received host and token with the fixture.
     """
     write_target(target_path, tables)
-    endpoint = ("--endpoint", "projects/1") if operation == "get" else ()
+    endpoint = API_ENDPOINT if operation == "get" else ()
 
     result = run_script(
         "ci-api",
@@ -1529,7 +1547,7 @@ def test_api_command_on_the_template_reads_the_selected_instance(
             GITLAB_AUTHORITY,
             *_selection_argv(SELECT_PUBLIC),
             "--host",
-            "other.example.test",
+            OTHER_HOST,
         ),
     ),
     ids=("github-provider", "conflicting-host"),
@@ -1566,6 +1584,393 @@ def test_api_selection_conflict_rejects_before_any_provider_call(
     )
 
     assert result.returncode != STATUS.exit_code(STATUS.PASS)
+    assert read_journal(call_journal) == []
+
+
+# --- ci-api: the reported target and credential source -----------------------
+
+ENV_TIER, PROJECT_TIER, USER_TIER = (entry["source"] for entry in TARGET_PROTOCOL)
+# A token exported in the shell that differs from every token file.
+AMBIENT_TOKEN: Final = "unit-ambient"
+OVERRIDE_TOKEN: Final = "unit-override"
+OVERRIDE_TOKEN_FILE: Final = "override.token"
+API_GET: Final = ("get", *API_ENDPOINT)
+LOG_JSON: Final = ("--log-format", "json")
+# ci-api operations whose stdout is a ci-skills object, not the provider value,
+# with the status of their stderr `result` event.
+REPORTING_OPERATIONS: Final[Mapping[str, tuple[tuple[str, ...], str]]] = (
+    MappingProxyType(
+        {
+            "check": (("check",), STATUS.PASS),
+            "check-dry-run": (("check", "--dry-run"), STATUS.DRY_RUN),
+            "get-dry-run": ((*API_GET, "--dry-run"), STATUS.DRY_RUN),
+        }
+    )
+)
+
+
+@dataclass(frozen=True)
+class PlacedTarget:
+    """A target written at one tier and the values ci-api must report for it.
+
+    :param path: Target file the command must read.
+    :param source: Expected ``target_source``.
+    :param selection: Expected ``target_selection`` without a ``--gitlab`` suffix.
+    :param env: Child environment selecting the tier, with an ambient GitLab token.
+    """
+
+    path: Path
+    source: str
+    selection: str
+    env: Mapping[str, str]
+
+    def token_file(self, instance: Instance = PRIVATE) -> Path:
+        """Return an instance's token file beside the target.
+
+        :param instance: Fixture instance whose token file is wanted.
+        :returns: Absolute token file path.
+        """
+        return (self.path.parent / instance.token_path).resolve()
+
+
+def place_target(
+    tier: str,
+    target_path: Path,
+    home: Path,
+    tables: Optional[Mapping[str, TomlValue]] = None,
+) -> PlacedTarget:
+    """Write a target and both instances' token files at one tier.
+
+    :param tier: ``TARGET_PROTOCOL`` source name of the tier.
+    :param target_path: Fixture path used for the environment tier.
+    :param home: Directory the child process uses as ``HOME``.
+    :param tables: Composed target; ``None`` writes ``single_target()``.
+    :returns: Written target, the report values it selects, and the child environment.
+    """
+    relative = Path(PROJECT_DIR) / TARGET_FILENAME
+    path = {
+        ENV_TIER: target_path,
+        PROJECT_TIER: Path.cwd() / relative,
+        USER_TIER: home / relative,
+    }[tier]
+    for instance in (PRIVATE, PUBLIC):
+        token = path.parent / instance.token_path
+        token.parent.mkdir(parents=True, exist_ok=True)
+        token.write_text(instance.token_text, encoding="utf-8")
+    write_target(path, single_target() if tables is None else tables)
+    env = {"HOME": str(home), TOKEN_VARIABLE: AMBIENT_TOKEN}
+    if tier == ENV_TIER:
+        env[TARGET_ENV] = str(path)
+        return PlacedTarget(path, tier, f"{tier} -> file:{path.resolve()}", env)
+    return PlacedTarget(path, tier, f"{tier}:{path.resolve()}", env)
+
+
+def assert_target_report(
+    report: Mapping[str, object], placed: Optional[PlacedTarget], credential: str
+) -> None:
+    """Compare ci-api's target and credential fields with the expected selection.
+
+    :param report: ci-api stdout object or stderr ``result`` event details.
+    :param placed: Target that supplied the host, or ``None`` when none did.
+    :param credential: Expected GitLab ``credential_sources`` reference.
+    :returns: None; assertions compare the fields.
+    """
+    if placed is None:
+        assert {key: report[key] for key in TARGET_REPORT_KEYS} == dict.fromkeys(
+            TARGET_REPORT_KEYS
+        )
+    else:
+        assert Path(str(report[TARGET_FILE_KEY])).resolve() == placed.path.resolve()
+        assert report[TARGET_SOURCE_KEY] == placed.source
+        assert report[TARGET_SELECTION_KEY] == placed.selection
+    assert report[CREDENTIAL_SOURCES_KEY] == {GITLAB_AUTHORITY: credential}
+
+
+def result_event(stderr: str) -> Mapping[str, object]:
+    """Select the one ``result`` diagnostic from ``--log-format json`` stderr.
+
+    :param stderr: Child standard error.
+    :returns: The decoded ``result`` event.
+    """
+    events = [json.loads(line) for line in stderr.splitlines() if line.startswith("{")]
+    (event,) = (item for item in events if item["event"] == "result")
+    return event
+
+
+@pytest.fixture
+def user_home(target_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run from a work directory that is not ``HOME``, so the tiers differ.
+
+    :param target_path: Fixture that isolates ``HOME`` and the target selectors.
+    :param monkeypatch: Fixture changing the working directory.
+    :returns: The isolated ``HOME`` directory.
+    """
+    directory = Path.home()
+    work = target_path.parent.parent / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return directory
+
+
+@pytest.mark.parametrize("operation", tuple(REPORTING_OPERATIONS))
+@pytest.mark.parametrize("tier", (ENV_TIER, PROJECT_TIER, USER_TIER))
+def test_api_reports_the_target_tier_and_the_token_file_it_used(
+    target_path: Path,
+    user_home: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    tier: str,
+    operation: str,
+) -> None:
+    """Report the selected tier and the token file while ``GITLAB_TOKEN`` is set.
+
+    The instance's ``token_file`` wins over the ambient variable. ``check`` and
+    both plans report the target file, its tier, the selection string and
+    ``file:<token_file>`` on stdout and on the stderr ``result`` event; no output
+    contains a token. ``check`` sends that file's token, a plan sends nothing.
+
+    :param target_path: Fixture path for the environment tier.
+    :param user_home: Isolated ``HOME`` that differs from the working directory.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal of provider calls.
+    :param tier: ``TARGET_PROTOCOL`` source that holds the target.
+    :param operation: Key of the ci-api arguments under test.
+    :returns: None; assertions compare the report, the event and the provider calls.
+    """
+    placed = place_target(tier, target_path, user_home)
+    argv, status = REPORTING_OPERATIONS[operation]
+    credential = f"file:{placed.token_file()}"
+
+    result = run_script(
+        "ci-api",
+        *argv,
+        "--provider",
+        GITLAB_AUTHORITY,
+        *LOG_JSON,
+        fake_bin=fake_bin,
+        env={**providers, **placed.env},
+    )
+    event = result_event(result.stderr)
+    calls = read_journal(call_journal)
+
+    assert result.returncode == ReadExit.SUCCESS, result.stderr
+    assert_target_report(parse_json_output(result), placed, credential)
+    assert event["result"] == status
+    assert_target_report(event["details"], placed, credential)
+    output = result.stdout + result.stderr
+    assert PRIVATE.token_text not in output
+    assert AMBIENT_TOKEN not in output
+    if status == STATUS.DRY_RUN:
+        assert calls == []
+    else:
+        assert calls
+        assert {call["token"] for call in calls} == {PRIVATE.token_text}
+
+
+def test_api_gitlab_option_is_appended_to_the_target_selection(
+    target_path: Path,
+    user_home: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+) -> None:
+    """Append ``--gitlab public`` to ``target_selection`` and report its token file.
+
+    :param target_path: Fixture path, unused by the user tier.
+    :param user_home: Isolated ``HOME`` holding the user-tier target.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal of provider calls.
+    :returns: None; assertions compare the report, host and token sent.
+    """
+    placed = place_target(USER_TIER, target_path, user_home, routed_target())
+
+    result = run_script(
+        "ci-api",
+        "check",
+        "--provider",
+        GITLAB_AUTHORITY,
+        *_selection_argv(SELECT_PUBLIC),
+        fake_bin=fake_bin,
+        env={**providers, **placed.env},
+    )
+    report = parse_json_output(result)
+    calls = read_journal(call_journal)
+
+    assert result.returncode == ReadExit.SUCCESS, result.stderr
+    assert report[TARGET_SOURCE_KEY] == placed.source
+    assert report[TARGET_SELECTION_KEY] == f"{placed.selection};{ARGV_PUBLIC}"
+    assert report[CREDENTIAL_SOURCES_KEY] == {
+        GITLAB_AUTHORITY: f"file:{placed.token_file(PUBLIC)}"
+    }
+    assert _hostnames(calls) == [PUBLIC.host] * len(calls)
+    assert {call["token"] for call in calls} == {PUBLIC.token_text}
+
+
+def test_api_get_keeps_the_provider_value_and_reports_on_stderr(
+    target_path: Path,
+    user_home: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+) -> None:
+    """Write the provider value unchanged and the selection on the ``result`` event.
+
+    :param target_path: Fixture path, unused by the user tier.
+    :param user_home: Isolated ``HOME`` holding the user-tier target.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal of provider calls.
+    :returns: None; assertions compare stdout, stderr and the provider calls.
+    """
+    placed = place_target(USER_TIER, target_path, user_home)
+
+    result = run_script(
+        "ci-api",
+        *API_GET,
+        "--provider",
+        GITLAB_AUTHORITY,
+        *LOG_JSON,
+        fake_bin=fake_bin,
+        env={**providers, **placed.env},
+    )
+    event = result_event(result.stderr)
+
+    assert result.returncode == ReadExit.SUCCESS, result.stderr
+    assert parse_json_output(result) == {
+        "id": FAKE_USER_ID,
+        "username": FAKE_USER,
+        "web_url": f"{PRIVATE.url}/{FAKE_USER}",
+    }
+    assert event["result"] == STATUS.PASS
+    assert_target_report(event["details"], placed, f"file:{placed.token_file()}")
+    assert {call["token"] for call in read_journal(call_journal)} == {
+        PRIVATE.token_text
+    }
+
+
+def test_api_token_file_option_is_reported_and_sent(
+    target_path: Path,
+    user_home: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+) -> None:
+    """Report and send ``--token-file`` while the target still supplies the host.
+
+    :param target_path: Fixture path, unused by the user tier.
+    :param user_home: Isolated ``HOME`` holding the user-tier target.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal of provider calls.
+    :returns: None; assertions compare the report and the token sent.
+    """
+    placed = place_target(USER_TIER, target_path, user_home)
+    override = target_path.parent / OVERRIDE_TOKEN_FILE
+    override.write_text(OVERRIDE_TOKEN, encoding="utf-8")
+
+    result = run_script(
+        "ci-api",
+        "check",
+        "--provider",
+        GITLAB_AUTHORITY,
+        "--token-file",
+        override,
+        fake_bin=fake_bin,
+        env={**providers, **placed.env},
+    )
+    calls = read_journal(call_journal)
+
+    assert result.returncode == ReadExit.SUCCESS, result.stderr
+    assert_target_report(
+        parse_json_output(result), placed, f"file:{override.resolve()}"
+    )
+    assert _hostnames(calls) == [PRIVATE.host] * len(calls)
+    assert {call["token"] for call in calls} == {OVERRIDE_TOKEN}
+
+
+@pytest.mark.parametrize("with_target", (False, True), ids=("no-target", "other-host"))
+def test_api_host_option_reports_no_target_and_the_ambient_token(
+    target_path: Path,
+    user_home: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+    with_target: bool,
+) -> None:
+    """Report null target fields when ``--host`` is not the target table's host.
+
+    Without a target file, or with ``--host`` naming another host, no target
+    table supplies the host or token file, so the ambient variable is sent.
+
+    :param target_path: Fixture path, unused by the user tier.
+    :param user_home: Isolated ``HOME`` that holds the user-tier target, if any.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal of provider calls.
+    :param with_target: Whether a user-tier target exists.
+    :returns: None; assertions compare the report, host and token sent.
+    """
+    env = {"HOME": str(user_home), TOKEN_VARIABLE: AMBIENT_TOKEN}
+    if with_target:
+        env = dict(place_target(USER_TIER, target_path, user_home).env)
+
+    result = run_script(
+        "ci-api",
+        "check",
+        "--provider",
+        GITLAB_AUTHORITY,
+        "--host",
+        OTHER_HOST,
+        fake_bin=fake_bin,
+        env={**providers, **env},
+    )
+    calls = read_journal(call_journal)
+
+    assert result.returncode == ReadExit.SUCCESS, result.stderr
+    assert_target_report(parse_json_output(result), None, f"env:{TOKEN_VARIABLE}")
+    assert _hostnames(calls) == [OTHER_HOST] * len(calls)
+    assert {call["token"] for call in calls} == {AMBIENT_TOKEN}
+
+
+def test_api_blocked_result_names_the_selected_token_file(
+    target_path: Path,
+    user_home: Path,
+    providers: Mapping[str, str],
+    fake_bin: Path,
+    call_journal: Path,
+) -> None:
+    """Name the unreadable token file on the BLOCKED ``result`` event.
+
+    :param target_path: Fixture path, unused by the user tier.
+    :param user_home: Isolated ``HOME`` holding the user-tier target.
+    :param providers: Child environment of the journaling fake providers.
+    :param fake_bin: Directory holding the fake providers.
+    :param call_journal: Journal that must stay empty.
+    :returns: None; assertions compare the exit code and the event details.
+    """
+    placed = place_target(USER_TIER, target_path, user_home)
+    missing = target_path.parent / OVERRIDE_TOKEN_FILE
+
+    result = run_script(
+        "ci-api",
+        "check",
+        "--provider",
+        GITLAB_AUTHORITY,
+        "--token-file",
+        missing,
+        *LOG_JSON,
+        fake_bin=fake_bin,
+        env={**providers, **placed.env},
+    )
+    event = result_event(result.stderr)
+
+    assert result.returncode == ReadExit.MISSING
+    assert result.stdout == ""
+    assert event["result"] == STATUS.BLOCKED
+    assert_target_report(event["details"], placed, f"file:{missing.resolve()}")
     assert read_journal(call_journal) == []
 
 
