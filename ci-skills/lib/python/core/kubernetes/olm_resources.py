@@ -70,7 +70,9 @@ class ResolveShippedResource(K8SCallback[OLMAction]):
                 None,
             )
             if document is None:
-                raise ValueError(f"operator_shipped_example_missing: {args.resource_kind}")
+                raise ValueError(
+                    f"operator_shipped_example_missing: {args.resource_kind}"
+                )
         self.state.shipped_document = document
         metadata = document.get("metadata", {})
         return {
