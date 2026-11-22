@@ -166,3 +166,15 @@ credential_file = "harbor.credentials"
 # Or replace credential_file with both existing file references:
 # username_file = "harbor.identity"
 # password_file = "harbor.secret"
+
+# Optional: one named table per pull registry whose images need a login. A
+# command that applies operator workloads creates a pull Secret in its own
+# run-scoped namespace only when a profile's host matches an image host, and
+# the cluster-wide pull secret is never edited. The keys and rules match
+# [harbor].
+# [registry.nvcr]
+# url = "https://nvcr.example.test"
+# credential_file = "nvcr.credentials"
+# Or replace credential_file with both existing file references:
+# username_file = "nvcr.identity"
+# password_file = "nvcr.secret"

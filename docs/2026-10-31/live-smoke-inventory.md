@@ -349,3 +349,22 @@ to the install), and deleted it (APPLIED, then NO_OP with the attached cleanup r
 project `123` listed no cluster Agents and the namespace returned NotFound. The `ea09ff7` set is preserved under
 `tests/acceptance/historical/pre-ci14-agent-at-ea09ff7/` and the `22ce1d8` set under
 `tests/acceptance/historical/pre-ci14-agent-series-at-22ce1d8/`.
+
+### GitLab Agent series and mirror read-back — 2026-11-22, CI16 OLM candidate `fd2d49a`
+
+Candidate `fd2d49a` is the CI16 OLM branch (#162) merged with `main` `1ad150e` (`80e0a46`), with the ruff SIM102 fix
+(`29f02be`) and the pydoclint docstring fix. The access receipt was captured at `2026-11-22T21:01:59Z`. The first mirror
+qualification, run `pr162-mirror-20261122-fd2d49a`, created repository `1467987884` and GitLab mirror `47`, removed the
+mirror, and stopped BLOCKED with `destination_identity_changed` before deleting the repository: the path
+`spyroot/test-mirror-push` returned a different repository ID, which matches a concurrent run on the same fixture path;
+it is not a receipt. The rerun, `pr162-mirror-20261122-fd2d49a-r2`, created repository `1467998784` and mirror `49`,
+returned NO_OP on repeat and deleted both (`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`). The Agent series on `hott/test`, run
+`12e9b4765edb4c09a496a4ecd0894a64`, connected Agent `15` in namespace `test-be4c3749c86d29296361` (APPLIED, then NO_OP
+after a new live plan), verified CI access from job `136198` in pipeline `16804` on branch `ci-agent-access-proof` (the
+three proof files are byte-identical to the install), and deleted it (APPLIED, then NO_OP with the attached cleanup
+record). At `2026-11-22T21:22:34Z` Agent `15` returned 404, its namespace returned NotFound, source `261` listed no
+remote mirror, and repositories `1467998784` and `1467987884` returned 404 by ID. An earlier full series from `80e0a46`
+(Agent `14`, namespace `test-7cd7f6cefe261219ce86`, job `135871`; mirror run with repository `1467953872` and mirror
+`46`) passed and was cleaned up the same way; its receipts are not kept because the pydoclint fix changed
+`ci-skills/lib`. The `238ab84` set from `main` is preserved under `tests/acceptance/historical/pre-ci16-olm-at-238ab84/`
+and this branch's `62ef623` set under `tests/acceptance/historical/pre-ci16-olm-main-integration/`.

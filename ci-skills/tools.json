@@ -72,6 +72,7 @@
     "github",
     "gitlab",
     "harbor",
+    "registry",
     "kubernetes"
   ],
   "capability_options": {
@@ -1615,6 +1616,89 @@
       },
       "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; join its booted node, inspect it or release a previous run. See references/ocp-node-image.md."
     },
+    "ocp_operator.py": {
+      "capabilities": [
+        "namespaced"
+      ],
+      "execution_surface": "configured Kubernetes API; the registry Secret callback reads a matched [registry.<name>] profile",
+      "options": [
+        "--apply",
+        "--approval",
+        "--binding",
+        "--channel",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--install-mode",
+        "--json",
+        "--kind",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--namespace",
+        "--output-dir",
+        "--package",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--shipped-default",
+        "--source",
+        "--source-namespace",
+        "--spec",
+        "--starting-csv",
+        "--timeout",
+        "--wait-for",
+        "--yaml"
+      ],
+      "purpose": "Enable an OLM operator such as the NVIDIA Network Operator and apply the resource its package ships.",
+      "read_only": false,
+      "report_kind": "olm_operator",
+      "required_options": [],
+      "required_tools": [
+        "kubectl",
+        "oc on OpenShift"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "A plan or operation evidence: resolved channel, catalog source and Subscription state, or the applied resource status.",
+      "side_effects": "Apply mode creates the Namespace, OperatorGroup, Subscription and the selected custom resource. A matched registry profile may create a pull Secret in the package namespace. The cluster-wide pull secret is never edited.",
+      "subcommands": {
+        "apply": {
+          "mutates": true,
+          "purpose": "Apply the resource document the package ships as its example, or the caller's --spec document.",
+          "read_back": "The status the operator's controller wrote for the applied object.",
+          "requires_authorities": [
+            "kubernetes"
+          ],
+          "result_schema": "schemas/results/olm-operator.schema.json",
+          "side_effects": "Apply mode creates the selected custom resource and waits for the caller-stated status field."
+        },
+        "install": {
+          "mutates": true,
+          "purpose": "Resolve or create the Namespace, OperatorGroup and Subscription that enable one package.",
+          "read_back": "PackageManifest channel and source, Subscription identity and the installed CSV phase.",
+          "requires_authorities": [
+            "kubernetes"
+          ],
+          "result_schema": "schemas/results/olm-operator.schema.json",
+          "side_effects": "Apply mode creates the Namespace, OperatorGroup and Subscription."
+        },
+        "remove": {
+          "mutates": true,
+          "purpose": "Remove one applied custom resource, or the package Subscription when no kind is named.",
+          "read_back": "Independent absence of every deleted object.",
+          "requires_authorities": [
+            "kubernetes"
+          ],
+          "result_schema": "schemas/results/olm-operator.schema.json",
+          "side_effects": "Deletes the named object or the package enablement; CRDs always stay."
+        }
+      },
+      "use_when": "An OpenShift cluster needs an OLM package enabled, its shipped default resource applied, or an answer stating what the caller must supply."
+    },
     "prepare_tool_pod.py": {
       "capabilities": [],
       "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
@@ -1855,6 +1939,7 @@
     "create or change a GitLab wiki page": "gitlab_wiki.py",
     "create or delete a GitHub runner": "create_selfhosted_runner.py",
     "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
+    "enable an OLM operator such as the NVIDIA Network Operator": "ocp_operator.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
     "mirror GitLab to GitHub": "gitlab_mirror.py",
     "open a GitLab bug": "gitlab_issue.py",
