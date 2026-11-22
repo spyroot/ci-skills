@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-22T00:53:30.134467+00:00",
+  "captured_at": "2026-11-22T11:23:52.534997+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "1cee1852e828b9caaee5877f0446162dd0820bdeaf705c27a117d27a02577d05",
+  "plan_digest": "28a5d3c2b260d316f721d64879f2ef1cd0a0e5a8d6e503575882387c176a0ed0",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1467093241,
+        "id": 1467484939,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 29,
+        "id": 33,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-22T00:52:57.605Z",
+        "last_successful_update_at": "2026-11-22T11:23:18.504Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "d50e7afbaabab51c8c4091a2f6292e01d928554a02cffafebec6b34606239deb",
+    "digest": "2522bff6e0991ad4fd691101a0e9bbfc051ac2de41b14371e01565360210e321",
     "file_count": 277,
-    "functional_digest": "7708296c533fd39702db35fdfd471717251c6184ca4eb16e6c7cb4082dcf17ce",
+    "functional_digest": "aeb18420744470875ea7e357869c05cc16fb49ac9270322c87b593f0925acfca",
     "revision": {
       "source": "installer_record",
-      "value": "ff5aa48e2e8046d4933579cac03f019891144c84",
+      "value": "5db056fb985bb908279ddfedf1a919cd0995bb74",
       "verified": true
     }
   },
@@ -108,5 +108,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user",
-  "tested_revision": "ff5aa48e2e8046d4933579cac03f019891144c84"
+  "tested_revision": "5db056fb985bb908279ddfedf1a919cd0995bb74"
 }
