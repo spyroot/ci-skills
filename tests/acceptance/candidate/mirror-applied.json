@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-22T16:00:04.818301+00:00",
+  "captured_at": "2026-11-22T16:27:57.328570+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "bb8129171c804da09ace8b50f98408acdcc9958636310f178efa7c4ffa784d31",
+  "plan_digest": "a71c62b7f3f6f9f1dd4ab0c80f0e050978e0c1a9ca8d1bf37a2d5c3186f23e61",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1467727780,
+        "id": 1467753820,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 42,
+        "id": 43,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-22T15:59:58.554Z",
+        "last_successful_update_at": "2026-11-22T16:27:25.693Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "7cfd4ee85b54685fc468ad0dda662695aba3394b97ee3472f1f197c3d4e6f78b",
+    "digest": "75b9cbce82f85caceae5303f009ff2afcf43c9a3485b75088aec4186ebe86680",
     "file_count": 283,
-    "functional_digest": "341f02894f9064aa9ea799a3b6b6f6ab6d08e5aacc63d09ab57c1f548ec3ce6d",
+    "functional_digest": "cc618fbe6a5636776cf631e124c060993155a56a949f678dc735a781ed6f5f8e",
     "revision": {
       "source": "installer_record",
-      "value": "f7321ceb291a34e1014d34d3929c84f6bc218fa6",
+      "value": "beda831dd3d9aba529f6f0a52a7b12390fc64054",
       "verified": true
     }
   },
@@ -108,5 +108,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user;argv:--gitlab=private",
-  "tested_revision": "f7321ceb291a34e1014d34d3929c84f6bc218fa6"
+  "tested_revision": "beda831dd3d9aba529f6f0a52a7b12390fc64054"
 }
