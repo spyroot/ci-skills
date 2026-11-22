@@ -386,9 +386,13 @@ def main(argv: list[str] | None = None) -> int:
     result = Executor(
         context=ExecutionContext.from_args(args),
         callbacks=[
-            K8SAuth(), build,
-            HarborAuth(), publish,
-            GitLabAuth(), runner, VerifyRunner(runner=runner),
+            K8SAuth(),
+            build,
+            HarborAuth(),
+            publish,
+            GitLabAuth(),
+            runner,
+            VerifyRunner(runner=runner),
         ],
     ).run()
     return emit_result(result, args)

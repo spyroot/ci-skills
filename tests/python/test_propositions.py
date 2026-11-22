@@ -588,8 +588,30 @@ def test_next_verb_is_retired() -> None:
         ("gitlab_wiki.py", ("gitlab-wiki",)),
     ]
     + [
+        (
+            "gitlab_runner_manager.py",
+            (
+                "gitlab-runner-config",
+                "gitlab-runner-feature-flags",
+                "gitlab-runner-cache",
+                "gitlab-runner-operator",
+                "gitlab-runner-helm",
+            ),
+        ),
+    ]
+    + [
         (command, ("harbor-authentication", "harbor-helm-oci"))
-        for command in ("toolbox.py", "harbor_push.py", "harbor_pull.py")
+        for command in ("harbor_push.py", "harbor_pull.py")
+    ]
+    + [
+        (command, ("harbor-authentication", "harbor-helm-oci", "github-arc"))
+        for command in ("toolbox.py", "create_selfhosted_runner.py")
+    ]
+    + [
+        (
+            "image_build_readiness.py",
+            ("harbor-authentication", "harbor-helm-oci", "gitlab-runner-helm"),
+        ),
     ],
 )
 def test_task_references_route_to_related_commands_and_read_installed_text(
@@ -616,6 +638,8 @@ def test_task_references_route_to_related_commands_and_read_installed_text(
         "gitlab-wiki": ("GitLab wiki content", "Fields and format"),
         "harbor-authentication": ("Harbor authentication", "Select credentials"),
         "harbor-helm-oci": ("Harbor Helm OCI", "Values"),
+        "github-arc": (CATALOG.GITHUB_ARC_REFERENCE, "Charts and version"),
+        "gitlab-runner-helm": (CATALOG.GITLAB_RUNNER_HELM_REFERENCE, "Version"),
     }
     names = {name for name, _ in references.values()}
     expected_names = {references[stem][0] for stem in expected_stems}

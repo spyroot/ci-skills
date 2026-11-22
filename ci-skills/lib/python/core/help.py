@@ -162,6 +162,11 @@ class CommandHelp:
                 ):
                     if self.text(field):
                         formatter.add_text(f"{label}: {self.text(field)}")
+                credentials = json_strings(self.document.get("credentials", []))
+                if credentials:
+                    formatter.add_text("Credentials:")
+                    for line in credentials:
+                        formatter.add_text(line)
             formatter.end_section()
         formatter.start_section("Examples")
         for example in self.examples(parser.prog):

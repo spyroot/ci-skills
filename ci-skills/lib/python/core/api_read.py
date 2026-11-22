@@ -21,7 +21,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final, Optional, TypeVar
 
-from lib.python.access.sources import _token_source
+from lib.python.access.sources import TokenSelection, _token_source
 from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
@@ -39,11 +39,20 @@ from lib.python.core.cli_api import (
     response_decoder,
     validate_endpoint,
 )
-from lib.python.core.endpoints import GITHUB_AUTHORITY, GITLAB_AUTHORITY
+from lib.python.core.endpoints import (
+    CREDENTIAL_SOURCES_KEY,
+    GITHUB_AUTHORITY,
+    GITLAB_AUTHORITY,
+    TARGET_REPORT_KEYS,
+)
 from lib.python.core.github.github import GitHubAPIClient
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.json_types import JSONObject, JSONValue
-from lib.python.core.project_binding import SMOKE_ENV, resolve_target_file
+from lib.python.core.project_binding import (
+    SMOKE_ENV,
+    load_selected_target,
+    resolve_target_file,
+)
 from lib.python.core.read_tools import (
     MAX_READ_BYTES,
     MAX_READ_LINES,
@@ -54,8 +63,8 @@ from lib.python.core.read_tools import (
 from lib.python.core.target import (
     GitLabRoute,
     GitLabSelection,
+    Target,
     TargetError,
-    load_target,
 )
 
 
@@ -345,6 +354,9 @@ class ApiProviderSelection:
         ``from_action`` leaves it ``None`` when no target file exists, when
         ``--provider`` is ``github``, and when ``--host`` names a host other than
         the selected table's ``url``.
+    :param target: Target whose provider table supplied ``host``, with its file,
+        source and selection string. ``from_action`` leaves it ``None`` when no
+        target file exists and when ``--host`` names a host other than the table's.
 
     .. attribute :: provider
         :type: GitProvider
@@ -368,12 +380,20 @@ class ApiProviderSelection:
         Route of the GitLab table that supplied ``host``. ``from_action`` leaves it
         ``None`` when no target file exists, when ``--provider`` is ``github``,
         and when ``--host`` names a host other than the selected table's ``url``.
+
+    .. attribute :: target
+        :type: Optional[Target]
+
+        Target whose provider table supplied ``host``, with its file, source and
+        selection string. ``from_action`` leaves it ``None`` when no target file
+        exists and when ``--host`` names a host other than the table's.
     """
 
     provider: GitProvider
     host: str
     token_file: Optional[Path] = None
     route: Optional[GitLabRoute] = None
+    target: Optional[Target] = None
 
     @classmethod
     def from_action(cls, action: ApiProviderAction) -> ApiProviderSelection:
@@ -388,8 +408,9 @@ class ApiProviderSelection:
         host, token_file = action.host, action.token_file
         selection = action.gitlab_selection or GitLabSelection()
         route = None
+        used: Optional[Target] = None
         try:
-            path, _source = resolve_target_file(None)
+            path, source = resolve_target_file(None)
         except TargetError as exc:
             if (
                 selection.requested
@@ -398,11 +419,11 @@ class ApiProviderSelection:
             ):
                 raise
         else:
-            target = load_target(
+            target = load_selected_target(
                 path,
+                source,
                 required_surfaces=(action.provider.value,),
-                gitlab=selection.selector,
-                gitlab_profile=selection.profile,
+                gitlab_selection=selection,
             )
             configured = (
                 target.github
@@ -421,11 +442,61 @@ class ApiProviderSelection:
                 host = configured.host
                 token_file = token_file or configured.token_file
                 route = target.routing
+                used = target
         if host is None and action.provider == GitProvider.GITHUB:
             host = GITHUB_DOTCOM_HOST
         if not host or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", host):
             raise ReadToolError("select a provider host in target.toml", ReadExit.USAGE)
-        return cls(action.provider, host.lower(), token_file, route)
+        return cls(action.provider, host.lower(), token_file, route, used)
+
+    @property
+    def credential_names(self) -> tuple[str, ...]:
+        """Name the variables that may hold this provider's token, in order.
+
+        :returns: ``github_variables(host)`` for GitHub, else ``GITLAB_VARIABLES``.
+        """
+        if self.provider == GitProvider.GITHUB:
+            return tuple(github_variables(self.host))
+        return tuple(GITLAB_VARIABLES)
+
+    @property
+    def credential_store(self) -> str:
+        """Name the native CLI store used when no file or variable is selected.
+
+        :returns: ``gh-credential-store:<host>`` or ``glab-credential-store:<host>``.
+        """
+        tool = "gh" if self.provider == GitProvider.GITHUB else "glab"
+        return f"{tool}-credential-store:{self.host}"
+
+    def planned_credential_source(self) -> str:
+        """Name the token source a binding would select, without reading the token.
+
+        :returns: ``file:<absolute path>``, ``env:<NAME>`` or ``credential_store``.
+        :raises OSError: If resolving the token file path fails.
+        :raises RuntimeError: If the token file path is a symlink loop.
+        """  # noqa: DOC502 - Path.resolve raises these for an unusable path.
+        return TokenSelection.choose(
+            self.token_file, self.credential_names, self.credential_store
+        ).reference
+
+    def report(self, credential_source: str) -> JSONObject:
+        """Report the target and the credential source of this provider call.
+
+        :param credential_source: Reference of the token the call sends or would send.
+        :returns: ``target_file``, ``target_source`` and ``target_selection`` from
+            ``Target.selection_report`` (``None`` when no target table supplied the
+            host), and ``credential_sources`` mapping the provider to
+            ``credential_source``.
+        """
+        fields = (
+            self.target.selection_report()
+            if self.target is not None
+            else dict.fromkeys(TARGET_REPORT_KEYS)
+        )
+        return {
+            **fields,
+            CREDENTIAL_SOURCES_KEY: {self.provider.value: credential_source},
+        }
 
 
 @dataclass(frozen=True)
@@ -460,8 +531,8 @@ class ApiReadService:
         github = selection.provider == GitProvider.GITHUB
         source = _token_source(
             selection.token_file,
-            github_variables(selection.host) if github else GITLAB_VARIABLES,
-            f"{'gh' if github else 'glab'}-credential-store:{selection.host}",
+            selection.credential_names,
+            selection.credential_store,
             clear_names=GITHUB_TOKEN_VARIABLES if github else GITLAB_VARIABLES,
         )
         client_type = GitHubAPIClient if github else GlabAPIClient
@@ -737,6 +808,38 @@ class ApiReadState(ExecutionContext):
     service: ApiReadService = field(init=False, repr=False)
     payload: JSONValue = field(default_factory=dict)
 
+    def selection_report(self) -> JSONObject:
+        """Report the target and credential source of this invocation.
+
+        After BindAPI, ``credential_sources`` names the token the bound session
+        exports to ``gh`` or ``glab``. Before it, as in a dry run, it names the
+        source the binding would select; the token is not read or validated.
+
+        :returns: ``ApiProviderSelection.report`` for the bound or planned source.
+        :raises AttributeError: If SelectAPI has not assigned the selection.
+        :raises OSError: If a planned token file path cannot be resolved.
+        :raises RuntimeError: If a planned token file path is a symlink loop.
+        """  # noqa: DOC502 - Unassigned state and Path.resolve raise these.
+        credential = (
+            self.service.session.credential_source
+            if hasattr(self, "service")
+            else self.selection.planned_credential_source()
+        )
+        return self.selection.report(credential)
+
+    def log_details(self) -> Optional[JSONObject]:
+        """Select the details of the stderr ``result`` event.
+
+        :returns: ``selection_report()``, or ``None`` when SelectAPI did not
+            assign a selection or the planned token path cannot be resolved.
+        """
+        if not hasattr(self, "selection"):
+            return None
+        try:
+            return self.selection_report()
+        except (OSError, RuntimeError):
+            return None
+
 
 ApiActionT_co = TypeVar("ApiActionT_co", bound=ApiProviderAction, covariant=True)
 
@@ -855,13 +958,18 @@ class CheckAPI(ApiProviderCallback[ApiCheckAction]):
     def run(self) -> JSONObject:
         """Store the selected identity and return its stable callback envelope.
 
-        :returns: A mapping whose ``value`` is the identity name or identity object.
+        :returns: A mapping whose ``value`` is the identity name for text output,
+            otherwise the identity object with ``ApiReadState.selection_report``
+            fields added.
         :raises ReadToolError: If identity inputs or the provider identity are invalid.
         :raises APIError: If authentication, transport, retries, or response bounds fail.
         :raises OSError: If the native provider process cannot be started.
         :raises AttributeError: If state or its preceding service binding is absent.
         """  # noqa: DOC502 - The bound service and state enforce these conditions.
-        self.state.payload = self.state.service.check(self.action)
+        identity = self.state.service.check(self.action)
+        if isinstance(identity, Mapping):
+            identity = {**identity, **self.state.selection_report()}
+        self.state.payload = identity
         return {"value": self.state.payload}
 
 
@@ -871,9 +979,12 @@ class PlanAPI(ApiSelectionCallback[ApiReadAction]):
     def run(self) -> JSONObject:
         """Store the nonexecuted request plan for the installed CLI and later callbacks.
 
-        :returns: Existing request-plan fields with the selected host and transformations.
+        :returns: Existing request-plan fields with the selected host and
+            transformations, and the ``ApiReadState.selection_report`` fields.
         :raises AttributeError: If state or its preceding provider selection is absent.
-        """  # noqa: DOC502 - Unassigned execution state raises AttributeError.
+        :raises OSError: If the planned token file path cannot be resolved.
+        :raises RuntimeError: If the planned token file path is a symlink loop.
+        """  # noqa: DOC502 - Unassigned state and Path.resolve raise these.
         action = self.action
         plan: JSONObject = {
             "mode": "dry-run",
@@ -886,6 +997,7 @@ class PlanAPI(ApiSelectionCallback[ApiReadAction]):
             "decodeBase64": action.decode_base64,
             "lines": action.lines if action.lines is not None else "",
             "paginate": action.paginate,
+            **self.state.selection_report(),
         }
         self.state.payload = plan
         return plan
@@ -897,9 +1009,12 @@ class PlanAPICheck(ApiSelectionCallback[ApiCheckAction]):
     def run(self) -> JSONObject:
         """Store the existing wire-format plan for an authenticated identity check.
 
-        :returns: Identity request plan with fixed endpoint and no transformations.
+        :returns: Identity request plan with fixed endpoint and no transformations,
+            and the ``ApiReadState.selection_report`` fields.
         :raises AttributeError: If state or its preceding provider selection is absent.
-        """  # noqa: DOC502 - Unassigned execution state raises AttributeError.
+        :raises OSError: If the planned token file path cannot be resolved.
+        :raises RuntimeError: If the planned token file path is a symlink loop.
+        """  # noqa: DOC502 - Unassigned state and Path.resolve raise these.
         plan: JSONObject = {
             "mode": "dry-run",
             "operation": "check",
@@ -911,6 +1026,7 @@ class PlanAPICheck(ApiSelectionCallback[ApiCheckAction]):
             "decodeBase64": False,
             "lines": "",
             "paginate": False,
+            **self.state.selection_report(),
         }
         self.state.payload = plan
         return plan

@@ -1,0 +1,337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/gitlab-agent-ownership.schema.json",
+  "title": "GitLab Agent native recovery record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "run_id",
+    "origin",
+    "project_id",
+    "project_path",
+    "agent_id",
+    "agent_name",
+    "registration_credential_id",
+    "registration_credential_name",
+    "preexisting_registration_credential_ids",
+    "cluster_uid",
+    "namespace",
+    "namespace_uid",
+    "credential_resource_name",
+    "credential_resource_uid",
+    "ownership_record_name",
+    "ownership_record_uid",
+    "release",
+    "release_revision",
+    "release_storage_name",
+    "release_storage_uid",
+    "chart_version",
+    "chart_sha256",
+    "app_version",
+    "image_digest",
+    "created",
+    "state",
+    "resources"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "gitlab_agent_ownership"
+    },
+    "run_id": {
+      "$ref": "gitlab-agent.schema.json#/$defs/run_id"
+    },
+    "origin": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^https?://",
+      "format": "uri"
+    },
+    "project_id": {
+      "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+    },
+    "project_path": {
+      "$ref": "gitlab-agent.schema.json#/$defs/project_path"
+    },
+    "agent_id": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "agent_name": {
+      "$ref": "gitlab-agent.schema.json#/$defs/name"
+    },
+    "registration_credential_id": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "registration_credential_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "\\S"
+    },
+    "preexisting_registration_credential_ids": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 2,
+      "items": {
+        "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+      },
+      "uniqueItems": true
+    },
+    "cluster_uid": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/uid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "namespace": {
+      "$ref": "gitlab-agent.schema.json#/$defs/name"
+    },
+    "namespace_uid": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/uid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "credential_resource_name": {
+      "$ref": "gitlab-agent.schema.json#/$defs/name"
+    },
+    "credential_resource_uid": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/uid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ownership_record_name": {
+      "$ref": "gitlab-agent.schema.json#/$defs/name"
+    },
+    "ownership_record_uid": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/uid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "release": {
+      "$ref": "gitlab-agent.schema.json#/$defs/release_name"
+    },
+    "release_revision": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "release_storage_name": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "release_storage_uid": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/uid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "chart_version": {
+      "const": "2.20.1"
+    },
+    "chart_sha256": {
+      "const": "4d2214c73856533f27cefd2de673c7e0abbb7925352c0cb157458287eb591210"
+    },
+    "app_version": {
+      "const": "v18.5.2"
+    },
+    "image_digest": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/image_digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "registration_credential",
+        "namespace",
+        "credential_resource",
+        "release",
+        "ownership_record"
+      ],
+      "properties": {
+        "agent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "registration_credential": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "namespace": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "credential_resource": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "release": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ownership_record": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "state": {
+      "enum": [
+        "PENDING",
+        "CONNECTED",
+        "VERIFIED",
+        "DELETING",
+        "DELETED",
+        "PARTIAL"
+      ]
+    },
+    "resources": {
+      "$ref": "gitlab-agent.schema.json#/$defs/resources"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "CONNECTED",
+              "VERIFIED"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "agent_id": {
+            "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+          },
+          "registration_credential_id": {
+            "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+          },
+          "release_revision": {
+            "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+          },
+          "cluster_uid": {
+            "$ref": "gitlab-agent.schema.json#/$defs/uid"
+          },
+          "namespace_uid": {
+            "$ref": "gitlab-agent.schema.json#/$defs/uid"
+          },
+          "credential_resource_uid": {
+            "$ref": "gitlab-agent.schema.json#/$defs/uid"
+          },
+          "ownership_record_uid": {
+            "$ref": "gitlab-agent.schema.json#/$defs/uid"
+          },
+          "release_storage_uid": {
+            "$ref": "gitlab-agent.schema.json#/$defs/uid"
+          },
+          "image_digest": {
+            "$ref": "gitlab-agent.schema.json#/$defs/image_digest"
+          },
+          "created": {
+            "properties": {
+              "agent": {
+                "const": true
+              },
+              "registration_credential": {
+                "const": true
+              },
+              "namespace": {
+                "type": "boolean"
+              },
+              "credential_resource": {
+                "const": true
+              },
+              "release": {
+                "const": true
+              },
+              "ownership_record": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

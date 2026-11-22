@@ -8,7 +8,7 @@ spyroot@gmail.com
 from enum import StrEnum
 from typing import Final
 
-from lib.python.core.endpoints import ROUTING_RESULT_KEY
+from lib.python.core.endpoints import ROUTING_RESULT_KEY, TARGET_SOURCE_KEY
 from lib.python.core.git.mirroring import MirrorPolicy
 from lib.python.core.provenance import FUNCTIONAL_DIGEST_KEY
 
@@ -240,7 +240,7 @@ class Field(StrEnum):
     REVISION = "revision"
     VALUE = "value"
     TESTED_REVISION = "tested_revision"
-    TARGET_SOURCE = "target_source"
+    TARGET_SOURCE = TARGET_SOURCE_KEY
     REASON = "reason"
     SCHEMA_VERSION = "schema_version"
     ROUTING = ROUTING_RESULT_KEY

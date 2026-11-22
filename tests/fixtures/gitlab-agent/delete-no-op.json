@@ -1,0 +1,173 @@
+{
+  "captured_at": "2026-11-21T15:28:57.524609+00:00",
+  "cleanup": {
+    "failures": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "execution_host": "runner.example.test",
+  "filters": {
+    "agent_name": "test",
+    "job_url": null,
+    "namespace": null,
+    "operation": "delete",
+    "project": "group/app",
+    "project_name": null,
+    "run_id": "9bf3d911128e4c4dae5f23bf69b5553d"
+  },
+  "kind": "gitlab_agent",
+  "mutated": false,
+  "operation": "delete",
+  "plan_digest": "417c4989e7c616c7d1c9aec43dfe8f5bffcf66525f79cbf2e1e14967c45b6f15",
+  "records": [
+    {
+      "absence": {
+        "agent_absent": true,
+        "exact_ids_checked": false,
+        "mode": "LOGICAL_SCOPE",
+        "release_absent": true,
+        "run_resources_absent": true,
+        "verified": true
+      },
+      "action": "NO_OP",
+      "after": {
+        "agent_http_status": null,
+        "agent_id": null,
+        "agent_name": "test",
+        "connection_ids": [],
+        "namespace": "test-17cad277083e6629133a",
+        "namespace_uid": null,
+        "project_id": 123,
+        "registration_credential_http_status": null,
+        "registration_credential_ids": [],
+        "release": "test-agent-17cad277083e6629",
+        "release_revision": null,
+        "release_storage_uid": null,
+        "resources": []
+      },
+      "before": {
+        "agent_http_status": null,
+        "agent_id": null,
+        "agent_name": "test",
+        "connection_ids": [],
+        "namespace": "test-17cad277083e6629133a",
+        "namespace_uid": null,
+        "project_id": 123,
+        "registration_credential_http_status": null,
+        "registration_credential_ids": [],
+        "release": "test-agent-17cad277083e6629",
+        "release_revision": null,
+        "release_storage_uid": null,
+        "resources": []
+      },
+      "callback": "GitLabAgent",
+      "ci_access": {
+        "artifact_path": "agent-access.json",
+        "artifact_sha256": null,
+        "job_url": null,
+        "proof": null,
+        "state": "NOT_VERIFIED"
+      },
+      "connection": {
+        "complete": false,
+        "items": [],
+        "state": "UNKNOWN"
+      },
+      "credentials": {
+        "agent_credential": {
+          "consumers": [],
+          "created": false,
+          "id": null,
+          "name": null,
+          "state": "ABSENT",
+          "storage": null
+        },
+        "gitlab": {
+          "calls": [
+            {
+              "endpoint": "user",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/group%2Fapp",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/123",
+              "method": "GET"
+            },
+            {
+              "endpoint": "metadata",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/123",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/123/cluster_agents",
+              "method": "GET"
+            }
+          ]
+        },
+        "kubernetes": {
+          "created_objects": []
+        }
+      },
+      "installation": {
+        "app_version": null,
+        "chart_sha256": null,
+        "chart_version": null,
+        "image_digest": null,
+        "image_reference": null,
+        "namespace": null,
+        "namespace_uid": null,
+        "observed_image_ids": [],
+        "release": null,
+        "release_revision": null,
+        "release_storage_uid": null
+      },
+      "ownership": null,
+      "prerequisites": {
+        "cluster_access": "VERIFIED",
+        "cluster_uid": "d4647c90-b83f-40fe-aaac-6854bf798513",
+        "egress": "UNPROVEN",
+        "gitlab_version": "18.5.2-ee",
+        "kas_address": "wss://gitlab.example.test/-/kubernetes-agent/",
+        "kas_enabled": true,
+        "kas_version": "18.5.2"
+      },
+      "verified": true
+    }
+  ],
+  "routing": {
+    "gitlab": "gitlab_private",
+    "harbor": "harbor",
+    "kubernetes": "kubernetes",
+    "selected_by": "argv:--gitlab=private"
+  },
+  "schema_version": "1.1",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "4c1752f060b328372bc64c62d2da2439519bfbc55ebffaf15d11bc11c29a766a",
+    "file_count": 312,
+    "functional_digest": "96df7627c1f6ceabf37ba0d0b1118087872e13ae3c4948700b44915ab8f19e08",
+    "revision": {
+      "source": "git_head",
+      "value": "0f68918c9625d4fcc56b3dd02fdb9245d34f68ab",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "https://gitlab.example.test",
+  "target_source": "user:/home/example/.ci-skills/target.toml;argv:--gitlab=private",
+  "tested_revision": "0f68918c9625d4fcc56b3dd02fdb9245d34f68ab"
+}

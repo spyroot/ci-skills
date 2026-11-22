@@ -216,3 +216,136 @@ repeat. Exact-owned cleanup removed both new IDs, independently proved absence a
 GitLab source `261`, its refs and disabled CI were preserved. No consumer Actions job or GitLab pipeline ran.
 The selected access receipt uses retained `spyroot/test-self-runner`; prior candidate receipts are preserved under
 `tests/acceptance/historical/pre-ci15-cleanup-repeat/`.
+
+### Issue #151 merge request description smoke — 2026-11-21, candidate `a46f295` (superseded)
+
+Superseded by the `ff5aa48` run below: `a46f295` was rebased onto `main` `989e4a8` and is not on the branch. The
+installed candidate `a46f295` (digest `a4b58db7`) ran `gitlab_mr.py create --description-file` on dcloud `hott/test`
+(project `123`), run `issue151-20261121225221`. `gitlab_repository.py commit` created run-owned branches
+`ci-skills/issue151-20261121225221` (commit `0a2f900d`) and `ci-skills/issue151-20261121225221-empty` (commit
+`09a24981`) from the default branch, with `[skip ci]` commit messages. Push pipelines `15313` and `15316` read
+`skipped`; merge-request pipeline `15318` for `!5` read `skipped` before cleanup and returned 404 after `!5` was
+deleted. No merge-request pipeline was read for `!4` before its deletion. MR `!4` (id `1451`) was created from a
+270-byte Markdown file. An independent read returned the same text minus its terminal newline (269 bytes). The repeated
+apply returned NO_OP, and an apply confirmed with the earlier digest after a file edit returned BLOCKED
+`confirm_plan_mismatch_rerun_dry_run` without a write. MR `!5` (id `1452`) was created from an empty file, and GitLab
+read back `""`. Cleanup re-read each identity, then deleted MRs `!4` and `!5` and both branches (HTTP 204 each). At
+`2026-11-21T23:13:46Z` an independent read returned `RESOURCE_NOT_FOUND` for both MRs and showed neither branch. A
+repeated cleanup sent no DELETE. Open MRs `!1`–`!3` and the other branches were unchanged.
+
+### Mirror qualification read-back — 2026-11-21, issue #151 candidate `a46f295` (superseded)
+
+Superseded by the `ff5aa48` qualification below; the `a46f295` receipts were not kept because that commit is not on the
+branch. GitHub `spyroot/test-mirror-push` was absent and source `261` had no remote mirror, with `main` and `smoke-seed`
+at `aafe5d50`, at `2026-11-21T23:14:54Z`. One installed-candidate qualification, run `issue151-mirror-20261121-a46f295`,
+created repository `1467035373` and GitLab mirror `27`. It verified both seed refs, rejected a wrong confirmation and
+returned NO_OP on repeat. Cleanup reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-21T23:19:05Z` GitHub
+returned 404 by name and by ID and source `261` had no remote mirror. The access receipt was captured from the same
+install.
+
+### Issue #151 merge request description smoke — 2026-11-22, candidate `ff5aa48`
+
+The installed candidate `ff5aa48` (digest `d50e7afb`), rebased onto `main` `989e4a8`, ran
+`gitlab_mr.py create --description-file` on dcloud `hott/test` (project `123`), run `issue151-20261122004650`.
+`gitlab_repository.py commit` created run-owned branches `ci-skills/issue151-20261122004650` (commit `f98ebed8`) and
+`ci-skills/issue151-20261122004650-empty` (commit `693bd236`) from the default branch, with `[skip ci]` commit
+messages. For `f98ebed8`, push pipeline `15633` and merge-request pipeline `15645` read `skipped` before cleanup. For
+`693bd236`, two reads before cleanup returned no pipeline. The plan listed `description` in `fields` and its output
+held no description text. MR `!6` (id `1471`) was created from a 270-byte Markdown file. An independent read returned
+the same text minus its terminal newline (269 bytes). The repeated apply returned NO_OP, and an apply confirmed with
+the earlier digest after a file edit returned BLOCKED `confirm_plan_mismatch_rerun_dry_run` without a write. MR `!7`
+(id `1476`) was created from an empty file, and GitLab read back `""`. Cleanup re-read each identity, then deleted MRs
+`!6` and `!7` and both branches (HTTP 204 each). At `2026-11-22T00:49:01Z` an independent read returned
+`RESOURCE_NOT_FOUND` for both MRs and showed neither run branch. A repeated cleanup sent no DELETE. Open MRs `!1`–`!3`
+were unchanged.
+
+### Mirror qualification read-back — 2026-11-22, issue #151 candidate `ff5aa48`
+
+One installed-candidate qualification, run `issue151-mirror-20261122-ff5aa48`, created repository `1467093241` and
+GitLab mirror `29` from source `261` with `main` and `smoke-seed` at `aafe5d50`. The applied sync read back verified, a
+wrong confirmation returned BLOCKED `mirror_plan_mismatch`, and the repeat returned NO_OP. Cleanup reported
+`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T01:10:21Z` GitHub returned 404 by ID and by name, source `261`
+listed no remote mirror, and mirror `29` returned 404. The access receipt was captured from the same install at
+`2026-11-22T01:08:32Z`. Two earlier `access_check` runs from this install, at `00:58Z`, returned BLOCKED only because
+`event_trace` timed out reading `events_v1`; the `a46f295` install passed at `01:01Z`, and both installs passed back to
+back at `01:04Z` and `01:06Z`, with `events.py`, `live.py` and `cli.py` unchanged between them. The receipts superseded
+here are `main`'s `e9c6608` set, preserved under `tests/acceptance/historical/pre-issue151-mr-description/`.
+
+### Mirror qualification read-back — 2026-11-22, issue #149 candidate `5db056f`
+
+Candidate `5db056f` is the issue #149 branch merged with the #158 head `2d39da3`. One installed-candidate
+qualification, run `pr157-mirror-20261122-5db056f`, created repository `1467484939` and GitLab mirror `33` from source
+`261` with `main` and `smoke-seed` at `aafe5d50`. The applied sync read back verified, a wrong confirmation returned
+BLOCKED `mirror_plan_mismatch`, and the repeat returned NO_OP. Cleanup reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`;
+at `2026-11-22T11:26:17Z` GitHub returned 404 by ID and by name, mirror `33` returned 404, and source `261` listed no
+remote mirror. The access receipt was captured from the same install at `2026-11-22T11:23:08Z`. The receipts
+superseded here are the #158 `ff5aa48` set, preserved under `tests/acceptance/historical/pre-issue149-ci-api-selection/`,
+and this branch's earlier `857070e` set (repository `1467450060`, mirror `32`), preserved under
+`tests/acceptance/historical/pre-issue149-158-integration/`.
+
+### Mirror qualification read-back — 2026-11-22, guarded image adoption candidate `e0c93c6`
+
+Candidate `e0c93c6` is the guarded image adoption branch merged with `main` `00a32b4` and the issue #149 head
+`9ce2d7b`. One installed-candidate qualification, run `pr147-mirror-20261122-e0c93c6`, created repository
+`1467491120` and GitLab mirror `34` from source `261` with `main` and `smoke-seed` at `aafe5d50`. The applied sync read
+back verified, a wrong confirmation returned BLOCKED `mirror_plan_mismatch`, and the repeat returned NO_OP. Cleanup
+reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T11:33:46Z` GitHub returned 404 by ID and by name, mirror
+`34` returned 404, and source `261` listed no remote mirror. The access receipt was captured from the same install at
+`2026-11-22T11:29:18Z`. The issue #149 `5db056f` set it supersedes is preserved under
+`tests/acceptance/historical/pre-guarded-image-adoption-at-5db056f/`.
+
+### Mirror qualification read-back — 2026-11-22, runner cleanup confirmation candidate `77f2565`
+
+Candidate `77f2565` is the runner cleanup confirmation branch merged with `main` `df6994f` and the guarded image
+adoption head `30f11bc`. One installed-candidate qualification, run `pr148-mirror-20261122-77f2565`, created
+repository `1467496859` and GitLab mirror `35` from source `261` with `main` and `smoke-seed` at `aafe5d50`. The
+applied sync read back verified, a wrong confirmation returned BLOCKED `mirror_plan_mismatch`, and the repeat returned
+NO_OP. Cleanup reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T11:40:54Z` GitHub returned 404 by ID and
+by name, mirror `35` returned 404, and source `261` listed no remote mirror. The access receipt was captured from the
+same install at `2026-11-22T11:36:36Z`. The `e0c93c6` set it supersedes is preserved under
+`tests/acceptance/historical/pre-runner-cleanup-confirmation/`.
+
+### GitLab Agent series and mirror read-back — 2026-11-22, CI14 Agent candidate `ea09ff7`
+
+Candidate `ea09ff7` is the CI14 Agent branch merged with `main` `96602b5` and the runner cleanup confirmation head
+`857ae1f`. One installed-candidate qualification, run `pr154-mirror-20261122-ea09ff7`, created repository `1467518714`
+and GitLab mirror `36` from source `261` with `main` and `smoke-seed` at `aafe5d50`. The applied sync read back
+verified, a wrong confirmation returned BLOCKED `mirror_plan_mismatch`, and the repeat returned NO_OP. Cleanup reported
+`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T12:13:20Z` GitHub returned 404 by ID and by name, mirror `36`
+returned 404, and source `261` listed no remote mirror. The access receipt was captured at `2026-11-22T12:02:48Z`.
+
+The same install ran the Agent series on dcloud `hott/test` (project `123`), run `afa99f3a4db54fe1a4602057c5c65ca5`.
+`connect` registered Agent `11` (`test`) and installed release `test-agent-fd1a7cb3d85eddb5` in namespace
+`test-fd1a7cb3d85eddb510a4` (APPLIED, `12:08:47Z`). Repeating the apply with the first digest returned BLOCKED
+`confirm_plan_mismatch_rerun_live_plan` without a write; a new live plan for the same run applied as NO_OP. The three
+proof files in the install were byte-identical to branch `ci-agent-access-proof` (commit `5d9b88f8`), so pipeline
+`16261` ran there with the run's eight variables; job `132233` (runner tag `pr-coordinator-mirror-fixtures`) succeeded
+and `verify` returned VERIFIED. `delete` returned APPLIED and its repeat NO_OP; the attached cleanup record reports
+`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`. At `2026-11-22T12:23:05Z` project `123` listed no cluster Agents, Agent `11`
+returned 404, the namespace returned NotFound, and Helm listed no release by that name. The receipts superseded here are
+this branch's `36f9e94` set, preserved under `tests/acceptance/historical/pre-ci14-agent-main-integration/`, and the
+`77f2565` set, preserved under `tests/acceptance/historical/pre-ci14-agent-series-at-77f2565/`.
+
+### Mirror qualification read-back — 2026-11-22, runner cleanup confirmation candidate `22ce1d8`
+
+Candidate `22ce1d8` is the runner cleanup confirmation branch merged with `main` `215b8ef` (#147). One
+installed-candidate qualification, run `pr148-mirror-20261122-22ce1d8`, created repository `1467651923` and GitLab
+mirror `40`, returned NO_OP on repeat and deleted both (`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`); at
+`2026-11-22T16:27:06Z` GitHub returned 404 by ID and source `261` listed no remote mirror. The first `access_check`
+from this install was BLOCKED only by `event_trace`; the rerun passed and is the receipt (`2026-11-22T16:25:56Z`). The
+`main` `3ebe9ba` set is preserved under `tests/acceptance/historical/pre-runner-cleanup-confirmation-at-3ebe9ba/` and
+this branch's `77f2565` set under `tests/acceptance/historical/pre-runner-cleanup-main-integration/`.
+
+### GitLab Agent series and mirror read-back — 2026-11-22, CI14 Agent candidate `238ab84`
+
+Candidate `238ab84` is the CI14 Agent branch with `RUN_SCOPE_KIND_INVALID` (`fae0cc9`) merged with the runner cleanup
+confirmation head `14961dd`, which carries `main` through #147. One mirror qualification, run
+`pr154-mirror-20261122-238ab84`, created repository `1467758933` and GitLab mirror `44`, returned NO_OP on repeat and
+deleted both; at `2026-11-22T16:37:12Z` GitHub returned 404 by ID and source `261` listed no remote mirror. The access
+receipt was captured at `2026-11-22T16:30:54Z`. The Agent series on `hott/test`, run `4b30ebdb503d4c90a43819b3fd983385`,
+connected Agent `12` in namespace `test-dd83de40632438857213` (APPLIED, then NO_OP after a new live plan), verified CI
+access from job `134109` in pipeline `16490` on branch `ci-agent-access-proof` (the three proof files are byte-identical
+to the install), and deleted it (APPLIED, then NO_OP with the attached cleanup record). At `2026-11-22T16:46:04Z`
+project `123` listed no cluster Agents and the namespace returned NotFound. The `ea09ff7` set is preserved under
+`tests/acceptance/historical/pre-ci14-agent-at-ea09ff7/` and the `22ce1d8` set under
+`tests/acceptance/historical/pre-ci14-agent-series-at-22ce1d8/`.

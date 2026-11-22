@@ -622,6 +622,11 @@ class GitLabRunnerManagerAction(WorkflowAction):
         if target_file is None or self.target.gitlab is None:
             raise ValueError("runner_manager_target_unresolved")
         scope_evidence, workload = self.scope_plan()
+        if self.args.action == "delete":
+            scope_evidence = {
+                **scope_evidence,
+                "manager_workload_present": bool(self.context.found_scopes),
+            }
         return plan_digest(
             {
                 "repository": self.repository_identity.reference,

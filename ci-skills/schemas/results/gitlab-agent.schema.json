@@ -1,0 +1,1775 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-agent.schema.json",
+  "title": "GitLab Agent operation result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "captured_at",
+    "errors",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "gitlab-runner-tag.schema.json#/properties/schema_version"
+    },
+    "kind": {
+      "const": "gitlab_agent"
+    },
+    "status": {
+      "$ref": "gitlab-mirror.schema.json#/properties/status"
+    },
+    "captured_at": {
+      "$ref": "gitlab-mirror.schema.json#/properties/captured_at"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "\\S"
+    },
+    "target_source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "\\S"
+    },
+    "routing": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/routing"
+    },
+    "filters": {
+      "$ref": "../gitlab-agent.schema.json"
+    },
+    "operation": {
+      "enum": [
+        "connect",
+        "verify",
+        "delete"
+      ]
+    },
+    "plan_digest": {
+      "$ref": "gitlab-mirror.schema.json#/properties/plan_digest"
+    },
+    "mutated": {
+      "$ref": "gitlab-mirror.schema.json#/properties/mutated"
+    },
+    "records": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/record"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 32,
+      "items": {
+        "$ref": "gitlab-mirror.schema.json#/$defs/error"
+      }
+    },
+    "summary": {
+      "allOf": [
+        {
+          "$ref": "gitlab-mirror.schema.json#/properties/summary"
+        },
+        {
+          "properties": {
+            "error_count": {
+              "maximum": 32
+            }
+          }
+        }
+      ]
+    },
+    "cleanup": {
+      "$ref": "toolbox-workflow.schema.json#/properties/cleanup"
+    },
+    "skill": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/skill"
+    },
+    "tested_revision": {
+      "$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"
+    },
+    "execution_host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "\\S"
+    },
+    "safe_next_step": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "\\S"
+    },
+    "report_files": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/report_files"
+    },
+    "smoke_cleanup": {
+      "$ref": "#/$defs/smoke_cleanup"
+    }
+  },
+  "$defs": {
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "agent_id",
+        "agent_name",
+        "agent_http_status",
+        "registration_credential_ids",
+        "registration_credential_http_status",
+        "namespace",
+        "namespace_uid",
+        "release",
+        "release_revision",
+        "release_storage_uid",
+        "resources",
+        "connection_ids"
+      ],
+      "properties": {
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "agent_id": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/agent_id"
+        },
+        "agent_name": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "agent_http_status": {
+          "enum": [
+            200,
+            404,
+            null
+          ]
+        },
+        "registration_credential_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 2,
+          "items": {
+            "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+          },
+          "uniqueItems": true
+        },
+        "registration_credential_http_status": {
+          "enum": [
+            200,
+            404,
+            null
+          ]
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "namespace_uid": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/namespace_uid"
+        },
+        "release": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/release_name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "release_revision": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/release_revision"
+        },
+        "release_storage_uid": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/release_storage_uid"
+        },
+        "resources": {
+          "description": "Resource rows. null in a connected snapshot means the rows equal this record's ownership.resources.",
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/resources"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connection_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "\\S"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "installation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "namespace_uid",
+        "release",
+        "release_revision",
+        "release_storage_uid",
+        "chart_version",
+        "chart_sha256",
+        "app_version",
+        "image_reference",
+        "image_digest",
+        "observed_image_ids"
+      ],
+      "properties": {
+        "namespace": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "namespace_uid": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/namespace_uid"
+        },
+        "release": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/release_name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "release_revision": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/release_revision"
+        },
+        "release_storage_uid": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/release_storage_uid"
+        },
+        "chart_version": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "chart_sha256": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "app_version": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image_reference": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image_digest": {
+          "$ref": "../gitlab-agent-ownership.schema.json#/properties/image_digest"
+        },
+        "observed_image_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 10,
+          "items": {
+            "$ref": "../gitlab-agent.schema.json#/$defs/image_digest"
+          }
+        }
+      }
+    },
+    "verified_installation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/installation"
+        },
+        {
+          "properties": {
+            "namespace": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/name"
+            },
+            "namespace_uid": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+            },
+            "release": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/release_name"
+            },
+            "release_revision": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+            },
+            "release_storage_uid": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+            },
+            "chart_version": {
+              "const": "2.20.1"
+            },
+            "chart_sha256": {
+              "const": "4d2214c73856533f27cefd2de673c7e0abbb7925352c0cb157458287eb591210"
+            },
+            "app_version": {
+              "const": "v18.5.2"
+            },
+            "image_reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "\\S"
+            },
+            "image_digest": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/image_digest"
+            },
+            "observed_image_ids": {
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "complete",
+        "items"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "CONNECTED",
+            "ABSENT",
+            "UNKNOWN"
+          ]
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent_id",
+              "agent_name",
+              "connection_id",
+              "connected_at",
+              "pod_name",
+              "pod_namespace",
+              "pod_uid",
+              "agent_version",
+              "agent_commit"
+            ],
+            "properties": {
+              "agent_id": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+              },
+              "agent_name": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/name"
+              },
+              "connection_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "\\S"
+              },
+              "connected_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "pod_name": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/name"
+              },
+              "pod_namespace": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/name"
+              },
+              "pod_uid": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+              },
+              "agent_version": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/version"
+              },
+              "agent_commit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "\\S"
+              }
+            }
+          },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "CONNECTED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "complete": {
+                "const": true
+              },
+              "items": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "prerequisites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gitlab_version",
+        "kas_enabled",
+        "kas_version",
+        "kas_address",
+        "cluster_uid",
+        "cluster_access",
+        "egress"
+      ],
+      "properties": {
+        "gitlab_version": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kas_enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "kas_version": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kas_address": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "^(grpcs|wss|grpc|ws)://",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cluster_uid": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cluster_access": {
+          "enum": [
+            "VERIFIED",
+            "BLOCKED",
+            "NOT_CHECKED"
+          ]
+        },
+        "egress": {
+          "enum": [
+            "UNPROVEN",
+            "CONNECTED"
+          ]
+        }
+      }
+    },
+    "verified_prerequisites": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/prerequisites"
+        },
+        {
+          "properties": {
+            "gitlab_version": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/version"
+            },
+            "kas_enabled": {
+              "const": true
+            },
+            "kas_version": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/version"
+            },
+            "kas_address": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "\\S"
+            },
+            "cluster_uid": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+            },
+            "cluster_access": {
+              "const": "VERIFIED"
+            },
+            "egress": {
+              "const": "CONNECTED"
+            }
+          }
+        }
+      ]
+    },
+    "verified_ownership": {
+      "allOf": [
+        {
+          "$ref": "../gitlab-agent-ownership.schema.json"
+        },
+        {
+          "properties": {
+            "state": {
+              "enum": [
+                "CONNECTED",
+                "VERIFIED"
+              ]
+            },
+            "resources": {
+              "minItems": 1,
+              "items": {
+                "properties": {
+                  "uid": {
+                    "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+                  },
+                  "state": {
+                    "const": "PRESENT"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ci_access": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "job_url",
+        "artifact_path",
+        "artifact_sha256",
+        "proof"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "NOT_VERIFIED",
+            "VERIFIED",
+            "BLOCKED"
+          ]
+        },
+        "job_url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "^https?://",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifact_path": {
+          "const": "agent-access.json"
+        },
+        "artifact_sha256": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proof": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent-ci-access.schema.json"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "VERIFIED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "job_url": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048,
+                "pattern": "^https?://",
+                "format": "uri"
+              },
+              "artifact_sha256": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/sha256"
+              },
+              "proof": {
+                "allOf": [
+                  {
+                    "$ref": "../gitlab-agent-ci-access.schema.json"
+                  },
+                  {
+                    "properties": {
+                      "status": {
+                        "const": "PASS"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "absence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "verified",
+        "agent_absent",
+        "release_absent",
+        "run_resources_absent",
+        "exact_ids_checked"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "NOT_CHECKED",
+            "TRACKED_IDENTITIES",
+            "LOGICAL_SCOPE"
+          ]
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "agent_absent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "release_absent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "run_resources_absent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "exact_ids_checked": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "LOGICAL_SCOPE"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "exact_ids_checked": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "TRACKED_IDENTITIES"
+              },
+              "verified": {
+                "const": true
+              }
+            },
+            "required": [
+              "mode",
+              "verified"
+            ]
+          },
+          "then": {
+            "properties": {
+              "exact_ids_checked": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callback",
+        "action",
+        "verified",
+        "before",
+        "after",
+        "ownership",
+        "installation",
+        "connection",
+        "ci_access",
+        "absence",
+        "prerequisites",
+        "credentials"
+      ],
+      "properties": {
+        "callback": {
+          "const": "GitLabAgent"
+        },
+        "action": {
+          "enum": [
+            "PLANNED",
+            "APPLIED",
+            "NO_OP",
+            "VERIFIED",
+            "PARTIAL",
+            "BLOCKED"
+          ]
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "before": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "after": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "ownership": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent-ownership.schema.json"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installation": {
+          "$ref": "#/$defs/installation"
+        },
+        "connection": {
+          "$ref": "#/$defs/connection"
+        },
+        "ci_access": {
+          "$ref": "#/$defs/ci_access"
+        },
+        "absence": {
+          "$ref": "#/$defs/absence"
+        },
+        "prerequisites": {
+          "$ref": "#/$defs/prerequisites"
+        },
+        "credentials": {
+          "$ref": "#/$defs/credentials"
+        }
+      }
+    },
+    "provider_absence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "http_status",
+        "absent",
+        "preserved"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+        },
+        "http_status": {
+          "enum": [
+            200,
+            404
+          ]
+        },
+        "absent": {
+          "type": "boolean"
+        },
+        "preserved": {
+          "type": "boolean"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "absent": {
+              "const": true
+            },
+            "preserved": {
+              "const": false
+            },
+            "http_status": {
+              "const": 404
+            }
+          }
+        },
+        {
+          "properties": {
+            "absent": {
+              "const": false
+            },
+            "preserved": {
+              "const": true
+            },
+            "http_status": {
+              "const": 200
+            }
+          }
+        }
+      ]
+    },
+    "resource_absence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "namespace",
+        "uid",
+        "observed_uid",
+        "absent",
+        "preserved"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "\\S"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "\\S"
+        },
+        "namespace": {
+          "type": "string",
+          "maxLength": 63
+        },
+        "uid": {
+          "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+        },
+        "observed_uid": {
+          "anyOf": [
+            {
+              "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "absent": {
+          "type": "boolean"
+        },
+        "preserved": {
+          "type": "boolean"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "absent": {
+              "const": true
+            },
+            "preserved": {
+              "const": false
+            },
+            "observed_uid": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "absent": {
+              "const": false
+            },
+            "preserved": {
+              "const": true
+            },
+            "observed_uid": {
+              "$ref": "../gitlab-agent.schema.json#/$defs/uid"
+            }
+          }
+        }
+      ]
+    },
+    "cleanup_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "registration_credential",
+        "resources",
+        "release_absent",
+        "run_resources_absent"
+      ],
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/provider_absence"
+        },
+        "registration_credential": {
+          "$ref": "#/$defs/provider_absence"
+        },
+        "resources": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/resource_absence"
+          }
+        },
+        "release_absent": {
+          "const": true
+        },
+        "run_resources_absent": {
+          "const": true
+        }
+      }
+    },
+    "smoke_cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "captured_at",
+        "execution_host",
+        "skill_digest",
+        "tested_revision",
+        "run_id",
+        "original_ownership",
+        "after",
+        "repeat"
+      ],
+      "properties": {
+        "kind": {
+          "const": "gitlab_agent_smoke_cleanup"
+        },
+        "status": {
+          "const": "PASS_INDEPENDENT_ABSENCE_AND_REPEAT"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "execution_host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "\\S"
+        },
+        "skill_digest": {
+          "$ref": "../gitlab-agent.schema.json#/$defs/sha256"
+        },
+        "tested_revision": {
+          "$ref": "../gitlab-agent.schema.json#/$defs/git_sha"
+        },
+        "run_id": {
+          "$ref": "../gitlab-agent.schema.json#/$defs/run_id"
+        },
+        "original_ownership": {
+          "$ref": "../gitlab-agent-ownership.schema.json"
+        },
+        "after": {
+          "$ref": "#/$defs/cleanup_observation"
+        },
+        "repeat": {
+          "$ref": "#/$defs/cleanup_observation"
+        }
+      }
+    },
+    "credentials": {
+      "description": "Credential trace of this invocation. It carries native IDs, names and UIDs only, never a credential value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gitlab",
+        "kubernetes",
+        "agent_credential"
+      ],
+      "properties": {
+        "gitlab": {
+          "description": "Requests sent with the selected GitLab token, in order.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "calls"
+          ],
+          "properties": {
+            "calls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "method",
+                  "endpoint"
+                ],
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "DELETE"
+                    ]
+                  },
+                  "endpoint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[^?#\\s]+$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "kubernetes": {
+          "description": "Objects this invocation created with the selected kubeconfig.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "created_objects"
+          ],
+          "properties": {
+            "created_objects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "name",
+                  "namespace",
+                  "uid"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "namespace": {
+                    "type": "string"
+                  },
+                  "uid": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "agent_credential": {
+          "description": "The Agent token: native ID, the Secret that holds it, and the connections that used it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "id",
+            "name",
+            "created",
+            "storage",
+            "consumers"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "PLANNED",
+                "PRESENT",
+                "ABSENT",
+                "RECORDED"
+              ],
+              "description": "PLANNED: fresh connect plan. ABSENT: no ownership record, or a confirmed delete read the token absent. PRESENT: this invocation read an active connection. RECORDED: only the ownership record names the token."
+            },
+            "id": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "created": {
+              "type": "boolean"
+            },
+            "storage": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "namespace",
+                    "name",
+                    "uid",
+                    "key"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "Secret"
+                    },
+                    "namespace": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uid": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "key": {
+                      "const": "token"
+                    }
+                  }
+                }
+              ]
+            },
+            "consumers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "connection_id",
+                  "pod_name",
+                  "pod_uid"
+                ],
+                "properties": {
+                  "connection_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pod_name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pod_uid": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "not": {
+              "const": "BLOCKED"
+            }
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "target",
+          "filters",
+          "operation",
+          "plan_digest",
+          "mutated",
+          "records",
+          "cleanup"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "DRY_RUN"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "mutated": {
+            "const": false
+          },
+          "records": {
+            "maxItems": 0
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PLANNED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "mutated": {
+            "const": false
+          },
+          "plan_digest": {
+            "$ref": "../gitlab-agent.schema.json#/$defs/sha256"
+          },
+          "records": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "action": {
+                  "const": "PLANNED"
+                },
+                "verified": {
+                  "const": false
+                }
+              }
+            }
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "skill",
+          "tested_revision",
+          "execution_host"
+        ],
+        "properties": {
+          "skill": {
+            "allOf": [
+              {
+                "$ref": "gitlab-runner-tag.schema.json#/$defs/verified_skill"
+              },
+              {
+                "required": [
+                  "functional_digest"
+                ]
+              }
+            ]
+          },
+          "tested_revision": {
+            "$ref": "../gitlab-agent.schema.json#/$defs/git_sha"
+          },
+          "records": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "verified": {
+                  "const": true
+                }
+              }
+            }
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "records": {
+                  "contains": {
+                    "properties": {
+                      "action": {
+                        "const": "APPLIED"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "records"
+              ]
+            },
+            "then": {
+              "properties": {
+                "mutated": {
+                  "const": true
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "mutated": {
+                  "const": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "BLOCKED",
+              "PARTIAL"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "errors": {
+            "minItems": 1
+          },
+          "summary": {
+            "properties": {
+              "error_count": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          },
+          "operation": {
+            "const": "connect"
+          }
+        },
+        "required": [
+          "status",
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "records": {
+            "items": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "APPLIED",
+                    "NO_OP"
+                  ]
+                },
+                "ownership": {
+                  "$ref": "#/$defs/verified_ownership"
+                },
+                "installation": {
+                  "$ref": "#/$defs/verified_installation"
+                },
+                "prerequisites": {
+                  "$ref": "#/$defs/verified_prerequisites"
+                },
+                "connection": {
+                  "properties": {
+                    "state": {
+                      "const": "CONNECTED"
+                    },
+                    "complete": {
+                      "const": true
+                    }
+                  }
+                },
+                "ci_access": {
+                  "properties": {
+                    "state": {
+                      "const": "NOT_VERIFIED"
+                    }
+                  }
+                },
+                "after": {
+                  "properties": {
+                    "project_id": {
+                      "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+                    },
+                    "agent_id": {
+                      "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+                    },
+                    "agent_name": {
+                      "$ref": "../gitlab-agent.schema.json#/$defs/name"
+                    },
+                    "agent_http_status": {
+                      "const": 200
+                    },
+                    "registration_credential_ids": {
+                      "minItems": 1
+                    },
+                    "registration_credential_http_status": {
+                      "const": 200
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          },
+          "operation": {
+            "const": "verify"
+          }
+        },
+        "required": [
+          "status",
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "records": {
+            "items": {
+              "properties": {
+                "action": {
+                  "const": "VERIFIED"
+                },
+                "ownership": {
+                  "$ref": "#/$defs/verified_ownership"
+                },
+                "installation": {
+                  "$ref": "#/$defs/verified_installation"
+                },
+                "prerequisites": {
+                  "$ref": "#/$defs/verified_prerequisites"
+                },
+                "connection": {
+                  "properties": {
+                    "state": {
+                      "const": "CONNECTED"
+                    },
+                    "complete": {
+                      "const": true
+                    }
+                  }
+                },
+                "ci_access": {
+                  "properties": {
+                    "state": {
+                      "const": "VERIFIED"
+                    }
+                  }
+                },
+                "after": {
+                  "properties": {
+                    "project_id": {
+                      "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+                    },
+                    "agent_id": {
+                      "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+                    },
+                    "agent_name": {
+                      "$ref": "../gitlab-agent.schema.json#/$defs/name"
+                    },
+                    "agent_http_status": {
+                      "const": 200
+                    },
+                    "registration_credential_ids": {
+                      "minItems": 1
+                    },
+                    "registration_credential_http_status": {
+                      "const": 200
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "mutated": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          },
+          "operation": {
+            "const": "delete"
+          }
+        },
+        "required": [
+          "status",
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "filters": {
+            "properties": {
+              "agent_name": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/name"
+              },
+              "run_id": {
+                "$ref": "../gitlab-agent.schema.json#/$defs/run_id"
+              }
+            }
+          },
+          "records": {
+            "items": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "APPLIED",
+                    "NO_OP"
+                  ]
+                },
+                "absence": {
+                  "properties": {
+                    "verified": {
+                      "const": true
+                    },
+                    "agent_absent": {
+                      "const": true
+                    },
+                    "release_absent": {
+                      "const": true
+                    },
+                    "run_resources_absent": {
+                      "const": true
+                    }
+                  }
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "action": {
+                        "const": "APPLIED"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "ownership": {
+                        "$ref": "../gitlab-agent-ownership.schema.json"
+                      },
+                      "absence": {
+                        "properties": {
+                          "mode": {
+                            "const": "TRACKED_IDENTITIES"
+                          },
+                          "exact_ids_checked": {
+                            "const": true
+                          }
+                        }
+                      },
+                      "before": {
+                        "properties": {
+                          "agent_id": {
+                            "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+                          }
+                        }
+                      },
+                      "after": {
+                        "properties": {
+                          "agent_id": {
+                            "$ref": "../gitlab-agent.schema.json#/$defs/positive_id"
+                          },
+                          "agent_http_status": {
+                            "const": 404
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

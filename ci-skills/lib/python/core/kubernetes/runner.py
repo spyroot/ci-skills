@@ -12,6 +12,7 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Final, Optional
 
 from lib.python.core.json_types import JSONDocument, JSONObject, JSONValue
+from lib.python.core.kubernetes.kinds import APPS_API_VERSION
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.podman_runtime import (
     PodmanRuntimeSettings,
@@ -37,7 +38,7 @@ from lib.python.core.toolbox import DOCTOR_PATH
 from lib.python.sys.status import APPLIED, NO_OP, VERIFIED
 
 POD_API: Final = "v1"
-DEPLOYMENT_API: Final = "apps/v1"
+DEPLOYMENT_API: Final = APPS_API_VERSION
 JOB_API: Final = "batch/v1"
 PULL_SECRET_TYPE: Final = "kubernetes.io/dockerconfigjson"
 PULL_SECRET_KEY: Final = ".dockerconfigjson"

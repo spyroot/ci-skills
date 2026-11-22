@@ -1,0 +1,167 @@
+{
+  "captured_at": "2026-11-22T11:32:28.678075+00:00",
+  "cleanup": {
+    "failures": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "execution_host": "johnnys-mbp.localdomain",
+  "filters": {
+    "create_if_absent": true,
+    "destination": "spyroot/test-mirror-push",
+    "operation": "sync",
+    "project": "hott/test-mirror-push"
+  },
+  "kind": "gitlab_mirror",
+  "mutated": false,
+  "operation": "sync",
+  "plan_digest": "9a6fb2fd0568e7ccb0aa3d5c27942380a715e376b56a836397b0e7e7cfb8c682",
+  "records": [
+    {
+      "action": "NO_OP",
+      "before": {
+        "destination": {
+          "host": "github.com",
+          "id": 1467491120,
+          "path": "spyroot/test-mirror-push"
+        },
+        "destination_refs": {
+          "count": 5,
+          "sha256": "b1e38c7321f2a2317c5d3724af65997a6437099c8c87acd794cbba59fda5bfd9"
+        },
+        "mirror": {
+          "auth_method": "password",
+          "enabled": true,
+          "id": 34,
+          "keep_divergent_refs": true,
+          "last_error_present": false,
+          "last_successful_update_at": "2026-11-22T11:31:04.658Z",
+          "only_protected_branches": false,
+          "update_status": "finished"
+        },
+        "source": {
+          "host": "gitlab.dcloud.run",
+          "id": 261,
+          "path": "hott/test-mirror-push"
+        },
+        "source_refs": {
+          "count": 5,
+          "sha256": "b1e38c7321f2a2317c5d3724af65997a6437099c8c87acd794cbba59fda5bfd9"
+        }
+      },
+      "callback": "gitlab_mirror",
+      "created": {
+        "mirror": false,
+        "repository": false
+      },
+      "destination": {
+        "host": "github.com",
+        "id": 1467491120,
+        "path": "spyroot/test-mirror-push"
+      },
+      "destination_refs": {
+        "count": 5,
+        "sha256": "b1e38c7321f2a2317c5d3724af65997a6437099c8c87acd794cbba59fda5bfd9"
+      },
+      "mirror": {
+        "auth_method": "password",
+        "enabled": true,
+        "id": 34,
+        "keep_divergent_refs": true,
+        "last_error_present": false,
+        "last_successful_update_at": "2026-11-22T11:31:04.658Z",
+        "only_protected_branches": false,
+        "update_status": "finished"
+      },
+      "replaced_mirror_id": null,
+      "replacement_required": false,
+      "source": {
+        "host": "gitlab.dcloud.run",
+        "id": 261,
+        "path": "hott/test-mirror-push"
+      },
+      "source_refs": {
+        "count": 5,
+        "sha256": "b1e38c7321f2a2317c5d3724af65997a6437099c8c87acd794cbba59fda5bfd9"
+      },
+      "verified": true,
+      "verified_source_ref_count": 5
+    }
+  ],
+  "routing": {
+    "gitlab": "gitlab_private",
+    "harbor": "harbor",
+    "kubernetes": "kubernetes",
+    "selected_by": "default"
+  },
+  "schema_version": "1.1",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "451c998b289e6c46f3e929267f0f4103ffbbdc68708d8c1c45d61d3cd1a2447b",
+    "file_count": 277,
+    "functional_digest": "77a6643a80fc523be6d618d2ccf095b1a0f59914b12cf29f634f0f88d3b270a7",
+    "revision": {
+      "source": "installer_record",
+      "value": "e0c93c643b2bf1b500d3dcadd9a9187139517aa7",
+      "verified": true
+    }
+  },
+  "smoke_cleanup": {
+    "after": {
+      "destination_http_status": 404,
+      "destination_id_http_status": 404,
+      "mirror_absent": true,
+      "source": {
+        "host": "gitlab.dcloud.run",
+        "id": 261,
+        "path": "hott/test-mirror-push"
+      }
+    },
+    "before": {
+      "destination": {
+        "host": "github.com",
+        "id": 1467491120,
+        "path": "spyroot/test-mirror-push"
+      },
+      "mirror_id": 34,
+      "source": {
+        "host": "gitlab.dcloud.run",
+        "id": 261,
+        "path": "hott/test-mirror-push"
+      }
+    },
+    "captured_at": "2026-11-22T11:33:33.340762+00:00",
+    "delete": {
+      "destination_http_status": 204,
+      "mirror_http_status": 204
+    },
+    "execution_host": "johnnys-mbp.localdomain",
+    "kind": "gitlab_mirror_smoke_cleanup",
+    "repeat": {
+      "destination_http_status": 404,
+      "destination_id_http_status": 404,
+      "mirror_absent": true,
+      "mutated": false,
+      "source": {
+        "host": "gitlab.dcloud.run",
+        "id": 261,
+        "path": "hott/test-mirror-push"
+      }
+    },
+    "skill_digest": "451c998b289e6c46f3e929267f0f4103ffbbdc68708d8c1c45d61d3cd1a2447b",
+    "status": "PASS",
+    "tested_revision": "e0c93c643b2bf1b500d3dcadd9a9187139517aa7"
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "https://gitlab.dcloud.run",
+  "target_source": "user",
+  "tested_revision": "e0c93c643b2bf1b500d3dcadd9a9187139517aa7"
+}

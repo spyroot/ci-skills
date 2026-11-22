@@ -1,6 +1,14 @@
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "default place for example .env files excluded"
 paths = ['''(^|/)docs/''']
+
+# GitLab Agent result receipts record the Kubernetes UID of the token Secret as
+# credential_resource_uid. The value is an object identifier, not a credential,
+# so only that key with a UUID value is allowed.
+[[allowlists]]
+description = "Kubernetes object UID under credential_resource_uid"
+regexTarget = "match"
+regexes = ['''credential_resource_uid": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"''']

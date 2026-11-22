@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/gitlab-agent-ci-access.schema.json",
+  "title": "Selected-project GitLab Agent CI proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "captured_at",
+    "run_id",
+    "project_id",
+    "agent_id",
+    "agent_context",
+    "kas_proxy_url",
+    "pipeline_id",
+    "job_id",
+    "consumer_sha",
+    "cluster_uid",
+    "namespace",
+    "namespace_uid",
+    "producer",
+    "expected_candidate",
+    "kubeconfig_source",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "gitlab_agent_ci_access"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "BLOCKED"
+      ]
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "run_id": {
+      "$ref": "gitlab-agent.schema.json#/$defs/run_id"
+    },
+    "project_id": {
+      "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+    },
+    "agent_id": {
+      "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+    },
+    "agent_context": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1152,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kas_proxy_url": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^https?://",
+          "format": "uri"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pipeline_id": {
+      "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+    },
+    "job_id": {
+      "$ref": "gitlab-agent.schema.json#/$defs/positive_id"
+    },
+    "consumer_sha": {
+      "$ref": "gitlab-agent.schema.json#/$defs/git_sha"
+    },
+    "cluster_uid": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/uid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "namespace": {
+      "$ref": "gitlab-agent.schema.json#/$defs/name"
+    },
+    "namespace_uid": {
+      "anyOf": [
+        {
+          "$ref": "gitlab-agent.schema.json#/$defs/uid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition_sha256",
+        "probe_sha256",
+        "library_sha256"
+      ],
+      "properties": {
+        "definition_sha256": {
+          "$ref": "gitlab-agent.schema.json#/$defs/sha256"
+        },
+        "probe_sha256": {
+          "$ref": "gitlab-agent.schema.json#/$defs/sha256"
+        },
+        "library_sha256": {
+          "$ref": "gitlab-agent.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "expected_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tested_revision",
+        "functional_digest"
+      ],
+      "properties": {
+        "tested_revision": {
+          "$ref": "gitlab-agent.schema.json#/$defs/git_sha"
+        },
+        "functional_digest": {
+          "$ref": "gitlab-agent.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "kubeconfig_source": {
+      "const": "gitlab_ci"
+    },
+    "errors": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "\\S"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "\\S"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "agent_context": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1152,
+            "pattern": "\\S"
+          },
+          "kas_proxy_url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "^https?://",
+            "format": "uri"
+          },
+          "cluster_uid": {
+            "$ref": "gitlab-agent.schema.json#/$defs/uid"
+          },
+          "namespace_uid": {
+            "$ref": "gitlab-agent.schema.json#/$defs/uid"
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "errors": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

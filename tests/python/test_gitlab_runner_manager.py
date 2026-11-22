@@ -38,6 +38,7 @@ CALLBACKS = import_script_module("lib.python.core.gitlab.runner_manager.callback
 K8S_RUNNER = import_script_module("lib.python.core.kubernetes.runner")
 RESOURCES = import_script_module("lib.python.core.kubernetes.resources")
 RUNNER_RUNTIME = import_script_module("lib.python.core.runner")
+KINDS = import_script_module("lib.python.core.kubernetes.kinds")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
 SCC_ACCESS = import_script_module("lib.python.core.kubernetes.scc_access")
 TARGET = import_script_module("lib.python.core.target")
@@ -76,6 +77,7 @@ BORROWED_NAMESPACE_UID: Final = "caller-namespace-uid"
 NAMESPACE_KEY: Final = ("namespace", "", NAMESPACE)
 ABSENCE_READ_FAILURE: Final = "unit_absence_read_failed"
 ABSENCE_REPLACEMENT_UID: Final = "concurrent-manager-uid"
+PREVIOUS_CONSUMER_NAME: Final = "earlier-consumer"
 SECRET_METADATA_COLUMNS: Final = (
     "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,UID:.metadata.uid"
 )
@@ -89,6 +91,25 @@ BORROWED_NAMESPACE_SNAPSHOT: Final = json.dumps(
         "metadata": {"name": NAMESPACE, "uid": BORROWED_NAMESPACE_UID},
     },
     sort_keys=True,
+)
+FIELD_ERRORS: Final = "errors"
+FIELD_REASON: Final = "reason"
+FIELD_SCOPES: Final = "scopes"
+# A run-owned object whose name no current candidate rule produces, as one left
+# by an earlier runner description or naming rule.
+STRAY_OWNED_NAME: Final = "unit-previous-manager-object"
+STRAY_OWNED_UID: Final = "unit-previous-manager-object-uid"
+# Labels ResourceSet.managed writes on every object a run applies; owned_objects
+# lists by exactly these.
+RUN_OWNERSHIP_LABELS: Final = MappingProxyType(
+    {
+        RESOURCES.MANAGER_LABEL: RESOURCES.MANAGER_VALUE,
+        RESOURCES.OPERATION_LABEL: RUN_ID,
+    }
+)
+# The ownership labels plus the run label RunScope.find_all also selects on.
+RUN_SCOPE_LABELS: Final = MappingProxyType(
+    {**RUN_OWNERSHIP_LABELS, RUN_SCOPE.RUN_ID_LABEL: RUN_ID}
 )
 
 
@@ -1905,7 +1926,7 @@ def test_manager_confirmed_absence_refuses_concurrent_runtime_without_mutation(
     (K8S_RUNNER.REGISTRATION_SECRET_SUFFIX, K8S_RUNNER.REGISTRY_SECRET_SUFFIX),
     ids=("registration", "registry"),
 )
-@pytest.mark.parametrize("previous_name", (None, "earlier-consumer"))
+@pytest.mark.parametrize("previous_name", (None, PREVIOUS_CONSUMER_NAME))
 def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1942,6 +1963,84 @@ def test_manager_absence_without_namespace_rejects_borrowed_secret_only_remnant(
     assert not cluster.guard_held
 
 
+@pytest.mark.parametrize(
+    ("kind", "labels"),
+    (
+        pytest.param(KINDS.DEPLOYMENT_KIND, RUN_OWNERSHIP_LABELS, id="deployment"),
+        pytest.param(KINDS.ROLE_BINDING_KIND, RUN_OWNERSHIP_LABELS, id="role-binding"),
+        pytest.param(KINDS.SECRET_KIND, RUN_SCOPE_LABELS, id="secret"),
+    ),
+)
+def test_manager_borrowed_absence_refuses_stray_run_owned_object_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    labels: Mapping[str, str],
+) -> None:
+    """Block a confirmed delete when a borrowed namespace holds a stray run-owned object.
+
+    The plan reads only the current candidate names, so an object this run owns
+    under an earlier name is invisible to them. ``SelectResolvedManagerScope``
+    lists the borrowed namespace by the run's ownership labels and must refuse
+    the absence. ``RunScope.find_all`` selects Deployments and RoleBindings by the
+    run label too, so those rows carry only the ownership labels; it never lists
+    Secrets, so the Secret row carries every run label.
+
+    :param monkeypatch: Bind the existing isolated provider lifecycle harness.
+    :param tmp_path: Test-owned token and lock directory.
+    :param capsys: Capture the real command's machine-readable report.
+    :param kind: Kind of the stray object, from the restored ownership check.
+    :param labels: Run labels on the stray object.
+    """
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    cluster.caller_namespace = NAMESPACE
+    cluster.objects[NAMESPACE_KEY] = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+    code, plan = _manager_cli_report(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, plan[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
+    cluster.objects[(kind.casefold(), NAMESPACE, STRAY_OWNED_NAME)] = {
+        "kind": kind,
+        "metadata": {
+            "name": STRAY_OWNED_NAME,
+            "namespace": NAMESPACE,
+            "uid": STRAY_OWNED_UID,
+            "labels": dict(labels),
+        },
+    }
+    survivors = deepcopy(cluster.objects)
+    cluster.applied.clear()
+    cluster.deleted.clear()
+
+    code, result = _manager_cli_report(
+        cluster,
+        capsys,
+        action=DELETE_ACTION,
+        run_id=RUN_ID,
+        flags=(APPLY_ARGUMENT, CONFIRM_ARGUMENT, plan[FIELD_PLAN_DIGEST]),
+    )
+
+    assert (code, result[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    )
+    assert [item[FIELD_REASON] for item in result[FIELD_ERRORS]] == [
+        WORKLOAD.MANAGER_SCOPE_NOT_UNIQUE
+    ]
+    assert [
+        item[FIELD_SCOPES]
+        for item in result[FIELD_RECORDS]
+        if item.get(FIELD_CALLBACK) == RUN_SCOPE.ResolveRunScopes.__name__
+    ] == [[]]
+    assert cluster.applied == cluster.deleted == []
+    assert cluster.objects == survivors
+    assert not cluster.guard_held
+
+
 def test_runner_runtime_identities_preserve_manager_cleanup_order() -> None:
     """The shared runtime inventory removes the workload before its credentials."""
     assert RUNNER_RUNTIME.runner_runtime_identities(RUNNER_DESCRIPTION) == (
@@ -1955,3 +2054,75 @@ def test_runner_runtime_identities_preserve_manager_cleanup_order() -> None:
             RUNNER_DESCRIPTION + RUNNER_RUNTIME.REGISTRY_SECRET_SUFFIX,
         ),
     )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "deployment-before-apply",
+        "secret-in-other-namespace",
+        "previous-name-secret-in-other-namespace",
+    ),
+)
+def test_manager_absence_confirmation_never_authorizes_writes_on_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    drift: str,
+) -> None:
+    """Apply a borrowed-namespace absence plan against a changed native baseline.
+
+    The previous-name case needs both the suffix match and the check under
+    ``--namespace``: the Secret keeps the run labels but not the current name,
+    and it is outside the selected namespace.
+    """
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    runtime = _absent_manager_runtime(cluster, capsys, borrowed=True)
+    if drift.endswith("secret-in-other-namespace"):
+        alternate = f"{NAMESPACE}-alternate"
+        borrowed = json.loads(BORROWED_NAMESPACE_SNAPSHOT)
+        borrowed["metadata"].update(name=alternate, uid=ABSENCE_REPLACEMENT_UID)
+        cluster.objects[("namespace", "", alternate)] = borrowed
+        cluster.caller_namespace = alternate
+    code, plan = _manager_cli_report(
+        cluster, capsys, action=DELETE_ACTION, run_id=RUN_ID
+    )
+    assert (code, plan[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.PLANNED),
+        STATUS.PLANNED,
+    )
+
+    kind = "deployment" if drift == "deployment-before-apply" else "secret"
+    identity = next(key for key in runtime if key[0] == kind)
+    replacement = json.loads(runtime[identity])
+    if kind == "deployment":
+        replacement["metadata"]["uid"] = ABSENCE_REPLACEMENT_UID
+    if drift == "previous-name-secret-in-other-namespace":
+        suffix = next(
+            suffix
+            for suffix in (
+                K8S_RUNNER.REGISTRATION_SECRET_SUFFIX,
+                K8S_RUNNER.REGISTRY_SECRET_SUFFIX,
+            )
+            if identity[2].endswith(suffix)
+        )
+        previous = PREVIOUS_CONSUMER_NAME + suffix
+        replacement["metadata"]["name"] = previous
+        identity = (identity[0], identity[1], previous)
+    cluster.objects[identity] = replacement
+    survivors = deepcopy(cluster.objects)
+
+    code, result = _manager_cli_report(
+        cluster,
+        capsys,
+        action=DELETE_ACTION,
+        run_id=RUN_ID,
+        flags=(APPLY_ARGUMENT, CONFIRM_ARGUMENT, plan[FIELD_PLAN_DIGEST]),
+    )
+    assert (code, result[FIELD_STATUS]) == (
+        STATUS.exit_code(STATUS.BLOCKED),
+        STATUS.BLOCKED,
+    ), (code, result[FIELD_STATUS], tuple(cluster.deleted))
+    assert cluster.objects == survivors
+    assert cluster.applied == cluster.deleted == []
+    assert not cluster.guard_held

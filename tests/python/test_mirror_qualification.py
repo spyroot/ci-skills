@@ -39,6 +39,8 @@ from test_gitlab_mirror import (
 CLI = load_module("qualify_mirror_cli", REPO_ROOT / "tools" / "qualify_mirror.py")
 # The module object the adapter imported, so exception classes are shared.
 QUALIFY = sys.modules[CLI.MirrorQualification.__module__]
+# The shared module that owns the installed-copy load reasons.
+INSTALLED_COPY = sys.modules[QUALIFY.installed_module.__module__]
 ACCEPTANCE = load_module(
     "check_live_acceptance_for_mirror_tool",
     REPO_ROOT / "tools" / "check_live_acceptance.py",
@@ -2186,7 +2188,7 @@ def test_installed_bindings_refuse_a_lib_from_another_directory(
     :returns: None; assertions verify the reason.
     """
     monkeypatch.setattr(sys, "path", list(sys.path))
-    reason = QUALIFY.INSTALLED_LIB_SHADOWED.format(name=QUALIFY.CATALOG_MODULE)
+    reason = INSTALLED_COPY.INSTALLED_LIB_SHADOWED.format(name=QUALIFY.CATALOG_MODULE)
 
     with pytest.raises(QUALIFY.QualificationError, match=f"^{re.escape(reason)}$"):
         QUALIFY.installed_bindings(tmp_path)
@@ -3231,7 +3233,9 @@ def test_main_reports_an_unavailable_installed_copy(
     :param capsys: Captured output.
     :returns: None; assertions verify exit code and output against each module.
     """
-    reason = QUALIFY.INSTALLED_LIB_UNAVAILABLE.format(name=QUALIFY.CATALOG_MODULE)
+    reason = INSTALLED_COPY.INSTALLED_LIB_UNAVAILABLE.format(
+        name=QUALIFY.CATALOG_MODULE
+    )
 
     def unavailable(skill: Path) -> NoReturn:
         """Fail like a missing installed module.

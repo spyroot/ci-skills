@@ -477,6 +477,54 @@ def test_token_source_native_store_exports_no_credential(
     assert source.environment == {"OTHER_TOKEN": None}
 
 
+def test_token_selection_names_the_source_without_reading_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Choose file, then variable, then store without reading a token value.
+
+    A dry run reports this choice, so an absent file and an empty variable are
+    still named; ``_token_source`` rejects them when it reads the token.
+
+    :param tmp_path: Scratch directory holding no token file.
+    :param monkeypatch: Pytest fixture setting and removing the variable.
+    :returns: None; assertions compare each choice with its reference.
+    """
+    absent = tmp_path / "absent.token"
+    names = ("SELECTED_TOKEN", "OTHER_TOKEN")
+    monkeypatch.setenv("OTHER_TOKEN", "")
+    monkeypatch.delenv("SELECTED_TOKEN", raising=False)
+    choose = ACCESS_SOURCES.TokenSelection.choose
+
+    assert choose(absent, names, "native-store") == ACCESS_SOURCES.TokenSelection(
+        f"file:{absent.resolve()}", "SELECTED_TOKEN"
+    )
+    assert choose(None, names, "native-store") == ACCESS_SOURCES.TokenSelection(
+        "env:OTHER_TOKEN", "OTHER_TOKEN"
+    )
+    monkeypatch.delenv("OTHER_TOKEN")
+    assert choose(None, names, "native-store") == ACCESS_SOURCES.TokenSelection(
+        "native-store", None
+    )
+
+
+def test_token_source_rejects_the_empty_selected_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refuse an empty selected variable instead of falling back to the next one.
+
+    :param monkeypatch: Pytest fixture setting an empty and a nonempty variable.
+    :returns: None; assertions verify the refusal reason.
+    """
+    monkeypatch.setenv("SELECTED_TOKEN", "")
+    monkeypatch.setenv("OTHER_TOKEN", "other-token")
+    target = import_script_module("lib.python.core.target")
+
+    with pytest.raises(target.TargetError, match="SELECTED_TOKEN is empty"):
+        ACCESS_SOURCES._token_source(
+            None, ("SELECTED_TOKEN", "OTHER_TOKEN"), "native-store"
+        )
+
+
 def test_log_settings_binding_is_scoped_and_restorable() -> None:
     """Bind parsed log options for code below the parser and restore the previous ones.
 
