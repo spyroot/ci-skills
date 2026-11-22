@@ -16,6 +16,7 @@ from lib.python.core.json_types import (
     JSONValue,
     copy_json,
     copy_json_object,
+    json_object,
 )
 from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
@@ -267,6 +268,65 @@ class ResourceSet:
             labels.get(MANAGER_LABEL) == MANAGER_VALUE
             and labels.get(OPERATION_LABEL) == self.operation
         )
+
+    def owned_objects(self, kind: str) -> tuple[JSONObject, ...]:
+        """Discover native objects carrying this exact operation ownership.
+
+        :param kind: Namespaced Kubernetes kind whose owned identities are needed.
+        :returns: Native objects in the exact namespace, without inferring names.
+        :raises KubernetesError: Native reads fail or ownership metadata is malformed.
+        """  # noqa: DOC502 - Native reads and shared ownership validation can fail.
+        if (
+            self.namespace
+            and self.service.read("Namespace", self.namespace, "") is None
+        ):
+            return ()
+        selector = f"{MANAGER_LABEL}={MANAGER_VALUE},{OPERATION_LABEL}={self.operation}"
+        document = self.service.json(
+            "get",
+            kind.casefold() + "s",
+            "--namespace",
+            self.namespace,
+            "-l",
+            selector,
+            "-o",
+            "json",
+        )
+        try:
+            items = KubernetesObject(json_object(document)).objects("items")
+            return tuple(
+                item.document
+                for item in items
+                if item.namespace == self.namespace
+                and self.owns(item.document)
+                and item.name
+            )
+        except TypeError as exc:
+            raise KubernetesError("resource_list_invalid") from exc
+
+    def resolve_owned_name(
+        self,
+        kind: str,
+        candidates: Sequence[str],
+        *,
+        ambiguous_reason: str,
+    ) -> str | None:
+        """Retain a unique native owned name, including previous naming prefixes.
+
+        :param kind: Native kind selected by the composing workflow.
+        :param candidates: Supported explicit/default names to read independently.
+        :param ambiguous_reason: Existing caller-owned ambiguity classification.
+        :returns: Unique observed owned name, or absence for a new resource.
+        :raises KubernetesError: Reads, ownership, or identity are invalid or ambiguous.
+        """  # noqa: DOC502 - Shared discovery and native readers propagate failures.
+        observed = {KubernetesObject(item).name for item in self.owned_objects(kind)}
+        for name in sorted(set(candidates)):
+            item = self.service.read(kind, name, self.namespace)
+            if item is not None and self.owns(item):
+                observed.add(name)
+        if len(observed) > 1:
+            raise KubernetesError(ambiguous_reason)
+        return next(iter(observed), None)
 
     def apply(self, document: JSONObject) -> JSONObject:
         """Apply changed desired fields and prove their independent read-back.
