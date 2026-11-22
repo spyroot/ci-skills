@@ -36,3 +36,7 @@ TEAM_GUIDE.md
 # Working copies a merge or patch tool leaves behind.
 *.orig
 *.rej
+
+# Mutation and coverage state written by .github/workflows/mutation.yml (mutmut, coverage).
+.mutmut-cache
+.coverage
