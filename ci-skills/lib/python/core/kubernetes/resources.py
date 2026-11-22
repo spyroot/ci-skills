@@ -181,6 +181,8 @@ def restorable(document: JSONObject) -> MutableMapping[str, JSONValue]:
     if isinstance(annotations, MutableMapping):
         for key in PROVIDER_ANNOTATIONS:
             annotations.pop(key, None)
+        if not annotations:
+            metadata_copy.pop("annotations")
     return desired
 
 

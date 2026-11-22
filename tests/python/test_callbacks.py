@@ -2340,6 +2340,39 @@ def test_adopt_deployment_container_image_noop_skips_patch_and_rollout() -> None
     assert result["action"] == STATUS.NO_OP
 
 
+def test_restorable_drops_annotations_left_empty_by_provider_cleanup() -> None:
+    """Provider-owned annotation removal does not leave an empty annotations map."""
+    document = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "runner",
+            "namespace": "ci",
+            "uid": "deployment-uid",
+            "annotations": {"deployment.kubernetes.io/revision": "2"},
+        },
+        "spec": {"template": {"spec": {"containers": []}}},
+    }
+
+    desired = RESOURCES.restorable(document)
+
+    assert "annotations" not in desired["metadata"]
+    kept = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "runner",
+            "namespace": "ci",
+            "uid": "deployment-uid",
+            "annotations": {"ci-skills.spyroot.dev/managed": "true"},
+        },
+    }
+    desired_kept = RESOURCES.restorable(kept)
+    assert desired_kept["metadata"]["annotations"] == {
+        "ci-skills.spyroot.dev/managed": "true"
+    }
+
+
 def test_adopt_deployment_container_image_rejects_unrelated_postwrite_change() -> None:
     """Read-back rejects unrelated desired-state drift without unsafe fallback."""
     state = {"deployment": _existing_runner_deployment()}
