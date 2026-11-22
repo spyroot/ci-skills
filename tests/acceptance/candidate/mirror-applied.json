@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-22T11:38:50.625801+00:00",
+  "captured_at": "2026-11-22T12:06:01.406254+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "3e27fedcf04e8ae12206274eb528c32a201054ddea27a68db74a4e81113d1bf6",
+  "plan_digest": "0f5f80fa59d9639dede1f05d9a929f65069a485e002c3d283ed0591aa5b3b795",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1467496859,
+        "id": 1467518714,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 35,
+        "id": 36,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-22T11:38:17.411Z",
+        "last_successful_update_at": "2026-11-22T12:05:28.014Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "99ecd93ad9ebb9828f66164d3f097fc0742e9be93e56efd7c57322a8cf70aee5",
-    "file_count": 277,
-    "functional_digest": "01b659898798dcee789281afa5a43048e41fe4ac2bace10047f14109e8617159",
+    "digest": "62609b2a1d7be2c190881568c7c53574f68b74ecfe626ed61ca98c45c5f9d4b7",
+    "file_count": 316,
+    "functional_digest": "0b109a47b8bc23fe6216852c7fc6756d2a72a6de40a05936e1bb828fb66d3549",
     "revision": {
       "source": "installer_record",
-      "value": "77f2565c2c4fc6d74786af51083bfc27be47cfe8",
+      "value": "ea09ff7187361de754a558f2f19dea0f6f4969fb",
       "verified": true
     }
   },
@@ -108,5 +108,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user",
-  "tested_revision": "77f2565c2c4fc6d74786af51083bfc27be47cfe8"
+  "tested_revision": "ea09ff7187361de754a558f2f19dea0f6f4969fb"
 }
