@@ -1,16 +1,16 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-11-21T23:43:17.874861+00:00",
+  "captured_at": "2026-11-22T11:29:18.160641+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
   },
   "credential_sources": {
     "github": "gh-credential-store:github.com",
-    "gitlab": "file:path:2ab0e691bda5",
+    "gitlab": "file:path:29f247d18d3c",
     "kubernetes": "target:kubernetes.kubeconfigs"
   },
-  "execution_host": "ci-skills-run-tool-pod-8d9c1cf393dbc37a",
+  "execution_host": "johnnys-mbp.localdomain",
   "kind": "access_check",
   "live_checks": {
     "ceph_cluster": {
@@ -22,7 +22,7 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "b8624ad3c98eb1eedc212926d83b9a3b44013b38a0014b304976d363e5223711",
+      "readback_sha256": "ae86f8ebce74ef98a4ce2a880b23ac4ea830b27c318571e2075ff4daeb7fa90d",
       "record_count": 15,
       "status": "PASS"
     },
@@ -35,7 +35,7 @@
       "ciliumnode_count": 13,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "936fd7b9b40346f2af4d4ded21cdd2baaa14528f84b4f3f4d7ab284d184c8163",
+      "readback_sha256": "19444fb8abfc7ce4d23d735bdcd4cb509d61e7574bac364cdc702dd18e3a9190",
       "record_count": 13,
       "status": "PASS"
     },
@@ -43,8 +43,8 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "6a1b23cae4eb509d373bab200e9793a0515956fa78175289e0418f20cd1001f2",
-      "record_count": 12219,
+      "readback_sha256": "ab67994c66f94c7fe4e8ee851cfba16695b84ad83c5dfe0546b37b092f40ad35",
+      "record_count": 5013,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -58,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "c08a0dccd3d61a834794bc19a36342b456beb1186605a3a1e43058d4c91d90b3",
+      "readback_sha256": "4ae2edab4b26da0d4cbbfefdc3e85e693325a5a28724a3956360171954b28a4b",
       "record_count": 1,
       "status": "PASS"
     },
@@ -66,19 +66,19 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "4d3909e404aa5a3159f3c8e206cc9d549efcf056916805287926c9ab195c74ab",
+      "readback_sha256": "590cbc11bb5a06120b9d3d2c67f732c2ffd53fa2c2ef67c765ea212d2a892cd7",
       "record_count": 85,
       "resource_counts": {
         "attachments": 40,
         "csidrivers": 6,
         "csinodes": 13,
         "daemonsets": 45,
-        "deployments": 232,
+        "deployments": 228,
         "nodes": 13,
-        "pods": 878,
+        "pods": 862,
         "pvcs": 78,
         "pvs": 85,
-        "replicasets": 572,
+        "replicasets": 573,
         "statefulsets": 15,
         "storageclasses": 10
       },
@@ -89,7 +89,7 @@
   "publication": false,
   "routing": {
     "gitlab": "gitlab_private",
-    "harbor": null,
+    "harbor": "harbor",
     "kubernetes": "kubernetes",
     "selected_by": "default"
   },
@@ -100,12 +100,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "e483db7f91b83252070657c000f1e9b769c6cd027ed9825f6d111be3857ab04b",
+    "digest": "451c998b289e6c46f3e929267f0f4103ffbbdc68708d8c1c45d61d3cd1a2447b",
     "file_count": 277,
-    "functional_digest": "62176432a00c9f3c7cbff6dcefc39a188d1307d329eb6e835ff85fc9b461366e",
+    "functional_digest": "77a6643a80fc523be6d618d2ccf095b1a0f59914b12cf29f634f0f88d3b270a7",
     "revision": {
       "source": "installer_record",
-      "value": "e9c6608ef61297794b7cf2c88a2ae5aebe01a487",
+      "value": "e0c93c643b2bf1b500d3dcadd9a9187139517aa7",
       "verified": true
     }
   },
@@ -127,7 +127,7 @@
       "target": "github.com/spyroot/test-self-runner"
     },
     "gitlab": {
-      "credential_source": "file:path:2ab0e691bda5",
+      "credential_source": "file:path:29f247d18d3c",
       "details": null,
       "identity": "spyroot",
       "name": "gitlab",
@@ -153,7 +153,7 @@
         "cilium_health_pod": "cilium-7722l",
         "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
         "kubeconfig_files": [
-          "path:6fcdd5297cb0"
+          "path:200724a2de76"
         ],
         "user_entry": "kube:admin/api-ww-cai-cisco-live-dcloud-local:6443"
       },
@@ -178,9 +178,9 @@
       "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin -> https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "target_file": "path:b31b018d2125",
-  "target_selection": "env:CI_SKILLS_TARGET -> file:path:b31b018d2125",
-  "target_source": "env:CI_SKILLS_TARGET",
+  "target_file": "path:5e5380df1eda",
+  "target_selection": "user:path:5e5380df1eda",
+  "target_source": "user",
   "targets": {
     "github": "github.com/spyroot/test-self-runner",
     "gitlab": "https://gitlab.dcloud.run",
@@ -189,5 +189,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "e9c6608ef61297794b7cf2c88a2ae5aebe01a487"
+  "tested_revision": "e0c93c643b2bf1b500d3dcadd9a9187139517aa7"
 }

@@ -57,6 +57,7 @@ from lib.python.core.endpoints import (
     ROUTING_SELECTED_BY_KEY,
     ROUTING_SELECTED_BY_LEGACY,
     TARGET_CONTRACT,
+    TARGET_REPORT_KEYS,
 )
 from lib.python.core.logging import bound_log_settings, log_event
 from lib.python.core.paths import SKILL_ROOT
@@ -860,6 +861,22 @@ class Target:
             either option, otherwise ``source`` unchanged.
         """
         return self.gitlab.selection_source(source) if self.gitlab else source
+
+    def selection_report(self) -> JSONObject:
+        """Report the target file, the source that selected it, and the selection.
+
+        ``access_check`` and ``ci-api`` write these fields into their results.
+
+        :returns: ``TARGET_REPORT_KEYS`` mapped to ``target_file`` as a string,
+            ``target_source`` from ``source_kind`` and ``target_selection`` from
+            ``target_reference``; each is ``None`` before source resolution.
+        """
+        values = (
+            str(self.source_file) if self.source_file else None,
+            self.source_kind,
+            self.target_reference,
+        )
+        return dict(zip(TARGET_REPORT_KEYS, values, strict=True))
 
     def require_github(self) -> GitHubTarget:
         """Select the concrete github settings required by a caller.

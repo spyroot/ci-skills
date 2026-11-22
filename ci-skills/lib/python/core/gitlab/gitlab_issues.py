@@ -12,11 +12,12 @@ from collections.abc import MutableMapping, Sequence
 from urllib.parse import urlencode
 
 from lib.python.core.gitlab.gitlab_actions import (
+    DESCRIPTION_FIELD,
     ActionError,
     ActionPlan,
     PreparedOperation,
+    _description,
     _fields,
-    _file_text,
     _id,
     _object,
     _pages,
@@ -49,9 +50,9 @@ def prepare(args: Namespace) -> PreparedOperation:
     body: MutableMapping[str, JSONValue] = {
         "title": _required_text(args.title, "title")
     }
-    description = _file_text(args.description_file, "description_file")
+    description = _description(args)
     if description is not None:
-        body["description"] = description
+        body[DESCRIPTION_FIELD] = description
     labels = [_required_text(label, "label") for label in args.label]
     if len(set(labels)) != len(labels):
         raise ActionError("duplicate_label")

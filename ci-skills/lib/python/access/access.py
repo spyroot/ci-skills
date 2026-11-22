@@ -17,10 +17,14 @@ from lib.python.access.kubernetes import kubernetes_access
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.endpoints import (
+    CREDENTIAL_SOURCES_KEY,
     GITHUB_AUTHORITY,
     GITLAB_AUTHORITY,
     KUBERNETES_AUTHORITY,
     ROUTING_RESULT_KEY,
+    TARGET_FILE_KEY,
+    TARGET_SELECTION_KEY,
+    TARGET_SOURCE_KEY,
 )
 from lib.python.core.json_types import (
     JSONObject,
@@ -67,18 +71,19 @@ def _bound_metadata(target: Target) -> JSONObject:
         name: sources.require(SkillPluginType(name)).reference
         for name in target.active_surfaces
     }
+    selection = target.selection_report()
     return {
         "execution_host": sources.execution_host,
         "captured_at": datetime.now(UTC).isoformat(),
-        "target_file": str(target.source_file) if target.source_file else None,
-        "target_source": target.source_kind,
+        TARGET_FILE_KEY: selection[TARGET_FILE_KEY],
+        TARGET_SOURCE_KEY: selection[TARGET_SOURCE_KEY],
         "tested_revision": target.tested_revision,
         "skill": copy_json(target.skill),
         "consuming_project": copy_json(target.skill["consuming_project"])
         if target.skill
         else None,
-        "credential_sources": references,
-        "target_selection": target.target_reference,
+        CREDENTIAL_SOURCES_KEY: references,
+        TARGET_SELECTION_KEY: selection[TARGET_SELECTION_KEY],
         "targets": _selected_targets(target),
     }
 
@@ -182,7 +187,7 @@ def dry_run_access(
         "kind": "access_check",
         "status": DRY_RUN,
         "publication": publication,
-        "target_selection": target.target_reference,
+        TARGET_SELECTION_KEY: target.target_reference,
         "surfaces": surfaces,
     }
     if target.routing is not None:
