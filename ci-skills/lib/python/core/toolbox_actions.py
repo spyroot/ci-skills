@@ -61,6 +61,7 @@ from lib.python.core.runner_identity import (
     ResolvedName,
     resolve_name,
     resolve_repository,
+    validate_project_name,
 )
 from lib.python.core.runner_options import (
     SingleValue,
@@ -76,18 +77,27 @@ from lib.python.core.runner_scope import (
 from lib.python.core.schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
 from lib.python.core.target import Target
 from lib.python.core.toolbox import (
+    BUILD_TAG_PREFIX as BUILD_TAG_PREFIX,  # noqa: PLC0414 - compatibility export
+)
+from lib.python.core.toolbox import (
+    DIGEST_ANNOTATION,
+    IMAGE_ANNOTATION,
     MANAGED_VALUE,
     BuildAction,
     BuildToolbox,
     ToolboxError,
     ToolboxSpec,
+    build_annotations,
+    build_candidate_reference,
+    resolve_build_candidate,
+)
+from lib.python.core.toolbox import (
+    FINGERPRINT_TAG_LENGTH as FINGERPRINT_TAG_LENGTH,  # noqa: PLC0414 - compatibility export
 )
 from lib.python.sys.status import APPLIED, BLOCKED, DRY_RUN, NO_OP, PASS, PLANNED
 
 DEFAULT_OPERATION_TIMEOUT: Final = 1800
 MUTATION_OPERATIONS: Final = ("create", "update", "delete")
-BUILD_TAG_PREFIX: Final = "ci-skills-build-"
-FINGERPRINT_TAG_LENGTH: Final = 24
 CLEANUP_IDENTITY_MISSING: Final = "runner_namespace_cleanup_identity_missing"
 
 
@@ -131,6 +141,7 @@ class WorkflowAction(SkillAction):
     """Retain explicit workflow inputs and the planning state they produce.
 
     :param args: Command arguments parsed by the shared catalogue-owned parser.
+    :param naming_base: Optional consumer naming context supplied by a parent workflow.
     :param spec: Selected toolbox specification, absent for direct push/pull operations.
     :param resolved_base: Immutable build base, absent when no build has been planned.
     :param resolved_source: Immutable direct push source, absent for other operations.
@@ -141,6 +152,7 @@ class WorkflowAction(SkillAction):
     :ivar repository_identity: Consumer repository source used for name defaults.
     :ivar resolved_runner_name: Caller or repository-derived workload name.
     :ivar resolved_description: Caller or repository-derived provider description.
+    :ivar build_candidate: Exact candidate selected before confirmation.
 
     .. attribute :: args
         :type: argparse.Namespace
@@ -151,6 +163,11 @@ class WorkflowAction(SkillAction):
         :type: Target
 
         Runtime target assigned by successful preparation.
+
+    .. attribute :: naming_base
+        :type: ResolvedName | None
+
+        Consumer naming context supplied by a parent workflow.
 
     .. attribute :: runner
         :type: RunnerAction
@@ -177,6 +194,11 @@ class WorkflowAction(SkillAction):
 
         Prepared plan fingerprint, absent until planning succeeds.
 
+    .. attribute :: build_candidate
+        :type: BuildAction | None
+
+        Exact candidate selected before confirmation, including verified reuse.
+
     .. attribute :: context
         :type: DeliveryState
 
@@ -188,6 +210,7 @@ class WorkflowAction(SkillAction):
     repository_identity: RepositoryIdentity = field(
         init=False, default=RepositoryIdentity(None, RepositorySource.UNKNOWN)
     )
+    naming_base: ResolvedName | None = None
     resolved_runner_name: ResolvedName | None = field(init=False, default=None)
     resolved_description: ResolvedName | None = field(init=False, default=None)
     runner: RunnerAction = field(init=False)
@@ -195,7 +218,33 @@ class WorkflowAction(SkillAction):
     resolved_base: Optional[str] = None
     resolved_source: Optional[str] = None
     digest: Optional[str] = None
+    build_candidate: BuildAction | None = field(init=False, default=None, repr=False)
     context: DeliveryState = field(default_factory=DeliveryState)
+
+    @property
+    def project_name(self) -> str | None:
+        """Read the validated consumer override without replacing provider identity.
+
+        :returns: Trimmed override, or absence when omitted.
+        :raises ValueError: A present override is blank or not a string.
+        """  # noqa: DOC502 - Shared input validation propagates ValueError.
+        return validate_project_name(getattr(self.args, "project_name", None))
+
+    @property
+    def consumer_name(self) -> ResolvedName:
+        """Resolve the consumer naming base shared by workload and support objects.
+
+        :returns: Bound parent naming context, known base, or pending unknown intent.
+        :raises ValueError: A present consumer override is invalid.
+        """  # noqa: DOC502 - The shared resolver validates the optional override.
+        selected = self.project_name
+        return self.naming_base or resolve_name(
+            None,
+            self.repository_identity,
+            argument="--project-name",
+            project_name=selected,
+            pending=True,
+        )
 
     def _validate(self) -> None:
         """Reject invalid command modes and missing catalogue-owned arguments.
@@ -203,6 +252,7 @@ class WorkflowAction(SkillAction):
         :raises ValueError: If required inputs, timeout, or plan/apply flags conflict.
         """
         args = self.args
+        validate_project_name(getattr(args, "project_name", None))
         if not args.action:
             raise ValueError("action_required")
         if args.apply and args.dry_run:
@@ -237,11 +287,10 @@ class WorkflowAction(SkillAction):
                     getattr(args, "name", None),
                     self.repository_identity,
                     argument="--name",
+                    project_name=self.project_name,
                 )
             )
-            if not self.repository_identity.name and not getattr(
-                args, "namespace", None
-            ):
+            if not self.consumer_name.value and not getattr(args, "namespace", None):
                 raise ValueError("repository_identity_required: provide --namespace")
             ownership_id = plan_digest(
                 {
@@ -252,7 +301,7 @@ class WorkflowAction(SkillAction):
             )[:RUN_ID_LIMIT]
             namespace = RunScope.new(
                 namespace=getattr(args, "namespace", None),
-                namespace_prefix=self.repository_identity.name,
+                namespace_prefix=self.consumer_name.value or None,
                 run_id=ownership_id,
             ).namespace
             name = self.resolved_runner_name.value
@@ -260,7 +309,11 @@ class WorkflowAction(SkillAction):
             raise ValueError("namespace_and_name_required")
         source_root = getattr(args, "runner_root", "") or ""
         labels = (
-            runner_tags(tuple(getattr(args, "label", [])), self.repository_identity)
+            runner_tags(
+                tuple(getattr(args, "label", [])),
+                self.repository_identity,
+                project_name=self.project_name,
+            )
             if args.kind == "create_selfhosted_runner"
             else tuple(getattr(args, "label", []))
         )
@@ -322,6 +375,38 @@ class WorkflowAction(SkillAction):
         if self.spec is not None and "@sha256:" in self.spec.base_image:
             self.resolved_base = self.spec.base_image
 
+    def prepare_build_candidate(self, state: DeliveryState) -> BuildAction | None:
+        """Bind a new or verified existing candidate before plan confirmation.
+
+        :param state: Authenticated native services shared by the parent workflow.
+        :returns: Exact build action, or absence for operations without a build.
+        :raises ValueError: A build specification has no resolved immutable base.
+        :raises KubernetesError: Native BuildConfig ownership or reads fail.
+        :raises ToolboxError: The selected BuildConfig belongs to another owner.
+        :raises APIError: Independent candidate digest read-back fails.
+        """  # noqa: DOC503 - Shared native and registry readers propagate failures.
+        spec = self.spec
+        if spec is None or self.args.action not in ("create", "update"):
+            return None
+        if self.resolved_base is None:
+            raise ValueError("build_plan_missing")
+        harbor = state.harbor
+        prefix = f"{harbor.target.host}/{harbor.target.project}/{spec.image_repository}"
+        preferred = BuildAction(
+            spec,
+            self.resolved_base,
+            prefix,
+            build_candidate_reference(
+                spec.fingerprint, name_prefix=self.consumer_name.value or None
+            ),
+            harbor.dockerconfig,
+            partial(harbor.digest, spec.image_repository),
+        )
+        self.build_candidate, _ = resolve_build_candidate(
+            preferred, state.kubernetes, preserve_existing=True
+        )
+        return self.build_candidate
+
     def fingerprint(self) -> str:
         """Bind operation inputs to selected endpoints and resolved image identities.
 
@@ -334,6 +419,8 @@ class WorkflowAction(SkillAction):
             github["token_file"] = str(github["token_file"])
         return plan_digest(
             {
+                "project_name": self.project_name,
+                "consumer_name": self.consumer_name.value or None,
                 "identity": {
                     "repository": self.repository_identity.reference,
                     "source": self.repository_identity.source,
@@ -377,6 +464,11 @@ class WorkflowAction(SkillAction):
                     for key in ("source_image", "repository", "tag", "image")
                 },
                 "specification": self.spec.fingerprint if self.spec else None,
+                "build_candidate": (
+                    self.build_candidate.image
+                    if self.build_candidate is not None
+                    else None
+                ),
                 "base_image": self.resolved_base,
                 "source_image": self.resolved_source,
                 "runner": asdict(self.runner)
@@ -564,6 +656,7 @@ class ConfirmWorkflow(HarborCallback[WorkflowAction]):
         image = getattr(workflow.args, "image", "")
         if image:
             self.state.published_image = published_image(image)
+        workflow.prepare_build_candidate(self.state)
         workflow.digest = workflow.fingerprint()
         if workflow.args.apply and workflow.args.confirm_plan != workflow.digest:
             raise ValueError("confirm_plan_mismatch_rerun_plan")
@@ -709,16 +802,10 @@ class HarborBuild(RegistryToolboxCallback):
         spec = workflow.spec
         if spec is None or workflow.resolved_base is None:
             raise ValueError("build_plan_missing")
-        prefix = f"{harbor.target.host}/{harbor.target.project}/{spec.image_repository}"
-        reference = BUILD_TAG_PREFIX + spec.fingerprint[:FINGERPRINT_TAG_LENGTH]
-        build = BuildAction(
-            spec,
-            workflow.resolved_base,
-            prefix,
-            reference,
-            harbor.dockerconfig,
-            partial(harbor.digest, spec.image_repository),
-        )
+        build = workflow.build_candidate or workflow.prepare_build_candidate(self.state)
+        if build is None:
+            raise ValueError("build_plan_missing")
+        reference = build.candidate_reference
         builder = BuildToolbox(build)
         builder.bind(self.state)
         self._builder = builder
@@ -773,12 +860,33 @@ class DeleteToolbox(RegistryToolboxCallback):
         if spec is None:
             raise ValueError("toolbox_spec_missing")
         resources = ResourceSet(self.state.kubernetes, spec.namespace, MANAGED_VALUE)
-        changed = resources.delete("BuildConfig", spec.app)
-        references = (
+        current = self.state.kubernetes.read("BuildConfig", spec.app, spec.namespace)
+        references = {
             spec.image_tag,
-            BUILD_TAG_PREFIX + spec.fingerprint[:FINGERPRINT_TAG_LENGTH],
-        )
-        for reference in references:
+            build_candidate_reference(spec.fingerprint),
+            build_candidate_reference(
+                spec.fingerprint, name_prefix=self.action.consumer_name.value or None
+            ),
+        }
+        if current is not None and resources.owns(current):
+            annotations = build_annotations(current)
+            image = annotations.get(IMAGE_ANNOTATION, "")
+            prefix = (
+                f"{self.state.harbor.target.host}/{self.state.harbor.target.project}/"
+                f"{spec.image_repository}:"
+            )
+            if image.startswith(prefix):
+                reference = image[len(prefix) :]
+                digest = annotations.get(DIGEST_ANNOTATION)
+                if (
+                    reference
+                    and digest is not None
+                    and self.state.harbor.digest(spec.image_repository, reference)
+                    == digest
+                ):
+                    references.add(reference)
+        changed = resources.delete("BuildConfig", spec.app)
+        for reference in sorted(references):
             changed = (
                 self.state.harbor.delete_tag(spec.image_repository, reference)
                 or changed

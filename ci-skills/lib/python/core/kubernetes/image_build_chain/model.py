@@ -8,6 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,11 +28,12 @@ from lib.python.core.gitlab.runner_manager import (
     GitLabRunnerManagerState,
 )
 from lib.python.core.gitlab.runner_manager.action import MANAGER_ROLE
-from lib.python.core.harbor.registry_mirror import HarborService
-from lib.python.core.json_types import JSONObject, copy_json
+from lib.python.core.harbor.registry_mirror import is_registry_digest
+from lib.python.core.json_types import JSONObject, copy_json, json_object
 from lib.python.core.kubernetes.podman_probe import PROBE_KIND, ProbeMode
 from lib.python.core.kubernetes.run_scope import RUN_ID_LIMIT, RunScope
 from lib.python.core.kubernetes.runner_scope import scope_key
+from lib.python.core.portable import portable
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import plan_digest
 from lib.python.core.runner_identity import (
@@ -41,6 +43,7 @@ from lib.python.core.runner_identity import (
     ResolvedName,
     resolve_name,
     resolve_repository,
+    validate_project_name,
 )
 from lib.python.core.runner_options import (
     RUNNER_NAME_LIMIT,
@@ -48,6 +51,7 @@ from lib.python.core.runner_options import (
     runner_tags,
 )
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
+from lib.python.core.runtime import redact_tree
 from lib.python.core.target import (
     GitLabOperationTarget,
     GitLabSelection,
@@ -55,10 +59,13 @@ from lib.python.core.target import (
     TargetError,
     select_gitlab_reference,
 )
+from lib.python.core.toolbox import ToolboxSpec
 from lib.python.core.toolbox_actions import WorkflowAction
 
 CHAIN_OPERATION: Final = "chain"
 RUNNER_TOKEN_NAME: Final = "runner-token"
+REGISTRY_COMPONENT: Final = re.compile(r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*")
+REGISTRY_TAG: Final = re.compile(r"[\w][\w.-]{0,127}", re.ASCII)
 
 
 @dataclass
@@ -147,11 +154,6 @@ class ImageBuildChainState(GitLabRunnerManagerState):
 
         Authenticated runner-scope GitLab service.
 
-    .. attribute :: toolbox_harbor
-        :type: HarborService
-
-        Authenticated Harbor service for the toolbox image.
-
     .. attribute :: selected_node
         :type: str
 
@@ -192,7 +194,6 @@ class ImageBuildChainState(GitLabRunnerManagerState):
     runner_create_plan: ActionPlan = field(init=False, repr=False)
     manager_action: GitLabRunnerManagerAction = field(init=False, repr=False)
     runner_gitlab: GitLabService = field(init=False, repr=False)
-    toolbox_harbor: HarborService = field(init=False, repr=False)
     selected_node: str = field(init=False)
     created_runner_id: int = field(init=False)
     token_directory: Path = field(init=False, repr=False)
@@ -225,7 +226,22 @@ class ImageBuildChainAction(SkillAction):
     .. attribute :: toolbox
         :type: WorkflowAction
 
-        Existing toolbox build-and-push action.
+        Existing Harbor copy action for the prepared toolbox.
+
+    .. attribute :: toolbox_spec
+        :type: ToolboxSpec | None
+
+        Explicit specification retained as publication inputs and plan metadata.
+
+    .. attribute :: naming_base
+        :type: ResolvedName
+
+        Consumer name used for defaults at each provider.
+
+    .. attribute :: destination_digest
+        :type: str | None
+
+        Exact destination tag digest observed before confirmation, or absence.
 
     .. attribute :: gitlab_target
         :type: GitLabOperationTarget
@@ -257,6 +273,16 @@ class ImageBuildChainAction(SkillAction):
 
         Exact selected runner description and provenance.
 
+    .. attribute :: explicit_description
+        :type: str | None
+
+        Original caller description before consumer defaults.
+
+    .. attribute :: explicit_tags
+        :type: tuple[str, ...]
+
+        Original caller labels before consumer defaults.
+
     .. attribute :: manager_scope
         :type: RunScope | None
 
@@ -272,14 +298,28 @@ class ImageBuildChainAction(SkillAction):
     state: ImageBuildChainState = field(default_factory=ImageBuildChainState)
     target: Target = field(init=False)
     toolbox: WorkflowAction = field(init=False)
+    toolbox_spec: ToolboxSpec | None = field(init=False, default=None)
+    naming_base: ResolvedName = field(init=False)
+    destination_digest: str | None = field(init=False, default=None)
     gitlab_target: GitLabOperationTarget = field(init=False, repr=False)
     target_source: str = field(init=False)
     mode: ProbeMode = field(init=False)
     gitlab_selection: tuple[str, str] = field(init=False)
     repository_identity: RepositoryIdentity = field(init=False)
     resolved_description: ResolvedName = field(init=False)
+    explicit_description: str | None = field(init=False, default=None)
+    explicit_tags: tuple[str, ...] = field(init=False, default=())
     manager_scope: RunScope | None = field(init=False)
     resolved_runner_name: ResolvedName | None = field(init=False, default=None)
+
+    @property
+    def project_name(self) -> str | None:
+        """Read the validated consumer override independently of provider identity.
+
+        :returns: Trimmed optional consumer naming input.
+        :raises ValueError: A present override is invalid.
+        """  # noqa: DOC502 - Shared input validation propagates ValueError.
+        return validate_project_name(getattr(self.args, "project_name", None))
 
     @property
     def runner_kind(self) -> str:
@@ -307,32 +347,122 @@ class ImageBuildChainAction(SkillAction):
         :returns: None after validating caller-owned inputs.
         :raises ValueError: A required selection is absent or invalid.
         """
-        required = {
-            "toolbox_spec": self.args.toolbox_spec,
-        }
-        missing = sorted(name for name, value in required.items() if not value)
-        if missing:
-            raise ValueError("chain_missing_inputs:" + ",".join(missing))
         parse_protected(getattr(self.args, "protected", None))
         if self.args.project is not None and self.args.group is not None:
             raise ValueError("chain_requires_exactly_one_project_or_group")
 
-    def _toolbox_args(self) -> argparse.Namespace:
-        """Build the existing toolbox action inputs without a second confirmation.
+    def _reference_image(self) -> str | None:
+        """Build a native image reference within the selected Harbor project.
 
-        :returns: Namespace consumed by ``WorkflowAction``.
+        :returns: Configured tag or digest reference, or pending configuration.
+        :raises ValueError: The artifact selector is invalid.
         """
+        harbor = self.target.harbor
+        if harbor is None or harbor.reference_toolbox is None:
+            return None
+        repository, separator, reference = harbor.reference_toolbox.partition("@")
+        if not separator:
+            repository, separator, reference = repository.rpartition(":")
+        valid_reference = (
+            is_registry_digest(reference)
+            if separator == "@"
+            else REGISTRY_TAG.fullmatch(reference) is not None
+        )
+        if (
+            not all(
+                REGISTRY_COMPONENT.fullmatch(part) for part in repository.split("/")
+            )
+            or not valid_reference
+        ):
+            raise ValueError(
+                "harbor_reference_toolbox_invalid: provide repository:tag or repository@sha256:digest"
+            )
+        return f"{harbor.host}/{harbor.project}/{repository}{separator}{reference}"
+
+    def _select_names(self) -> None:
+        """Resolve one consumer name and pass it through each default.
+
+        :raises ValueError: The caller's explicit name or scheduling tags are invalid.
+        """  # noqa: DOC502 - existing name and tag validators propagate failures.
+        base = resolve_name(
+            None,
+            self.repository_identity,
+            argument="--project-name",
+            project_name=self.project_name,
+            pending=True,
+        )
+        self.naming_base = base
+        self.resolved_description = (
+            resolve_name(
+                self.explicit_description,
+                self.repository_identity,
+                argument="--description",
+            )
+            if self.explicit_description is not None
+            else base
+        )
+        self.args.runner_description = self.resolved_description.value or None
+        defaults = (base.value,) if base.value else ()
+        self.args.runner_label = list(
+            runner_tags(self.explicit_tags or defaults, self.repository_identity)
+        )
+        spec = self.toolbox_spec
         values = vars(self.args).copy()
         values.update(
-            kind="toolbox",
-            action="create",
-            spec=self.args.toolbox_spec,
+            kind="harbor_push",
+            action="push",
             apply=False,
-            dry_run=self.mode == ProbeMode.DRY_RUN,
-            live_plan=False,
             confirm_plan=None,
+            source_image=self._reference_image(),
+            repository=spec.image_repository if spec else base.value or None,
+            tag=spec.image_tag if spec else base.value or None,
         )
-        return argparse.Namespace(**values)
+        self.toolbox = WorkflowAction(
+            argparse.Namespace(**values), context=self.state, naming_base=base
+        )
+        self.toolbox.target = self.target
+        self.toolbox.repository_identity = self.repository_identity
+
+    def naming_conflicts(self) -> list[JSONObject]:
+        """List explicit differences from the requested consumer defaults.
+
+        :returns: Each conflicting field with its explicit and expected values.
+        """
+        expected = self.naming_base.value
+        if not expected:
+            return []
+        conflicts: list[JSONObject] = []
+        if (
+            self.explicit_description is not None
+            and self.resolved_description.value != expected
+        ):
+            conflicts.append(
+                {
+                    "field": "runner.description",
+                    "explicit": self.explicit_description,
+                    "expected": expected,
+                }
+            )
+        if self.explicit_tags and expected not in self.args.runner_label:
+            conflicts.append(
+                {
+                    "field": "runner.labels",
+                    "explicit": list(self.explicit_tags),
+                    "expected": expected,
+                }
+            )
+        if (
+            self.toolbox_spec is not None
+            and self.toolbox_spec.image_repository != expected
+        ):
+            conflicts.append(
+                {
+                    "field": "toolbox.repository",
+                    "explicit": self.toolbox_spec.image_repository,
+                    "expected": expected,
+                }
+            )
+        return conflicts
 
     def prepare(self, mode: ProbeMode) -> None:
         """Resolve targets and construct mutation-free component actions.
@@ -345,6 +475,9 @@ class ImageBuildChainAction(SkillAction):
         """  # noqa: DOC503 - existing component preparation propagates errors.
         self.mode = mode
         self._validate_chain_inputs()
+        validate_project_name(getattr(self.args, "project_name", None))
+        self.explicit_description = self.args.runner_description
+        self.explicit_tags = tuple(self.args.runner_label)
         target = resolve_target(
             self.args.target,
             self.args.binding,
@@ -373,32 +506,12 @@ class ImageBuildChainAction(SkillAction):
             if self.runner_kind == "project"
             else RepositoryIdentity(None, RepositorySource.UNKNOWN)
         )
-        self.resolved_description = resolve_name(
-            self.args.runner_description,
-            self.repository_identity,
-            argument="--description",
-            pending=self.runner_kind == "project",
-        )
-        self.args.runner_description = self.resolved_description.value or None
-        self.args.runner_label = list(
-            runner_tags(self.args.runner_label, self.repository_identity)
-        )
-        if self.runner_kind == "group" and (
-            not self.args.namespace or not self.args.runner_label
-        ):
-            raise ValueError(
-                "repository_identity_required: provide --namespace and --tag"
-            )
-        self.toolbox = WorkflowAction(self._toolbox_args(), context=self.state)
-        self.toolbox.prepare()
+        if self.args.toolbox_spec:
+            self.toolbox_spec = ToolboxSpec.from_path(Path(self.args.toolbox_spec))
+        self._select_names()
+        if self.runner_kind == "group" and not self.naming_base.value:
+            raise ValueError("group_runner_chain_requires_project_name")
         self._prepare_scope()
-        if self.toolbox.spec is not None:
-            build = ScopeObservation(
-                ScopePurpose.BUILD,
-                self.toolbox.spec.namespace,
-                ScopeSource.TOOLBOX_DEFAULT,
-            )
-            self.state.runner_scopes[scope_key(build.purpose, build.namespace)] = build
         self.state.args = self.args
         self.state.runner_auth_plan = self._runner_auth_plan()
 
@@ -414,7 +527,7 @@ class ImageBuildChainAction(SkillAction):
                 "repository": self.repository_identity.reference,
                 "description": self.resolved_description.value,
                 "tags": list(self.args.runner_label),
-                "toolbox": self.toolbox.spec.fingerprint if self.toolbox.spec else None,
+                "toolbox": self.toolbox_spec.fingerprint if self.toolbox_spec else None,
                 "namespace": self.args.namespace,
             }
         )[:RUN_ID_LIMIT]
@@ -422,9 +535,9 @@ class ImageBuildChainAction(SkillAction):
             RunScope.new(
                 namespace=self.args.namespace,
                 run_id=scope_id,
-                namespace_prefix=self.repository_identity.name,
+                namespace_prefix=self.naming_base.value or None,
             )
-            if self.repository_identity.name or self.args.namespace
+            if self.naming_base.value or self.args.namespace
             else None
         )
         self.resolved_runner_name = (
@@ -432,11 +545,9 @@ class ImageBuildChainAction(SkillAction):
                 self.manager_scope.bounded_name(
                     MANAGER_ROLE,
                     limit=RUNNER_NAME_LIMIT,
-                    prefix=self.repository_identity.name,
+                    prefix=self.naming_base.value or None,
                 ),
-                NameSource.REPOSITORY
-                if self.repository_identity.name
-                else NameSource.UNKNOWN,
+                self.naming_base.source,
             )
             if self.manager_scope is not None
             else None
@@ -462,15 +573,7 @@ class ImageBuildChainAction(SkillAction):
             self.repository_identity = RepositoryIdentity.from_access(
                 access, self.runner_reference
             )
-            self.resolved_description = resolve_name(
-                self.args.runner_description,
-                self.repository_identity,
-                argument="--description",
-            )
-            self.args.runner_description = self.resolved_description.value
-            self.args.runner_label = list(
-                runner_tags(self.args.runner_label, self.repository_identity)
-            )
+            self._select_names()
             self._prepare_scope()
 
     def _runner_auth_plan(self) -> ActionPlan:
@@ -506,33 +609,45 @@ class ImageBuildChainAction(SkillAction):
                 "tag_list": ",".join(self.args.runner_label),
             },
             revision=self.args.revision,
+            project_name=self.project_name,
         )
 
     def plan(self, selected_node: str) -> JSONObject:
         """Render one stable three-step delivery plan.
 
         :param selected_node: Exact worker selected for the runner workload.
-        :returns: Stable toolbox build, Harbor publication, and runner inputs.
-        :raises ValueError: The prepared toolbox specification is absent.
+        :returns: Stable, portable toolbox publication, naming, and runner inputs.
+        :raises ValueError: A live plan contains inputs that would be redacted.
         """
-        toolbox = self.toolbox.spec
-        if toolbox is None:
-            raise ValueError("toolbox_spec_required")
-        return {
+        spec = self.toolbox_spec
+        harbor = self.target.harbor
+        kubernetes = self.target.kubernetes
+        document: JSONObject = {
             "kind": PROBE_KIND,
             "operation": CHAIN_OPERATION,
             "target_file": str(self.target.source_file),
             "target_source": self.target_source,
             "tested_revision": self.target.tested_revision,
             "skill": copy_json(self.target.skill),
+            "consumer_name": self.naming_base.value or None,
+            "project_name": self.project_name,
+            "naming_conflicts": self.naming_conflicts(),
             "toolbox": {
-                "specification": toolbox.fingerprint,
-                "base_image": self.toolbox.resolved_base or toolbox.base_image,
-                "repository": toolbox.image_repository,
-                "tag": toolbox.image_tag,
-                "namespace": toolbox.namespace,
-                "app": toolbox.app,
+                "mode": "copy",
+                "source_image": self.toolbox.resolved_source
+                or self.toolbox.args.source_image,
+                "specification": spec.fingerprint if spec else None,
+                "repository": self.toolbox.args.repository,
+                "tag": self.toolbox.args.tag,
+                "namespace": spec.namespace if spec else None,
+                "app": spec.app if spec else None,
+                "destination_digest": self.destination_digest,
+                "origin": harbor.url if harbor else None,
+                "project": harbor.project if harbor else None,
             },
+            "kubernetes": {"server": kubernetes.server, "context": kubernetes.context}
+            if kubernetes
+            else None,
             "runner": {
                 "name": (
                     self.resolved_runner_name.value
@@ -568,9 +683,12 @@ class ImageBuildChainAction(SkillAction):
                 "repository_source": self.repository_identity.source,
                 "description_source": self.resolved_description.source,
                 "protected": parse_protected(getattr(self.args, "protected", None)),
-                "token_sink": "ephemeral",
             },
         }
+        public_plan = redact_tree(document)
+        if self.mode != ProbeMode.DRY_RUN and public_plan != document:
+            raise ValueError("chain_plan_contains_sensitive_values")
+        return json_object(portable(public_plan))
 
     def fingerprint(self, selected_node: str) -> str:
         """Hash the stable delivery plan used by live plan and apply.
