@@ -174,7 +174,7 @@ def install_callbacks(action: OLMAction) -> AbstractCallbacks[DeliveryState, OLM
     :returns: Authentication, resolution, and confirmation callbacks.
     """
     callbacks: AbstractCallbacks[DeliveryState, OLMAction] = [
-        K8SAuth(action.target, min(action.timeout, DEFAULT_COMMAND_TIMEOUT)),
+        K8SAuth(action.target, min(action.args.timeout, DEFAULT_COMMAND_TIMEOUT)),
         ResolveOperatorPackage(action),
         ConfirmOperatorPlan(action),
     ]
