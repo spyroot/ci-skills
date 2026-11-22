@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-22T14:01:55.289722+00:00",
+  "captured_at": "2026-11-22T15:53:46.541709+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,14 +15,14 @@
   "kind": "gitlab_mirror",
   "mutated": false,
   "operation": "sync",
-  "plan_digest": "f5052b20fb030fddb7cd05611bb922403e6336594af396edd7351b684abfc3b2",
+  "plan_digest": "cf884f03e46332559c14e75ebf80aba5096482c82ad82baadcf68c7ff188bbb3",
   "records": [
     {
       "action": "NO_OP",
       "before": {
         "destination": {
           "host": "github.com",
-          "id": 1467616283,
+          "id": 1467720970,
           "path": "spyroot/test-mirror-push"
         },
         "destination_refs": {
@@ -32,10 +32,10 @@
         "mirror": {
           "auth_method": "password",
           "enabled": true,
-          "id": 39,
+          "id": 41,
           "keep_divergent_refs": true,
           "last_error_present": false,
-          "last_successful_update_at": "2026-11-22T14:00:10.661Z",
+          "last_successful_update_at": "2026-11-22T15:52:31.634Z",
           "only_protected_branches": false,
           "update_status": "finished"
         },
@@ -56,7 +56,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1467616283,
+        "id": 1467720970,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -66,10 +66,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 39,
+        "id": 41,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-22T14:00:10.661Z",
+        "last_successful_update_at": "2026-11-22T15:52:31.634Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -106,7 +106,7 @@
     "functional_digest": "47c203b52494191e7e0611a585e20cf9deb27f4819392fdc25eb90177461c437",
     "revision": {
       "source": "installer_record",
-      "value": "3ebe9bae1c5ccf04bdef26331fc3224c49ff8583",
+      "value": "a3e3227f403d21bdd4a957ebc841c7c799fadcc3",
       "verified": true
     }
   },
@@ -124,17 +124,17 @@
     "before": {
       "destination": {
         "host": "github.com",
-        "id": 1467616283,
+        "id": 1467720970,
         "path": "spyroot/test-mirror-push"
       },
-      "mirror_id": 39,
+      "mirror_id": 41,
       "source": {
         "host": "gitlab.dcloud.run",
         "id": 261,
         "path": "hott/test-mirror-push"
       }
     },
-    "captured_at": "2026-11-22T14:03:18.047878+00:00",
+    "captured_at": "2026-11-22T15:55:05.460729+00:00",
     "delete": {
       "destination_http_status": 204,
       "mirror_http_status": 204
@@ -154,7 +154,7 @@
     },
     "skill_digest": "120f06f0bbf4acf4942f404c681efbc8148f2a2401ae97f67bd2d2a835394dca",
     "status": "PASS",
-    "tested_revision": "3ebe9bae1c5ccf04bdef26331fc3224c49ff8583"
+    "tested_revision": "a3e3227f403d21bdd4a957ebc841c7c799fadcc3"
   },
   "status": "PASS",
   "summary": {
@@ -163,5 +163,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user;argv:--gitlab=private",
-  "tested_revision": "3ebe9bae1c5ccf04bdef26331fc3224c49ff8583"
+  "tested_revision": "a3e3227f403d21bdd4a957ebc841c7c799fadcc3"
 }
