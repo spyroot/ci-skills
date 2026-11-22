@@ -304,3 +304,13 @@ NO_OP. Cleanup reported `PASS_INDEPENDENT_ABSENCE_AND_REPEAT`; at `2026-11-22T11
 by name, mirror `35` returned 404, and source `261` listed no remote mirror. The access receipt was captured from the
 same install at `2026-11-22T11:36:36Z`. The `e0c93c6` set it supersedes is preserved under
 `tests/acceptance/historical/pre-runner-cleanup-confirmation/`.
+
+### Mirror qualification read-back — 2026-11-22, runner cleanup confirmation candidate `22ce1d8`
+
+Candidate `22ce1d8` is the runner cleanup confirmation branch merged with `main` `215b8ef` (#147). One
+installed-candidate qualification, run `pr148-mirror-20261122-22ce1d8`, created repository `1467651923` and GitLab
+mirror `40`, returned NO_OP on repeat and deleted both (`PASS_INDEPENDENT_ABSENCE_AND_REPEAT`); at
+`2026-11-22T16:27:06Z` GitHub returned 404 by ID and source `261` listed no remote mirror. The first `access_check`
+from this install was BLOCKED only by `event_trace`; the rerun passed and is the receipt (`2026-11-22T16:25:56Z`). The
+`main` `3ebe9ba` set is preserved under `tests/acceptance/historical/pre-runner-cleanup-confirmation-at-3ebe9ba/` and
+this branch's `77f2565` set under `tests/acceptance/historical/pre-runner-cleanup-main-integration/`.
