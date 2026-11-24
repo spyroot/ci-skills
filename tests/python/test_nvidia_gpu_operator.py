@@ -30,6 +30,7 @@ from lib.python.core.kubernetes.nvidia_gpu.callbacks import (
     NvidiaPauseOperator,
 )
 from lib.python.core.kubernetes.nvidia_gpu.cli import (
+    NvidiaGPUOperator,
     build_parser,
     resolve_gpu_mode,
 )
@@ -79,6 +80,8 @@ from lib.python.core.kubernetes.nvidia_gpu.models import (
 )
 from lib.python.core.kubernetes.nvidia_gpu.preflight import (
     CONFIRM_MISMATCH,
+    PauseApplyError,
+    apply_pause_plan,
     build_pause_plan,
     pause_plan_evidence,
 )
@@ -113,12 +116,15 @@ class FakeK8SService:
             NODES: {},
         }
         self.missing_apis: set[str] = set()
+        self.forbidden_apis: set[str] = set()
+        self.corrupt_json_apis: set[str] = set()
         self.mutations: list[tuple[str, ...]] = []
         self.dry_run_reject: set[str] = set()
 
     def seed(self, resource: str, obj: dict[str, Any]) -> None:
         """Insert one object into the in-memory cluster table."""
         name = obj["metadata"]["name"]
+        obj["metadata"].setdefault("resourceVersion", "1")
         self.resources.setdefault(resource, {})[name] = obj
 
     def command(self, *args: str, **_: Any) -> FakeResult:
@@ -146,6 +152,13 @@ class FakeK8SService:
                 1,
                 stderr=f'error: the server doesn\'t have a resource type "{resource}"',
             )
+        if resource in self.forbidden_apis:
+            return FakeResult(
+                1,
+                stderr=f"Error from server (Forbidden): {resource} is forbidden",
+            )
+        if resource in self.corrupt_json_apis:
+            return FakeResult(0, stdout="{not-valid-json")
         positional = [
             a
             for a in args[2:]
@@ -192,16 +205,49 @@ class FakeK8SService:
             return FakeResult(1, stderr="not found")
         patch_idx = args.index("--patch") + 1
         ops = json.loads(args[patch_idx])
-        if dry_run:
-            return FakeResult(0, stdout=json.dumps(obj))
+        working = json.loads(json.dumps(obj))
         for op in ops:
-            parts = [p for p in op["path"].split("/") if p]
-            cursor = obj
-            for part in parts[:-1]:
-                cursor = cursor.setdefault(part, {})
-            cursor[parts[-1]] = op["value"]
+            parts = [_pointer_unescape(p) for p in op["path"].split("/") if p]
+            if op["op"] == "test":
+                cursor: Any = working
+                for part in parts[:-1]:
+                    if isinstance(cursor, dict) and part in cursor:
+                        cursor = cursor[part]
+                    else:
+                        return FakeResult(
+                            1,
+                            stderr=f"jsonpatch test operation failed: {op['path']}",
+                        )
+                if (
+                    not isinstance(cursor, dict)
+                    or parts[-1] not in cursor
+                    or cursor[parts[-1]] != op.get("value")
+                ):
+                    return FakeResult(
+                        1, stderr=f"jsonpatch test operation failed: {op['path']}"
+                    )
+            elif op["op"] in {"add", "replace"}:
+                cursor = working
+                for part in parts[:-1]:
+                    cursor = cursor.setdefault(part, {})
+                cursor[parts[-1]] = op["value"]
+            elif op["op"] == "remove":
+                cursor = working
+                for part in parts[:-1]:
+                    cursor = cursor[part]
+                cursor.pop(parts[-1], None)
+        if dry_run:
+            return FakeResult(0, stdout=json.dumps(working))
+        metadata = working.setdefault("metadata", {})
+        metadata["resourceVersion"] = str(int(metadata.get("resourceVersion", "1")) + 1)
+        self.resources[resource][name] = working
         self.mutations.append(args)
-        return FakeResult(0, stdout=json.dumps(obj))
+        return FakeResult(0, stdout=json.dumps(working))
+
+
+def _pointer_unescape(token: str) -> str:
+    """Reverse RFC 6901 escaping for one JSON Pointer path token."""
+    return token.replace("~1", "/").replace("~0", "~")
 
 
 def _run_cb(callback_cls: type[Any], action: GPUOperatorAction) -> dict[str, Any]:
@@ -640,3 +686,282 @@ def test_cli_mode_resolution() -> None:
         resolve_gpu_mode(parser.parse_args(["pause", "--dry-run"]))
         == ActionMode.OFFLINE
     )
+
+
+def test_pause_operator_blocked_by_preexisting_health_needs() -> None:
+    """A ClusterPolicy/GPUCluster conflict recorded by the health read blocks pause."""
+    service = FakeK8SService()
+    _seed_standard_cluster(service)
+    service.seed(
+        GPU_CLUSTERS,
+        {
+            "metadata": {"name": "gpu-cluster", "uid": "gc-uid-1"},
+            "status": {"state": "ready"},
+        },
+    )
+    action = _make_action("pause", node="gpu-worker-1", scope=PAUSE_SCOPE_UPGRADE_SKIP)
+    action.state.kubernetes = service
+    health = _run_cb(NvidiaHealthCheck, action)
+    assert [n["need"] for n in health["needs"]] == [NEED_ALLOCATION_CONFLICT]
+
+    result = _run_cb(NvidiaPauseOperator, action)
+    assert result["verified"] is False
+    assert [n["need"] for n in result["needs"]] == [NEED_ALLOCATION_CONFLICT]
+    assert action.state.pause_plan is None
+    assert service.mutations == []
+
+
+def test_pause_plan_digest_binds_selector_and_node_set() -> None:
+    """Selector edits and node-set changes invalidate the confirmation digest."""
+    service = FakeK8SService()
+    _seed_standard_cluster(service)
+    plan, needs = build_pause_plan(
+        _make_action(
+            "pause", scope=PAUSE_SCOPE_AUTO_UPGRADE, nvidia_driver="pool-stock"
+        ),
+        service,
+    )
+    assert needs == []
+    assert plan is not None
+    assert plan.selector == {"pool": "stock"}
+    assert plan.node_uids == ("node-uid-1",)
+    baseline = plan_digest(pause_plan_evidence(plan))
+
+    service.seed(
+        NODES,
+        {
+            "metadata": {
+                "name": "gpu-worker-2",
+                "uid": "node-uid-3",
+                "labels": {LABEL_PCI_NVIDIA: "true", "pool": "stock"},
+            },
+            "status": {"allocatable": {NVIDIA_GPU_RESOURCE: "2"}},
+        },
+    )
+    grown, _ = build_pause_plan(
+        _make_action(
+            "pause", scope=PAUSE_SCOPE_AUTO_UPGRADE, nvidia_driver="pool-stock"
+        ),
+        service,
+    )
+    assert grown is not None
+    assert grown.node_uids == ("node-uid-1", "node-uid-3")
+    assert plan_digest(pause_plan_evidence(grown)) != baseline
+
+    service.resources[NVIDIA_DRIVERS]["pool-stock"]["spec"]["nodeSelector"] = {
+        "pool": "edge"
+    }
+    moved, _ = build_pause_plan(
+        _make_action(
+            "pause", scope=PAUSE_SCOPE_AUTO_UPGRADE, nvidia_driver="pool-stock"
+        ),
+        service,
+    )
+    assert moved is not None
+    assert moved.selector == {"pool": "edge"}
+    assert plan_digest(pause_plan_evidence(moved)) != baseline
+
+
+def test_apply_enforces_uid_and_resource_version_preconditions() -> None:
+    """A concurrent write fails the guarded patch instead of being overwritten."""
+    service = FakeK8SService()
+    _seed_standard_cluster(service)
+    plan, needs = build_pause_plan(
+        _make_action("pause", node="gpu-worker-1", scope=PAUSE_SCOPE_UPGRADE_SKIP),
+        service,
+    )
+    assert needs == []
+    assert plan is not None and not plan.no_op
+
+    node = service.resources[NODES]["gpu-worker-1"]
+    node["metadata"]["resourceVersion"] = "99"
+    with pytest.raises(PauseApplyError) as excinfo:
+        apply_pause_plan(plan, service)
+    assert excinfo.value.mutated is False
+    assert "k8s_precondition_failed" in str(excinfo.value)
+    assert LABEL_UPGRADE_SKIP not in node["metadata"]["labels"]
+
+    fresh_plan, _ = build_pause_plan(
+        _make_action("pause", node="gpu-worker-1", scope=PAUSE_SCOPE_UPGRADE_SKIP),
+        service,
+    )
+    assert fresh_plan is not None
+    applied = apply_pause_plan(fresh_plan, service)
+    assert applied["mutated"] is True
+    stored = service.resources[NODES]["gpu-worker-1"]
+    assert stored["metadata"]["labels"][LABEL_UPGRADE_SKIP] == "true"
+
+
+def test_readback_failure_preserves_mutated_state() -> None:
+    """A landed write followed by a failed read-back still reports mutated."""
+
+    class TamperingService(FakeK8SService):
+        def command(self, *args: str, **kwargs: Any) -> FakeResult:
+            result = super().command(*args, **kwargs)
+            if (
+                args[0] == "patch"
+                and "--dry-run=server" not in args
+                and result.returncode == 0
+            ):
+                self.resources[args[1]][args[2]]["metadata"]["labels"].pop(
+                    LABEL_UPGRADE_SKIP, None
+                )
+            return result
+
+    service = TamperingService()
+    _seed_standard_cluster(service)
+    plan, _ = build_pause_plan(
+        _make_action("pause", node="gpu-worker-1", scope=PAUSE_SCOPE_UPGRADE_SKIP),
+        service,
+    )
+    assert plan is not None
+    action = _make_action(
+        "pause",
+        node="gpu-worker-1",
+        scope=PAUSE_SCOPE_UPGRADE_SKIP,
+        mode=ActionMode.APPLY,
+        confirm_plan=plan_digest(pause_plan_evidence(plan)),
+    )
+    action.state.kubernetes = service
+    with pytest.raises(PauseApplyError) as excinfo:
+        _run_cb(NvidiaPauseOperator, action)
+    assert excinfo.value.mutated is True
+    assert action.state.mutated is True
+
+
+def test_offline_output_is_forbidden_by_mode_policy() -> None:
+    """--dry-run combined with report or log persistence violates the mode policy."""
+    parser = build_parser()
+    with pytest.raises(ValueError, match="dry_run_cannot_write_output"):
+        resolve_gpu_mode(parser.parse_args(["pause", "--dry-run", "--output-dir", "r"]))
+    with pytest.raises(ValueError, match="dry_run_cannot_write_output"):
+        resolve_gpu_mode(parser.parse_args(["pause", "--dry-run", "--log-file", "l"]))
+
+
+def test_argument_failure_envelope_conforms_to_result_schema(capsys) -> None:
+    """Mode-validation failures emit a BLOCKED envelope with the required fields."""
+    args = build_parser().parse_args(["pause", "--apply", "--dry-run", "--json"])
+    assert NvidiaGPUOperator(args).execute() == 2
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["status"] == "BLOCKED"
+    assert envelope["operation"] == "pause"
+    assert isinstance(envelope["tested_revision"], str)
+    for key in (
+        "schema_version",
+        "kind",
+        "status",
+        "operation",
+        "captured_at",
+        "errors",
+        "summary",
+    ):
+        assert key in envelope
+
+
+def test_missing_operation_is_a_usage_error(capsys) -> None:
+    """An invocation without an operation is a usage error, not a result envelope."""
+    args = build_parser().parse_args(["--json"])
+    assert NvidiaGPUOperator(args).execute() == 2
+    captured = capsys.readouterr()
+    assert "gpu_operator_operation_required" in captured.err
+    assert captured.out == ""
+
+
+def test_optional_list_propagates_unexpected_errors() -> None:
+    """Forbidden or unparsable list responses fail instead of reading as empty."""
+    service = FakeK8SService()
+    _seed_standard_cluster(service)
+    service.forbidden_apis.add(DAEMONSETS)
+    with pytest.raises(KubernetesError, match="k8s_list_failed"):
+        collect_health_snapshot(service, DEFAULT_GPU_NAMESPACE)
+    service.forbidden_apis.clear()
+    service.corrupt_json_apis.add(PODS)
+    with pytest.raises(KubernetesError, match="k8s_list_parse_failed"):
+        collect_health_snapshot(service, DEFAULT_GPU_NAMESPACE)
+
+
+def test_empty_driver_selector_matches_all_gpu_nodes() -> None:
+    """An NVIDIADriver without nodeSelector governs every GPU node."""
+    service = FakeK8SService()
+    service.seed(
+        CLUSTER_POLICIES,
+        {
+            "metadata": {"name": "gpu-cluster-policy", "uid": "cp-uid-1"},
+            "spec": {"driver": {"enabled": True, "useNvidiaDriverCRD": True}},
+            "status": {"state": "ready"},
+        },
+    )
+    service.seed(
+        NVIDIA_DRIVERS,
+        {
+            "metadata": {"name": "pool-all", "uid": "drv-uid-3"},
+            "spec": {"version": "580.159.03"},
+            "status": {"state": "ready"},
+        },
+    )
+    service.seed(
+        NODES,
+        {
+            "metadata": {
+                "name": "gpu-worker-1",
+                "uid": "node-uid-1",
+                "labels": {
+                    LABEL_PCI_NVIDIA: "true",
+                    LABEL_CUDA_DRIVER_FULL: "570.158.01",
+                },
+            },
+            "status": {"allocatable": {NVIDIA_GPU_RESOURCE: "4"}},
+        },
+    )
+    snapshot, _ = collect_health_snapshot(service, DEFAULT_GPU_NAMESPACE)
+    node = snapshot["nodes"][0]
+    assert node["matched_driver_crs"] == ["pool-all"]
+    assert node["desired_driver_version"] == "580.159.03"
+    assert node["driver_drift"] is True
+
+
+def test_cluster_policy_version_wins_when_driver_crd_disabled() -> None:
+    """Leftover NVIDIADriver CRs do not override the active ClusterPolicy version."""
+    service = FakeK8SService()
+    service.seed(
+        CLUSTER_POLICIES,
+        {
+            "metadata": {"name": "gpu-cluster-policy", "uid": "cp-uid-1"},
+            "spec": {
+                "driver": {
+                    "enabled": True,
+                    "version": "570.158.01",
+                    "useNvidiaDriverCRD": False,
+                }
+            },
+            "status": {"state": "ready"},
+        },
+    )
+    service.seed(
+        NVIDIA_DRIVERS,
+        {
+            "metadata": {"name": "pool-leftover", "uid": "drv-uid-9"},
+            "spec": {"version": "999.99.99", "nodeSelector": {"pool": "stock"}},
+            "status": {"state": "ready"},
+        },
+    )
+    service.seed(
+        NODES,
+        {
+            "metadata": {
+                "name": "gpu-worker-1",
+                "uid": "node-uid-1",
+                "labels": {
+                    LABEL_PCI_NVIDIA: "true",
+                    LABEL_CUDA_DRIVER_FULL: "570.158.01",
+                    "pool": "stock",
+                },
+            },
+            "status": {"allocatable": {NVIDIA_GPU_RESOURCE: "4"}},
+        },
+    )
+    snapshot, _ = collect_health_snapshot(service, DEFAULT_GPU_NAMESPACE)
+    node = snapshot["nodes"][0]
+    assert node["matched_driver_crs"] == ["pool-leftover"]
+    assert node["desired_driver_version"] == "570.158.01"
+    assert node["driver_drift"] is False

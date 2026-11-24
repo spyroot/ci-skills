@@ -12,6 +12,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import MutableMapping, MutableSequence, Sequence
 from typing import Final, Optional
 
@@ -141,7 +142,7 @@ def resolve_gpu_mode(args: argparse.Namespace) -> ActionMode:
         live_plan=args.live_plan,
         confirmed=args.confirm_plan is not None,
         receipt_requested=args.receipt_out is not None,
-        output_requested=False,
+        output_requested=bool(args.output_dir or args.log_file),
         timeout=args.timeout,
         policy=GPU_OPERATOR_MODE_POLICY,
         read_only=read_only,
@@ -238,7 +239,7 @@ class NvidiaGPUOperator:
         )
         output = report(GPU_OPERATOR_KIND, target_label, {}, [], [])
         output["operation"] = self.args.operation
-        output["tested_revision"] = self.target.tested_revision
+        output["tested_revision"] = self.target.tested_revision or ""
         output["target_file"] = (
             str(self.target.source_file) if self.target.source_file is not None else ""
         )
@@ -294,10 +295,28 @@ class NvidiaGPUOperator:
 
         :returns: Canonical process exit code.
         """
+        if self.args.operation is None:
+            # No operation was requested, so there is no per-operation result
+            # envelope to emit; report an argparse-style usage error instead.
+            build_parser().print_usage(sys.stderr)
+            print(
+                "nvidia_gpu_operator.py: error: gpu_operator_operation_required",
+                file=sys.stderr,
+            )
+            return 2
         try:
             mode = resolve_gpu_mode(self.args)
         except ValueError as exc:
-            return _failure(self.args, GPU_OPERATOR_KIND, "arguments", str(exc))
+            return _failure(
+                self.args,
+                GPU_OPERATOR_KIND,
+                "arguments",
+                str(exc),
+                extra={
+                    "operation": self.args.operation,
+                    "tested_revision": self.args.revision or "",
+                },
+            )
         errors: MutableSequence[JSONObject] = []
         try:
             mode = self._prepare(mode)

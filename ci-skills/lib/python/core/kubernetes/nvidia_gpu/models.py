@@ -475,6 +475,26 @@ class PausePlan:
 
         Kubernetes object UID bound into ``plan_digest``.
 
+    .. attribute :: resource_version
+        :type: str
+
+        Observed ``metadata.resourceVersion`` enforced by a server-side JSON
+        patch ``test`` guard so a concurrent write fails the mutation.
+
+    .. attribute :: selector
+        :type: JSONObject
+
+        Governing selector or scope descriptor bound into ``plan_digest``
+        (DEC-CI17-10), such as the ``NVIDIADriver`` ``nodeSelector`` or the
+        explicit node name.
+
+    .. attribute :: node_uids
+        :type: tuple[str, ...]
+
+        Sorted UIDs of the nodes affected through ``selector`` at plan time,
+        bound into ``plan_digest`` so a changed node set invalidates the
+        confirmation (DEC-CI17-10).
+
     .. attribute :: before
         :type: JSONObject
 
@@ -511,6 +531,9 @@ class PausePlan:
     resource: str
     name: str
     uid: str
+    resource_version: str
+    selector: JSONObject
+    node_uids: tuple[str, ...]
     before: JSONObject
     after: JSONObject
     patch_kind: str

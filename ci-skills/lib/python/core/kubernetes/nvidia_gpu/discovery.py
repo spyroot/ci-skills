@@ -12,6 +12,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Optional
 
@@ -97,9 +98,9 @@ def _optional_list(
             return []
         raise KubernetesError(f"k8s_list_failed:{resource}")
     try:
-        document = service.json(*argv)
-    except KubernetesError:
-        return []
+        document = json.loads(result.stdout) if result.stdout.strip() else {}
+    except json.JSONDecodeError as exc:
+        raise KubernetesError(f"k8s_list_parse_failed:{resource}") from exc
     items = document.get("items", []) if isinstance(document, dict) else []
     return [item for item in items if isinstance(item, dict)]
 
@@ -145,10 +146,9 @@ def _selector_matches(selector: Mapping[str, str], labels: Mapping[str, str]) ->
 
     :param selector: ``NVIDIADriver.spec.nodeSelector`` key/value mapping.
     :param labels: Kubernetes Node labels.
-    :returns: True when all selector entries match and the selector is non-empty.
+    :returns: True when all selector entries match; an empty selector selects
+        every node, matching the NVIDIA GPU Operator's documented behavior.
     """
-    if not selector:
-        return False
     return all(labels.get(key) == value for key, value in selector.items())
 
 
@@ -398,6 +398,46 @@ def _parse_mcps(items: Sequence[JSONObject]) -> list[MachineConfigPoolInfo]:
     return sorted(pools, key=lambda entry: entry.name)
 
 
+def _node_allocatable_gpus(item: JSONObject) -> int:
+    """Count allocatable ``nvidia.com/gpu`` resources on one Node object.
+
+    :param item: Raw Kubernetes Node object.
+    :returns: Integer allocatable GPU count, or zero when absent or invalid.
+    """
+    allocatable = (item.get("status") or {}).get("allocatable") or {}
+    try:
+        return int(str(allocatable.get(NVIDIA_GPU_RESOURCE, "0")))
+    except ValueError:
+        return 0
+
+
+def _node_gpu_present(item: JSONObject) -> bool:
+    """Report whether one Node object presents an NVIDIA GPU.
+
+    :param item: Raw Kubernetes Node object.
+    :returns: True when PCI/GPU presence labels or allocatable GPUs are observed.
+    """
+    metadata = item.get("metadata") or {}
+    raw_labels = metadata.get("labels") or {}
+    labels = {
+        str(k): str(v) for k, v in raw_labels.items() if isinstance(raw_labels, dict)
+    }
+    return (
+        labels.get(LABEL_PCI_NVIDIA) == "true"
+        or labels.get(LABEL_GPU_PRESENT) == "true"
+        or _node_allocatable_gpus(item) > 0
+    )
+
+
+def list_gpu_node_objects(service: KubernetesService) -> list[JSONObject]:
+    """List raw Node objects that present NVIDIA GPUs.
+
+    :param service: Verified Kubernetes service.
+    :returns: Raw Node objects carrying NVIDIA GPU presence evidence.
+    """
+    return [item for item in _list_items(service, NODES) if _node_gpu_present(item)]
+
+
 def _parse_gpu_nodes(
     items: Sequence[JSONObject],
     node_filter: str,
@@ -433,17 +473,8 @@ def _parse_gpu_nodes(
             for k, v in raw_labels.items()
             if isinstance(raw_labels, dict)
         }
-        allocatable = (item.get("status") or {}).get("allocatable") or {}
-        raw_gpus = allocatable.get(NVIDIA_GPU_RESOURCE, "0")
-        try:
-            gpu_count = int(str(raw_gpus))
-        except ValueError:
-            gpu_count = 0
-        gpu_present = (
-            labels.get(LABEL_PCI_NVIDIA) == "true"
-            or labels.get(LABEL_GPU_PRESENT) == "true"
-            or gpu_count > 0
-        )
+        gpu_count = _node_allocatable_gpus(item)
+        gpu_present = _node_gpu_present(item)
         if not gpu_present and node_filter == "*":
             continue
         matched = tuple(
@@ -453,7 +484,7 @@ def _parse_gpu_nodes(
                 if _selector_matches(pool.node_selector, labels)
             )
         )
-        if use_driver_crd or driver_pools:
+        if use_driver_crd or (cluster_policy is None and driver_pools):
             desired = pool_versions.get(matched[0]) if len(matched) == 1 else None
         else:
             desired = policy_driver_version

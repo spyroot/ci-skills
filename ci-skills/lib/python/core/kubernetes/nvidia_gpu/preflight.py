@@ -12,6 +12,11 @@ from typing import Final, Optional
 
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
+from lib.python.core.kubernetes.nvidia_gpu.discovery import (
+    _list_items,
+    _selector_matches,
+    list_gpu_node_objects,
+)
 from lib.python.core.kubernetes.nvidia_gpu.models import (
     CLUSTER_POLICIES,
     LABEL_DEPLOY_DRIVER,
@@ -44,6 +49,78 @@ PATCH_KIND_LABEL: Final = "node_label"
 PATCH_KIND_JSON: Final = "json_patch"
 
 
+class PauseApplyError(KubernetesError):
+    """Signal a failed pause/resume write or read-back with its mutation state.
+
+    .. attribute :: mutated
+        :type: bool
+
+        True when the cluster write succeeded and only the independent
+        read-back failed, so failure reports must not claim ``mutated=false``.
+    """
+
+    mutated: bool
+
+    def __init__(self, reason: str, *, mutated: bool) -> None:
+        """Retain the failure reason and whether the write already landed.
+
+        :param reason: Machine-readable failure identifier.
+        :param mutated: Whether the cluster was already mutated.
+        """
+        super().__init__(reason)
+        self.mutated = mutated
+
+
+def _escape_json_pointer(token: str) -> str:
+    """Escape one JSON Pointer path token per RFC 6901.
+
+    :param token: Raw object member name, such as a label key containing ``/``.
+    :returns: Escaped token safe for use in a JSON patch path.
+    """
+    return token.replace("~", "~0").replace("/", "~1")
+
+
+def _guard_ops(uid: str, resource_version: str) -> list[JSONObject]:
+    """Build server-enforced identity and state preconditions for one patch.
+
+    :param uid: Kubernetes UID the target object must still carry.
+    :param resource_version: ``metadata.resourceVersion`` observed at plan time.
+    :returns: RFC 6902 ``test`` operations evaluated atomically with the patch.
+    """
+    return [
+        {"op": "test", "path": "/metadata/uid", "value": uid},
+        {"op": "test", "path": "/metadata/resourceVersion", "value": resource_version},
+    ]
+
+
+def _affected_node_uids(
+    service: KubernetesService,
+    selector: dict[str, str],
+    *,
+    gpu_only: bool,
+) -> tuple[str, ...]:
+    """Resolve the sorted node UID set governed by one selector right now.
+
+    :param service: Verified Kubernetes service.
+    :param selector: Governing node selector; empty selects every candidate node.
+    :param gpu_only: Restrict candidates to GPU-present nodes when True.
+    :returns: Sorted tuple of affected node UIDs for digest binding.
+    """
+    items = list_gpu_node_objects(service) if gpu_only else _list_items(service, NODES)
+    uids = []
+    for item in items:
+        metadata = item.get("metadata") or {}
+        raw_labels = metadata.get("labels") or {}
+        labels = {
+            str(k): str(v)
+            for k, v in raw_labels.items()
+            if isinstance(raw_labels, dict)
+        }
+        if _selector_matches(selector, labels):
+            uids.append(str(metadata.get("uid", "")))
+    return tuple(sorted(uids))
+
+
 def _get_object(
     service: KubernetesService,
     resource: str,
@@ -63,7 +140,10 @@ def _get_object(
         if "not found" in detail or "notfound" in detail or "404" in detail:
             return None
         raise KubernetesError(f"k8s_get_failed:{resource}/{name}")
-    document = service.json("get", resource, name, "-o", "json")
+    try:
+        document = json.loads(result.stdout) if result.stdout.strip() else None
+    except json.JSONDecodeError as exc:
+        raise KubernetesError(f"k8s_get_parse_failed:{resource}/{name}") from exc
     return document if isinstance(document, dict) else None
 
 
@@ -75,8 +155,18 @@ def _get_first_cluster_policy(service: KubernetesService) -> Optional[JSONObject
     """
     result = service.command("get", CLUSTER_POLICIES, "-o", "json")
     if result.returncode:
-        return None
-    document = service.json("get", CLUSTER_POLICIES, "-o", "json")
+        detail = f"{result.stdout}\n{result.stderr}".casefold()
+        if (
+            "the server doesn't have a resource type" in detail
+            or "not found" in detail
+            or "404" in detail
+        ):
+            return None
+        raise KubernetesError(f"k8s_list_failed:{CLUSTER_POLICIES}")
+    try:
+        document = json.loads(result.stdout) if result.stdout.strip() else {}
+    except json.JSONDecodeError as exc:
+        raise KubernetesError(f"k8s_list_parse_failed:{CLUSTER_POLICIES}") from exc
     items = document.get("items", []) if isinstance(document, dict) else []
     for item in items:
         if isinstance(item, dict):
@@ -84,32 +174,35 @@ def _get_first_cluster_policy(service: KubernetesService) -> Optional[JSONObject
     return None
 
 
-def _dry_run_label(
-    service: KubernetesService,
-    node_name: str,
-    label_arg: str,
-) -> bool:
-    """Validate one Node label mutation with Kubernetes server-side dry-run.
+def _label_patch_ops(
+    labels_present: bool,
+    label_key: str,
+    desired: Optional[str],
+    uid: str,
+    resource_version: str,
+) -> list[JSONObject]:
+    """Build one guarded JSON patch mutating exactly one Node label.
 
-    :param service: Verified Kubernetes service.
-    :param node_name: Exact Kubernetes Node name.
-    :param label_arg: Label expression such as ``key=value`` or ``key-``.
-    :returns: True when server-side dry-run succeeds.
-    :raises KubernetesError: If server-side dry-run rejects the change.
+    :param labels_present: Whether ``metadata.labels`` already exists on the Node.
+    :param label_key: Documented NVIDIA Node label key.
+    :param desired: Label value to set, or ``None`` to remove the label.
+    :param uid: Node UID enforced by the identity guard.
+    :param resource_version: Node ``resourceVersion`` enforced by the state guard.
+    :returns: RFC 6902 operations: guards first, then the label mutation.
     """
-    result = service.command(
-        "label",
-        NODES,
-        node_name,
-        label_arg,
-        "--overwrite",
-        "--dry-run=server",
-        "-o",
-        "json",
-    )
-    if result.returncode:
-        raise KubernetesError(f"{DRY_RUN_FAILED}:{NODES}/{node_name}")
-    return True
+    ops = _guard_ops(uid, resource_version)
+    escaped = _escape_json_pointer(label_key)
+    if desired is None:
+        ops.append({"op": "remove", "path": f"/metadata/labels/{escaped}"})
+    elif labels_present:
+        ops.append(
+            {"op": "add", "path": f"/metadata/labels/{escaped}", "value": desired}
+        )
+    else:
+        ops.append(
+            {"op": "add", "path": "/metadata/labels", "value": {label_key: desired}}
+        )
+    return ops
 
 
 def _dry_run_json_patch(
@@ -178,12 +271,19 @@ def _node_label_plan(
         ]
     metadata = node.get("metadata") or {}
     uid = str(metadata.get("uid", ""))
-    labels = metadata.get("labels") or {}
-    current = labels.get(label_key) if isinstance(labels, dict) else None
+    resource_version = str(metadata.get("resourceVersion", ""))
+    raw_labels = metadata.get("labels")
+    labels_present = isinstance(raw_labels, dict)
+    labels = raw_labels if labels_present else {}
+    current = labels.get(label_key)
     desired = pause_value if action.operation == "pause" else resume_value
     no_op = current == desired
-    label_arg = f"{label_key}-" if desired is None else f"{label_key}={desired}"
-    dry_run_ok = True if no_op else _dry_run_label(service, action.node, label_arg)
+    patch_ops = _label_patch_ops(
+        labels_present, label_key, desired, uid, resource_version
+    )
+    dry_run_ok = (
+        True if no_op else _dry_run_json_patch(service, NODES, action.node, patch_ops)
+    )
     return (
         PausePlan(
             action=action.operation,
@@ -191,10 +291,13 @@ def _node_label_plan(
             resource=NODES,
             name=action.node,
             uid=uid,
+            resource_version=resource_version,
+            selector={"node": action.node},
+            node_uids=(uid,),
             before={label_key: current},
             after={label_key: desired},
             patch_kind=PATCH_KIND_LABEL,
-            patch_payload={"label_arg": label_arg, "label_key": label_key},
+            patch_payload={"ops": patch_ops, "label_key": label_key},
             no_op=no_op,
             server_dry_run_ok=dry_run_ok,
         ),
@@ -213,6 +316,7 @@ def _auto_upgrade_plan(
     :returns: Tuple of resolved ``PausePlan`` (if valid) and ``GPUNeed`` items.
     """
     desired = action.operation == "resume"
+    selector: dict[str, str] = {}
     if action.nvidia_driver:
         resource = NVIDIA_DRIVERS
         obj = _get_object(service, resource, action.nvidia_driver)
@@ -225,6 +329,16 @@ def _auto_upgrade_plan(
                 )
             ]
         spec = obj.get("spec") or {}
+        raw_selector = spec.get("nodeSelector")
+        selector = (
+            {
+                str(k): str(v)
+                for k, v in raw_selector.items()
+                if isinstance(raw_selector, dict)
+            }
+            if isinstance(raw_selector, dict)
+            else {}
+        )
         upgrade = (
             spec.get("upgradePolicy")
             if isinstance(spec.get("upgradePolicy"), dict)
@@ -269,6 +383,7 @@ def _auto_upgrade_plan(
                     supply="pass --nvidia-driver <name> to target the governing NVIDIADriver CR",
                 )
             ]
+        selector = {"cluster_policy": str((obj.get("metadata") or {}).get("name", ""))}
         upgrade = (
             driver.get("upgradePolicy")
             if isinstance(driver.get("upgradePolicy"), dict)
@@ -296,10 +411,17 @@ def _auto_upgrade_plan(
     metadata = obj.get("metadata") or {}
     name = str(metadata.get("name", ""))
     uid = str(metadata.get("uid", ""))
+    resource_version = str(metadata.get("resourceVersion", ""))
     current = upgrade.get("autoUpgrade")
     no_op = current is desired
+    guarded_ops = _guard_ops(uid, resource_version) + patch_ops
     dry_run_ok = (
-        True if no_op else _dry_run_json_patch(service, resource, name, patch_ops)
+        True if no_op else _dry_run_json_patch(service, resource, name, guarded_ops)
+    )
+    node_uids = _affected_node_uids(
+        service,
+        selector if action.nvidia_driver else {},
+        gpu_only=True,
     )
     return (
         PausePlan(
@@ -308,10 +430,13 @@ def _auto_upgrade_plan(
             resource=resource,
             name=name,
             uid=uid,
+            resource_version=resource_version,
+            selector=selector,
+            node_uids=node_uids,
             before={"autoUpgrade": current},
             after={"autoUpgrade": desired},
             patch_kind=PATCH_KIND_JSON,
-            patch_payload={"ops": patch_ops},
+            patch_payload={"ops": guarded_ops},
             no_op=no_op,
             server_dry_run_ok=dry_run_ok,
         ),
@@ -363,6 +488,17 @@ def _mcp_pause_plan(
     metadata = pool.get("metadata") or {}
     spec = pool.get("spec") or {}
     uid = str(metadata.get("uid", ""))
+    resource_version = str(metadata.get("resourceVersion", ""))
+    raw_selector = spec.get("nodeSelector")
+    selector = (
+        {
+            str(k): str(v)
+            for k, v in raw_selector.items()
+            if isinstance(raw_selector, dict)
+        }
+        if isinstance(raw_selector, dict)
+        else {}
+    )
     current = bool(spec.get("paused", False))
     desired = action.operation == "pause"
     no_op = current is desired
@@ -373,10 +509,11 @@ def _mcp_pause_plan(
             "value": desired,
         }
     ]
+    guarded_ops = _guard_ops(uid, resource_version) + patch_ops
     dry_run_ok = (
         True
         if no_op
-        else _dry_run_json_patch(service, MACHINE_CONFIG_POOLS, action.mcp, patch_ops)
+        else _dry_run_json_patch(service, MACHINE_CONFIG_POOLS, action.mcp, guarded_ops)
     )
     return (
         PausePlan(
@@ -385,10 +522,13 @@ def _mcp_pause_plan(
             resource=MACHINE_CONFIG_POOLS,
             name=action.mcp,
             uid=uid,
+            resource_version=resource_version,
+            selector=selector,
+            node_uids=_affected_node_uids(service, selector, gpu_only=False),
             before={"paused": current},
             after={"paused": desired},
             patch_kind=PATCH_KIND_JSON,
-            patch_payload={"ops": patch_ops},
+            patch_payload={"ops": guarded_ops},
             no_op=no_op,
             server_dry_run_ok=dry_run_ok,
         ),
@@ -438,6 +578,8 @@ def pause_plan_evidence(plan: PausePlan) -> JSONObject:
         "resource": plan.resource,
         "name": plan.name,
         "uid": plan.uid,
+        "selector": plan.selector,
+        "node_uids": sorted(plan.node_uids),
         "before": plan.before,
         "after": plan.after,
         "no_op": plan.no_op,
@@ -461,10 +603,16 @@ def verify_pause_confirmation(plan: PausePlan, confirm_plan: Optional[str]) -> s
 def apply_pause_plan(plan: PausePlan, service: KubernetesService) -> JSONObject:
     """Execute one confirmed pause/resume mutation and independently read it back.
 
+    Every write is one RFC 6902 JSON patch whose leading ``test`` operations
+    make the Kubernetes API server enforce the planned object UID and
+    ``resourceVersion`` atomically with the mutation, so a recreated object or
+    a concurrent write fails the patch instead of being overwritten.
+
     :param plan: Verified pause/resume plan.
     :param service: Verified Kubernetes service.
     :returns: Read-back evidence showing observed state and whether mutation occurred.
-    :raises KubernetesError: If the write or independent read-back fails.
+    :raises PauseApplyError: If the write or independent read-back fails; its
+        ``mutated`` attribute records whether the write already landed.
     """
     if plan.no_op:
         return {
@@ -476,41 +624,48 @@ def apply_pause_plan(plan: PausePlan, service: KubernetesService) -> JSONObject:
             "observed": plan.after,
             "verified": True,
         }
-    if plan.patch_kind == PATCH_KIND_LABEL:
-        label_arg = str(plan.patch_payload["label_arg"])
-        result = service.command(
-            "label", NODES, plan.name, label_arg, "--overwrite", "-o", "json"
+    ops = plan.patch_payload["ops"]
+    result = service.command(
+        "patch",
+        plan.resource,
+        plan.name,
+        "--type=json",
+        "--patch",
+        json.dumps(ops, sort_keys=True),
+        "-o",
+        "json",
+    )
+    if result.returncode:
+        detail = f"{result.stdout}\n{result.stderr}".casefold()
+        reason = (
+            "k8s_precondition_failed"
+            if "test" in detail and "fail" in detail
+            else "k8s_patch_failed"
         )
-        if result.returncode:
-            raise KubernetesError(f"k8s_label_failed:{NODES}/{plan.name}")
-    else:
-        ops = plan.patch_payload["ops"]
-        result = service.command(
-            "patch",
-            plan.resource,
-            plan.name,
-            "--type=json",
-            "--patch",
-            json.dumps(ops, sort_keys=True),
-            "-o",
-            "json",
-        )
-        if result.returncode:
-            raise KubernetesError(f"k8s_patch_failed:{plan.resource}/{plan.name}")
+        raise PauseApplyError(f"{reason}:{plan.resource}/{plan.name}", mutated=False)
 
-    # Independent read-back verification.
+    # Independent read-back verification bound to the planned object identity.
     fresh = _get_object(service, plan.resource, plan.name)
     if fresh is None:
-        raise KubernetesError(f"k8s_readback_missing:{plan.resource}/{plan.name}")
+        raise PauseApplyError(
+            f"k8s_readback_missing:{plan.resource}/{plan.name}", mutated=True
+        )
+    fresh_uid = str((fresh.get("metadata") or {}).get("uid", ""))
+    if fresh_uid != plan.uid:
+        raise PauseApplyError(
+            f"k8s_readback_uid_mismatch:{plan.resource}/{plan.name}", mutated=True
+        )
     observed = _extract_observed(plan, fresh)
     if observed != plan.after:
-        raise KubernetesError(f"k8s_readback_mismatch:{plan.resource}/{plan.name}")
+        raise PauseApplyError(
+            f"k8s_readback_mismatch:{plan.resource}/{plan.name}", mutated=True
+        )
     return {
         "action": "APPLIED",
         "mutated": True,
         "resource": plan.resource,
         "name": plan.name,
-        "uid": str((fresh.get("metadata") or {}).get("uid", "")),
+        "uid": fresh_uid,
         "observed": observed,
         "verified": True,
     }

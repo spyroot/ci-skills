@@ -17,6 +17,7 @@ from lib.python.core.kubernetes.kubernetes import K8SCallback
 from lib.python.core.kubernetes.nvidia_gpu.discovery import collect_health_snapshot
 from lib.python.core.kubernetes.nvidia_gpu.models import GPUOperatorAction
 from lib.python.core.kubernetes.nvidia_gpu.preflight import (
+    PauseApplyError,
     apply_pause_plan,
     build_pause_plan,
     pause_plan_evidence,
@@ -64,7 +65,25 @@ class NvidiaPauseOperator(K8SCallback[GPUOperatorAction]):
 
         :returns: Plan evidence in ``LIVE_PLAN`` mode, or read-back evidence in
             ``APPLY`` mode.
+        :raises PauseApplyError: If the confirmed write or its independent
+            read-back fails; the error carries whether the write landed.
         """
+        if self.state.needs:
+            # Fail closed: blockers recorded by the preceding health read (for
+            # example a ClusterPolicy/GPUCluster conflict) forbid any write.
+            return {
+                "action": self.action.operation,
+                "scope": self.action.scope,
+                "needs": [
+                    {
+                        "need": item.need,
+                        "evidence": item.evidence,
+                        "supply": item.supply,
+                    }
+                    for item in self.state.needs
+                ],
+                "verified": False,
+            }
         plan, needs = build_pause_plan(self.action, self.kubernetes)
         if needs:
             self.state.needs.extend(needs)
@@ -95,7 +114,12 @@ class NvidiaPauseOperator(K8SCallback[GPUOperatorAction]):
                 "verified": True,
             }
         verified_digest = verify_pause_confirmation(plan, self.action.args.confirm_plan)
-        applied = apply_pause_plan(plan, self.kubernetes)
+        try:
+            applied = apply_pause_plan(plan, self.kubernetes)
+        except PauseApplyError as exc:
+            # The write may already have landed; failure reports must carry it.
+            self.state.mutated = exc.mutated
+            raise
         self.state.mutated = bool(applied.get("mutated", False))
         return {
             **applied,

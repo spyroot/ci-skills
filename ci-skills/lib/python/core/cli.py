@@ -275,6 +275,7 @@ def _failure(
     *,
     cleanup_errors: Optional[Sequence[Mapping[str, str]]] = None,
     safe_next_step: Optional[str] = None,
+    extra: Optional[Mapping[str, JSONValue]] = None,
 ) -> int:
     """Write a blocked result while preserving the command's output mode.
 
@@ -285,6 +286,8 @@ def _failure(
     :param cleanup_errors: Additional resource-cleanup failures, when present.
     :param safe_next_step: Recovery step the caller can take, when one is known;
         it names flags and keys, never a supplied value.
+    :param extra: Command-specific fields merged into the blocked envelope, such
+        as schema-required keys the shared envelope does not carry.
     :returns: Exit status 2 after writing the blocked result.
     """
     errors: list[Mapping[str, str]] = [
@@ -302,6 +305,8 @@ def _failure(
         "errors": errors,
         "summary": {"record_count": 0, "error_count": len(errors)},
     }
+    if extra:
+        data.update(extra)
     if cleanup_errors:
         data["cleanup"] = {"status": BLOCKED}
     if safe_next_step:
