@@ -12,3 +12,46 @@ force-exclude = true
 external = ["DOC"]
 # Callback contracts use explicit Optional and Union annotations.
 ignore = ["UP007", "UP045"]
+
+[tool.coverage.run]
+branch = true
+# The 80% target scopes to the shipped skill. tools/ and gates/ are exercised
+# by jobs whose suites run outside the unit step, so they cannot join this
+# gate without cross-job data merging.
+source = ["ci-skills/lib/python", "ci-skills/bin"]
+
+[tool.coverage.report]
+# Operator-set merge target: the required unit step fails below this total.
+fail_under = 80
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.mutmut]
+source_paths = ["ci-skills/lib/python/"]
+pytest_add_cli_args_test_selection = ["tests/python/"]
+# mutmut auto-copies tests/ and pyproject.toml into its sandbox. Everything
+# else tests/python reads from the repository root must be listed here or the
+# baseline suite fails on missing files before any mutant runs.
+also_copy = [
+    "ci-skills/SKILL.md",
+    "ci-skills/tools.json",
+    "ci-skills/benchmarks/",
+    "ci-skills/bin/",
+    "ci-skills/lib/__init__.py",
+    "ci-skills/lib/bash/",
+    "ci-skills/references/",
+    "ci-skills/schemas/",
+    "examples/",
+    "gates/",
+    "inventory/",
+    "schemas/",
+    "tools/",
+    ".github/workflows/",
+    "README.md",
+    "standards-binding.yaml",
+    "target.toml.template",
+]
