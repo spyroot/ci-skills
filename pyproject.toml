@@ -32,7 +32,25 @@ exclude_also = [
 
 [tool.mutmut]
 source_paths = ["ci-skills/lib/python/"]
-pytest_add_cli_args_test_selection = ["tests/python/"]
+# Sandbox profile: mutmut runs the suite inside its untracked mutants/ copy,
+# where git revision provenance cannot verify. The deselected tests require a
+# git-verified checkout, so they are excluded here by this documented profile
+# rule (unit-testing contract); they still run in the required CI jobs.
+pytest_add_cli_args_test_selection = [
+    "tests/python/",
+    # The receipt records the checkout's resolved git revision.
+    "--deselect",
+    "tests/python/test_access_core.py::test_check_access_receipt_records_metadata_and_resolved_sources",
+    # Committed receipts are compared against the checkout's git revision.
+    "--deselect",
+    "tests/python/test_gitlab_actions.py::test_committed_runner_tag_receipts_match_live_contract",
+    # The installer refuses an unverified source revision (untracked copy).
+    "--deselect",
+    "tests/python/test_installed_package.py",
+    # The checkout itself cannot report a verified revision when untracked.
+    "--deselect",
+    "tests/python/test_provenance.py::test_this_checkout_reports_a_verified_revision",
+]
 # mutmut auto-copies tests/ and pyproject.toml into its sandbox. Everything
 # else tests/python reads from the repository root must be listed here or the
 # baseline suite fails on missing files before any mutant runs.
