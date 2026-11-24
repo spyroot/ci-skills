@@ -152,6 +152,7 @@ def _get_first_cluster_policy(service: KubernetesService) -> Optional[JSONObject
 
     :param service: Verified Kubernetes service.
     :returns: First ``ClusterPolicy`` object, or ``None`` when absent.
+    :raises KubernetesError: The list call failed or returned unparseable JSON.
     """
     result = service.command("get", CLUSTER_POLICIES, "-o", "json")
     if result.returncode:
