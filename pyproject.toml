@@ -12,3 +12,20 @@ force-exclude = true
 external = ["DOC"]
 # Callback contracts use explicit Optional and Union annotations.
 ignore = ["UP007", "UP045"]
+
+# Mutation testing, run by the `mutation` job in .github/workflows/mutation.yml with
+# mutmut 2.5.1. mutmut mutates these modules in place and runs `runner` once per
+# mutant; the test modules the runner selects are listed once, in
+# tests/python/mutation-targets.txt. The job also reports coverage of these modules.
+[tool.mutmut]
+paths_to_mutate = [
+    "ci-skills/lib/python/core/gitlab/cluster_agent/authority.py",
+    "ci-skills/lib/python/core/gitlab/cluster_agent/ci_access.py",
+    "ci-skills/lib/python/core/gitlab/cluster_agent/ci_access_probe.py",
+    "ci-skills/lib/python/core/gitlab/cluster_agent/ci_access_proof.py",
+    "tools/qualify_agent_cleanup.py",
+    "tools/skillkit/agent_cleanup.py",
+    "tools/skillkit/installed_copy.py",
+]
+tests_dir = "tests/python/"
+runner = "python -W error -m pytest -x -q @tests/python/mutation-targets.txt"

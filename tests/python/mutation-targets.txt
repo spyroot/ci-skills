@@ -1,0 +1,4 @@
+tests/python/test_agent_cleanup_qualification.py
+tests/python/test_gitlab_agent_authority.py
+tests/python/test_gitlab_agent_ci_access.py
+tests/python/test_gitlab_agent_cli.py
