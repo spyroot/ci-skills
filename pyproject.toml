@@ -50,6 +50,11 @@ pytest_add_cli_args_test_selection = [
     # The checkout itself cannot report a verified revision when untracked.
     "--deselect",
     "tests/python/test_provenance.py::test_this_checkout_reports_a_verified_revision",
+    # Drives installed CLI entrypoints in subprocesses from unrelated working
+    # directories; mutmut's trampolined modules cannot resolve their
+    # configuration from those child-process working directories.
+    "--deselect",
+    "tests/python/test_target_profiles.py",
 ]
 # mutmut auto-copies tests/ and pyproject.toml into its sandbox. Everything
 # else tests/python reads from the repository root must be listed here or the

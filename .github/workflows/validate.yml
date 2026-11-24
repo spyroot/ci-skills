@@ -75,7 +75,7 @@ jobs:
           python -m pip install pydoclint==0.10.1 yamllint==1.38.0
           conda run -n ci-skills python -c "import jsonschema, mutmut, pytest, pytest_cov, yaml"
           apt-get update -qq
-          apt-get install -y -qq bats curl jq shellcheck
+          apt-get install -y -qq bats curl jq make shellcheck
           npm install --global markdownlint-cli2@0.23.2
           mkdir -p "$RUNNER_TEMP/ci-tools"
           GOBIN="$RUNNER_TEMP/ci-tools" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
