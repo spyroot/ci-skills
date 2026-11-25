@@ -1,0 +1,581 @@
+{
+  "captured_at": "2026-11-25T20:37:30.934954+00:00",
+  "cleanup": {
+    "failures": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "execution_host": "spyroots-macbook-pro.local",
+  "filters": {
+    "agent_name": "test",
+    "job_url": null,
+    "namespace": null,
+    "operation": "delete",
+    "project": "hott/test",
+    "project_name": null,
+    "run_id": "pr172-agent3-20261125"
+  },
+  "kind": "gitlab_agent",
+  "mutated": false,
+  "operation": "delete",
+  "plan_digest": "30b77b51135df16c9719239dee053ac37f14a0382db6435a1f006983cf35d658",
+  "records": [
+    {
+      "absence": {
+        "agent_absent": true,
+        "exact_ids_checked": false,
+        "mode": "LOGICAL_SCOPE",
+        "release_absent": true,
+        "run_resources_absent": true,
+        "verified": true
+      },
+      "action": "NO_OP",
+      "after": {
+        "agent_http_status": null,
+        "agent_id": null,
+        "agent_name": "test",
+        "connection_ids": [],
+        "namespace": "test-70e1aeef8b0b5a9f9bf7",
+        "namespace_uid": null,
+        "project_id": 123,
+        "registration_credential_http_status": null,
+        "registration_credential_ids": [],
+        "release": "test-agent-70e1aeef8b0b5a9f",
+        "release_revision": null,
+        "release_storage_uid": null,
+        "resources": []
+      },
+      "before": {
+        "agent_http_status": null,
+        "agent_id": null,
+        "agent_name": "test",
+        "connection_ids": [],
+        "namespace": "test-70e1aeef8b0b5a9f9bf7",
+        "namespace_uid": null,
+        "project_id": 123,
+        "registration_credential_http_status": null,
+        "registration_credential_ids": [],
+        "release": "test-agent-70e1aeef8b0b5a9f",
+        "release_revision": null,
+        "release_storage_uid": null,
+        "resources": []
+      },
+      "callback": "GitLabAgent",
+      "ci_access": {
+        "artifact_path": "agent-access.json",
+        "artifact_sha256": null,
+        "job_url": null,
+        "proof": null,
+        "state": "NOT_VERIFIED"
+      },
+      "connection": {
+        "complete": false,
+        "items": [],
+        "state": "UNKNOWN"
+      },
+      "credentials": {
+        "agent_credential": {
+          "consumers": [],
+          "created": false,
+          "id": null,
+          "name": null,
+          "state": "ABSENT",
+          "storage": null
+        },
+        "gitlab": {
+          "calls": [
+            {
+              "endpoint": "user",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/hott%2Ftest",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/123",
+              "method": "GET"
+            },
+            {
+              "endpoint": "metadata",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/123",
+              "method": "GET"
+            },
+            {
+              "endpoint": "projects/123/cluster_agents",
+              "method": "GET"
+            }
+          ]
+        },
+        "kubernetes": {
+          "created_objects": []
+        }
+      },
+      "installation": {
+        "app_version": null,
+        "chart_sha256": null,
+        "chart_version": null,
+        "image_digest": null,
+        "image_reference": null,
+        "namespace": null,
+        "namespace_uid": null,
+        "observed_image_ids": [],
+        "release": null,
+        "release_revision": null,
+        "release_storage_uid": null
+      },
+      "ownership": null,
+      "prerequisites": {
+        "cluster_access": "VERIFIED",
+        "cluster_uid": "d4647c90-b83f-40fe-aaac-6854bf798513",
+        "egress": "UNPROVEN",
+        "gitlab_version": "18.5.2-ee",
+        "kas_address": "wss://gitlab.dcloud.run/-/kubernetes-agent/",
+        "kas_enabled": true,
+        "kas_version": "18.5.2"
+      },
+      "verified": true
+    }
+  ],
+  "routing": {
+    "gitlab": "gitlab",
+    "harbor": null,
+    "kubernetes": null,
+    "selected_by": "legacy"
+  },
+  "schema_version": "1.1",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "c671cac885f7177114e53e9c39b7f90381f3c0fea7e8b1b005b4f235c870cb64",
+    "file_count": 331,
+    "functional_digest": "006c909ad8cb9929cc0e9d6983bcf37c9a5b5016b485e95e49e9eda1172bff65",
+    "revision": {
+      "source": "installer_record",
+      "value": "b6d05f1a07859bade973ffdbcd5bdfc78afbd604",
+      "verified": true
+    }
+  },
+  "smoke_cleanup": {
+    "after": {
+      "agent": {
+        "absent": true,
+        "http_status": 404,
+        "id": 22,
+        "preserved": false
+      },
+      "registration_credential": {
+        "absent": true,
+        "http_status": 404,
+        "id": 22,
+        "preserved": false
+      },
+      "release_absent": true,
+      "resources": [
+        {
+          "absent": true,
+          "kind": "Namespace",
+          "name": "test-70e1aeef8b0b5a9f9bf7",
+          "namespace": "",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8"
+        },
+        {
+          "absent": true,
+          "kind": "ConfigMap",
+          "name": "test-agent-recovery-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "95f09201-d4d1-4804-9f66-243172a4ef46"
+        },
+        {
+          "absent": true,
+          "kind": "Secret",
+          "name": "test-agent-token-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "9293fce7-a9fa-4974-80ad-e4f231000229"
+        },
+        {
+          "absent": true,
+          "kind": "Secret",
+          "name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc"
+        },
+        {
+          "absent": true,
+          "kind": "ServiceAccount",
+          "name": "test-agent-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "ab288802-ee48-40ea-8a60-60402e84c0bd"
+        },
+        {
+          "absent": true,
+          "kind": "ClusterRoleBinding",
+          "name": "test-70e1aeef8b0b5a9f9bf7:test-agent-70e1aeef8b0b5a9f-cluster-admin",
+          "namespace": "",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "a8bd1a03-8203-498b-9f3d-06c8716aaa72"
+        },
+        {
+          "absent": true,
+          "kind": "Service",
+          "name": "test-agent-70e1aeef8b0b5a9f-service",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "dc658385-bd20-4f56-a4e4-8f0262dcef50"
+        },
+        {
+          "absent": true,
+          "kind": "Deployment",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "6ada2549-cc20-47e6-b6d6-03f138de8942"
+        },
+        {
+          "absent": true,
+          "kind": "Pod",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-b7qmt",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "7970b4c3-80b6-4d19-a107-086adeaf1863"
+        },
+        {
+          "absent": true,
+          "kind": "Pod",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-qj5ln",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "98751a75-b13b-4aa9-b14c-4fa865c6ae37"
+        },
+        {
+          "absent": true,
+          "kind": "ReplicaSet",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "2a9f4284-9f28-4097-893c-52b266eaa6ce"
+        },
+        {
+          "absent": true,
+          "kind": "Lease",
+          "name": "agent-22-lock",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "a8224bd0-1f82-48d6-b464-008b6b2ecf2e"
+        }
+      ],
+      "run_resources_absent": true
+    },
+    "captured_at": "2026-11-25T20:39:18.834001+00:00",
+    "execution_host": "spyroots-macbook-pro.local",
+    "kind": "gitlab_agent_smoke_cleanup",
+    "original_ownership": {
+      "agent_id": 22,
+      "agent_name": "test",
+      "app_version": "v18.5.2",
+      "chart_sha256": "4d2214c73856533f27cefd2de673c7e0abbb7925352c0cb157458287eb591210",
+      "chart_version": "2.20.1",
+      "cluster_uid": "d4647c90-b83f-40fe-aaac-6854bf798513",
+      "created": {
+        "agent": true,
+        "credential_resource": true,
+        "namespace": true,
+        "ownership_record": true,
+        "registration_credential": true,
+        "release": true
+      },
+      "credential_resource_name": "test-agent-token-70e1aeef8b0b5a9f",
+      "credential_resource_uid": "9293fce7-a9fa-4974-80ad-e4f231000229",
+      "image_digest": "sha256:748ca8c9e9f9f8ea4e777ce42c19a462a3cc3813795338c43f8e19d1f6bb87c5",
+      "kind": "gitlab_agent_ownership",
+      "namespace": "test-70e1aeef8b0b5a9f9bf7",
+      "namespace_uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8",
+      "origin": "https://gitlab.dcloud.run",
+      "ownership_record_name": "test-agent-recovery-70e1aeef8b0b5a9f",
+      "ownership_record_uid": "95f09201-d4d1-4804-9f66-243172a4ef46",
+      "preexisting_registration_credential_ids": [],
+      "project_id": 123,
+      "project_path": "hott/test",
+      "registration_credential_id": 22,
+      "registration_credential_name": "test-agent-token-70e1aeef8b0b5a9f",
+      "release": "test-agent-70e1aeef8b0b5a9f",
+      "release_revision": 1,
+      "release_storage_name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
+      "release_storage_uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc",
+      "resources": [
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "Namespace",
+          "name": "test-70e1aeef8b0b5a9f9bf7",
+          "namespace": "",
+          "state": "PRESENT",
+          "uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8"
+        },
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "ConfigMap",
+          "name": "test-agent-recovery-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "95f09201-d4d1-4804-9f66-243172a4ef46"
+        },
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "Secret",
+          "name": "test-agent-token-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "9293fce7-a9fa-4974-80ad-e4f231000229"
+        },
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "Secret",
+          "name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc"
+        },
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "ServiceAccount",
+          "name": "test-agent-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "ab288802-ee48-40ea-8a60-60402e84c0bd"
+        },
+        {
+          "api_version": "rbac.authorization.k8s.io/v1",
+          "created": true,
+          "kind": "ClusterRoleBinding",
+          "name": "test-70e1aeef8b0b5a9f9bf7:test-agent-70e1aeef8b0b5a9f-cluster-admin",
+          "namespace": "",
+          "state": "PRESENT",
+          "uid": "a8bd1a03-8203-498b-9f3d-06c8716aaa72"
+        },
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "Service",
+          "name": "test-agent-70e1aeef8b0b5a9f-service",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "dc658385-bd20-4f56-a4e4-8f0262dcef50"
+        },
+        {
+          "api_version": "apps/v1",
+          "created": true,
+          "kind": "Deployment",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "6ada2549-cc20-47e6-b6d6-03f138de8942"
+        },
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "Pod",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-b7qmt",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "7970b4c3-80b6-4d19-a107-086adeaf1863"
+        },
+        {
+          "api_version": "v1",
+          "created": true,
+          "kind": "Pod",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-qj5ln",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "98751a75-b13b-4aa9-b14c-4fa865c6ae37"
+        },
+        {
+          "api_version": "apps/v1",
+          "created": true,
+          "kind": "ReplicaSet",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "2a9f4284-9f28-4097-893c-52b266eaa6ce"
+        },
+        {
+          "api_version": "coordination.k8s.io/v1",
+          "created": true,
+          "kind": "Lease",
+          "name": "agent-22-lock",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "state": "PRESENT",
+          "uid": "a8224bd0-1f82-48d6-b464-008b6b2ecf2e"
+        }
+      ],
+      "run_id": "pr172-agent3-20261125",
+      "schema_version": "1.0",
+      "state": "CONNECTED"
+    },
+    "repeat": {
+      "agent": {
+        "absent": true,
+        "http_status": 404,
+        "id": 22,
+        "preserved": false
+      },
+      "registration_credential": {
+        "absent": true,
+        "http_status": 404,
+        "id": 22,
+        "preserved": false
+      },
+      "release_absent": true,
+      "resources": [
+        {
+          "absent": true,
+          "kind": "Namespace",
+          "name": "test-70e1aeef8b0b5a9f9bf7",
+          "namespace": "",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8"
+        },
+        {
+          "absent": true,
+          "kind": "ConfigMap",
+          "name": "test-agent-recovery-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "95f09201-d4d1-4804-9f66-243172a4ef46"
+        },
+        {
+          "absent": true,
+          "kind": "Secret",
+          "name": "test-agent-token-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "9293fce7-a9fa-4974-80ad-e4f231000229"
+        },
+        {
+          "absent": true,
+          "kind": "Secret",
+          "name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc"
+        },
+        {
+          "absent": true,
+          "kind": "ServiceAccount",
+          "name": "test-agent-70e1aeef8b0b5a9f",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "ab288802-ee48-40ea-8a60-60402e84c0bd"
+        },
+        {
+          "absent": true,
+          "kind": "ClusterRoleBinding",
+          "name": "test-70e1aeef8b0b5a9f9bf7:test-agent-70e1aeef8b0b5a9f-cluster-admin",
+          "namespace": "",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "a8bd1a03-8203-498b-9f3d-06c8716aaa72"
+        },
+        {
+          "absent": true,
+          "kind": "Service",
+          "name": "test-agent-70e1aeef8b0b5a9f-service",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "dc658385-bd20-4f56-a4e4-8f0262dcef50"
+        },
+        {
+          "absent": true,
+          "kind": "Deployment",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "6ada2549-cc20-47e6-b6d6-03f138de8942"
+        },
+        {
+          "absent": true,
+          "kind": "Pod",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-b7qmt",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "7970b4c3-80b6-4d19-a107-086adeaf1863"
+        },
+        {
+          "absent": true,
+          "kind": "Pod",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-qj5ln",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "98751a75-b13b-4aa9-b14c-4fa865c6ae37"
+        },
+        {
+          "absent": true,
+          "kind": "ReplicaSet",
+          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "2a9f4284-9f28-4097-893c-52b266eaa6ce"
+        },
+        {
+          "absent": true,
+          "kind": "Lease",
+          "name": "agent-22-lock",
+          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "observed_uid": null,
+          "preserved": false,
+          "uid": "a8224bd0-1f82-48d6-b464-008b6b2ecf2e"
+        }
+      ],
+      "run_resources_absent": true
+    },
+    "run_id": "pr172-agent3-20261125",
+    "skill_digest": "c671cac885f7177114e53e9c39b7f90381f3c0fea7e8b1b005b4f235c870cb64",
+    "status": "PASS_INDEPENDENT_ABSENCE_AND_REPEAT",
+    "tested_revision": "b6d05f1a07859bade973ffdbcd5bdfc78afbd604"
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "https://gitlab.dcloud.run",
+  "target_source": "user",
+  "tested_revision": "b6d05f1a07859bade973ffdbcd5bdfc78afbd604"
+}
