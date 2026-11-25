@@ -29,7 +29,7 @@ The phase labeled both workflows absent when this plan was opened; that lag is n
 Current source contains
 `ci-skills/bin/gitlab_mirror.py`, `core/gitlab/mirror/cli.py` and `workflow.py`, shared Git ref comparison in
 `core/git/mirroring.py`, GitHub repository access and installed input/result schemas. The candidate mirror receipts
-identify tested revision `bcf7d598`; their existence is recorded evidence, not execution on a new candidate.
+identify tested revision `ec964431`; the original qualification identified `bcf7d598`. Their existence is recorded evidence, not execution on a new candidate.
 The Agent workflow was delivered after this plan's baseline: `ci-skills/bin/gitlab_agent.py`,
 `core/gitlab/cluster_agent/` and `core/kubernetes/gitlab_agent.py` are present in main, with the candidate
 Agent receipts (connect APPLIED/NO_OP, delete APPLIED/NO_OP, verify) accepted on main `47c55eb`.
@@ -151,7 +151,7 @@ These records retain their captured revision. The Agent slice was delivered late
 [PR #154](https://github.com/spyroot/ci-skills/pull/154) (merged `c2b4168`): registration, installation, connection
 and selected-project access are proven by the accepted candidate Agent receipts
 (`tests/acceptance/candidate/agent-connect-applied.json`, `agent-connect-no-op.json`, `agent-delete-applied.json`,
-`agent-delete-no-op.json`, `agent-verify.json`; tested revision `fd2d49a`, accepted on main `47c55eb`). Follow-up
+`agent-delete-no-op.json`, `agent-verify.json`; tested revision `ec964431`, accepted on main `47c55eb`). Follow-up
 [#130](https://github.com/spyroot/ci-skills/issues/130) is closed, and the previously retained owned fixture
 repository `1442655376` is verified absent (authenticated 404 by ID).
 The

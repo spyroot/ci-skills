@@ -16,8 +16,8 @@ contains identity/scope/interface code; the next work separates its live proof f
 - [x] PR #127 merged as `ff1fdc8`; installed `bcf7d598` ran one GitHub persistent consumer job and one GitLab
   shell/Podman job, with same-ID create NO_OP and exact-owned cleanup. See [completed evidence][baseline].
 - [x] Named profiles and required mirror evidence/portability foundation merged in PR #129.
-- [x] Reconcile runner follow-ups [#132](https://github.com/spyroot/ci-skills/issues/132) (closed 2026-11-22);
-  finish uncovered PR-001 explicit/default selection, borrowed namespace and protection variants; do not
+- [x] Reconcile runner follow-ups [#132](https://github.com/spyroot/ci-skills/issues/132) (closed 2026-11-22).
+- [ ] Finish uncovered PR-001 explicit/default selection, borrowed namespace and protection variants; do not
   repeat completed cases.
 - [ ] Deliver the approved optional `--project-name` override and propagate its consumer-specific names.
 - [ ] Deliver PR-002 plain Debian/Ubuntu Conda provisioning and a consuming toolbox job.

@@ -130,9 +130,10 @@ Provider references: [GitLab mirrors](https://docs.gitlab.com/api/remote_mirrors
 [GitLab Agent installation](https://docs.gitlab.com/user/clusters/agent/install/) and
 [project CI access](https://docs.gitlab.com/user/clusters/agent/ci_cd_workflow/).
 
-### Proposed D1/D3 resolution for PR-001 — pending operator approval
+### Proposed D1/D3 resolution for PR-001 — historical proposal, delivered
 
-This section is a proposal, not an approved replacement for the open decisions.
+This section is the historical proposal that preceded the delivered mirror workflow; the interface it
+proposed is implemented and live-qualified.
 
 Use GitLab's native HTTPS password-authenticated push mirror. Bind the selected GitHub credential through the existing
 credential provider and private request-body transport. GitLab retains that credential for future pushes; never expose
