@@ -19,6 +19,11 @@ from .callbacks import (
     VerifyGitLabRunnerPreserved,
     retain_manager_resources,
 )
+from .helm_deploy import (
+    DeployKubernetesManagerChart,
+    SelectManagerChart,
+    UninstallKubernetesManagerChart,
+)
 from .token import (
     BoundRunnerToken,
     DeferredRunnerToken,
@@ -40,6 +45,7 @@ __all__ = (
     "BoundRunnerToken",
     "DeferredRunnerToken",
     "DeleteManagerRunner",
+    "DeployKubernetesManagerChart",
     "DeployManagerRunner",
     "GitLabManagerAuth",
     "GitLabRunnerManagerAction",
@@ -52,8 +58,10 @@ __all__ = (
     "OpenManagerRunScope",
     "PullManagerImage",
     "RunnerTokenSelection",
+    "SelectManagerChart",
     "SelectManagerPlanScope",
     "SelectResolvedManagerScope",
+    "UninstallKubernetesManagerChart",
     "VerifyGitLabRunnerOnline",
     "VerifyGitLabRunnerPreserved",
     "read_runner_token",

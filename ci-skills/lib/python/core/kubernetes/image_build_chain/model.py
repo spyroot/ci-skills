@@ -46,7 +46,9 @@ from lib.python.core.runner_identity import (
     validate_project_name,
 )
 from lib.python.core.runner_options import (
+    EXECUTOR_KUBERNETES,
     RUNNER_NAME_LIMIT,
+    parse_executor,
     parse_protected,
     runner_tags,
 )
@@ -63,6 +65,7 @@ from lib.python.core.toolbox import ToolboxSpec
 from lib.python.core.toolbox_actions import WorkflowAction
 
 CHAIN_OPERATION: Final = "chain"
+CHAIN_EXECUTOR_KUBERNETES_UNAVAILABLE: Final = "chain_executor_kubernetes_unavailable"
 RUNNER_TOKEN_NAME: Final = "runner-token"
 REGISTRY_COMPONENT: Final = re.compile(r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*")
 REGISTRY_TAG: Final = re.compile(r"[\w][\w.-]{0,127}", re.ASCII)
@@ -469,12 +472,18 @@ class ImageBuildChainAction(SkillAction):
 
         :param mode: Validated offline, live-plan, or confirmed-apply mode.
         :returns: None after retaining component actions and one shared state.
-        :raises ValueError: Chain or toolbox inputs are invalid.
+        :raises ValueError: Chain or toolbox inputs are invalid, or the
+            kubernetes executor was confirmed for a chain apply it cannot
+            deliver end-to-end yet.
         :raises TargetError: Required target surfaces cannot be resolved.
         :raises OSError: A selected target, credential, or toolbox file cannot be read.
         """  # noqa: DOC503 - existing component preparation propagates errors.
         self.mode = mode
         self._validate_chain_inputs()
+        if mode == ProbeMode.APPLY and (
+            parse_executor(getattr(self.args, "executor", None)) == EXECUTOR_KUBERNETES
+        ):
+            raise ValueError(CHAIN_EXECUTOR_KUBERNETES_UNAVAILABLE)
         validate_project_name(getattr(self.args, "project_name", None))
         self.explicit_description = self.args.runner_description
         self.explicit_tags = tuple(self.args.runner_label)

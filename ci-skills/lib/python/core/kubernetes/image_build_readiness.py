@@ -53,7 +53,11 @@ from lib.python.core.kubernetes.scc_access import EnsureSCCAccess
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit_result, report
 from lib.python.core.runner_identity import resolve_repository, validate_project_name
-from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
+from lib.python.core.runner_options import (
+    EXECUTOR_VALUES,
+    PROTECTION_VALUES,
+    SingleValue,
+)
 from lib.python.core.runtime import TRACE_TEXT_LIMIT, redact_tree, sanitize
 from lib.python.core.target import GitLabSelection, Target, TargetError
 from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED
@@ -103,6 +107,17 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
         choices=tuple(PROTECTION_VALUES),
         action=SingleValue,
         help="chain: select protected or unprotected runner refs",
+    )
+    result.add_argument(
+        "--executor",
+        choices=EXECUTOR_VALUES,
+        action=SingleValue,
+        help="chain: runner job executor forwarded to the manager deploy step",
+    )
+    result.add_argument(
+        "--chart-version",
+        metavar="VERSION",
+        help="chain: exact gitlab-runner chart version for the kubernetes executor",
     )
 
 

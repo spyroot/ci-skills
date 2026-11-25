@@ -38,12 +38,32 @@ TAG_DUPLICATE: Final = "duplicate_tag"
 PROTECTION_READBACK_MISMATCH: Final = "runner_protection_readback_mismatch"
 SINGULAR_CONFLICT: Final = "conflicting values for "
 
+EXECUTOR_SHELL: Final = "shell"
+EXECUTOR_KUBERNETES: Final = "kubernetes"
+EXECUTOR_VALUES: Final = (EXECUTOR_SHELL, EXECUTOR_KUBERNETES)
+EXECUTOR_INVALID: Final = "runner_executor_must_be_shell_or_kubernetes"
+
 
 class RunnerProtection(StrEnum):
     """Native GitLab runner access levels; unrelated to untagged jobs."""
 
     PROTECTED = "ref_protected"
     UNPROTECTED = "not_protected"
+
+
+def parse_executor(value: str | None) -> str:
+    """Resolve the caller-selected runner job executor.
+
+    :param value: Executor name; absence selects the shell executor.
+    :returns: Canonical executor name.
+    :raises ValueError: A present executor is not one supported name.
+    """
+    if value is None:
+        return EXECUTOR_SHELL
+    selected = value.strip().lower()
+    if selected not in EXECUTOR_VALUES:
+        raise ValueError(EXECUTOR_INVALID)
+    return selected
 
 
 PROTECTION_VALUES: Final = MappingProxyType(

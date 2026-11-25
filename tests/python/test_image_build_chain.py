@@ -700,6 +700,51 @@ def test_chain_plan_requires_only_runner_delivery_inputs(
     assert "probe" not in plan
 
 
+@pytest.mark.parametrize("apply", (False, True), ids=("live-plan", "apply"))
+def test_chain_rejects_kubernetes_executor_apply(
+    monkeypatch: pytest.MonkeyPatch, apply: bool
+) -> None:
+    """Keep chain kubernetes planning informative but refuse confirmed apply.
+
+    The chain composes the shell manager path; the kubernetes executor is
+    forwarded for planning only until the chain workflow delivers it
+    end-to-end.
+
+    :param monkeypatch: Redirect only target and credential resolution.
+    :param apply: Whether the caller confirmed the chain for mutation.
+    :returns: None after checking the mode-gated executor rejection.
+    """
+    _mock_chain_targets(monkeypatch)
+    mode_flags = (
+        ["--apply", "--confirm-plan", "sha256:unit"] if apply else ["--live-plan"]
+    )
+    args = READINESS.build_parser().parse_args(
+        [
+            "chain",
+            "--binding",
+            "/unit/target.toml",
+            "--project",
+            "team/build",
+            "--project-name",
+            DEFAULT_CONSUMER,
+            "--namespace",
+            CALLER_NAMESPACE,
+            "--node",
+            NODE,
+            "--executor",
+            "kubernetes",
+            *mode_flags,
+            "--json",
+        ]
+    )
+    action = CHAIN.ImageBuildChainAction(args)
+    if apply:
+        with pytest.raises(ValueError, match="chain_executor_kubernetes_unavailable"):
+            action.prepare(PODMAN.ProbeMode.APPLY)
+    else:
+        action.prepare(PODMAN.ProbeMode.LIVE_PLAN)
+
+
 @pytest.mark.parametrize(
     "confirmation", ("", "sha256:stale"), ids=("absent", "mismatched")
 )

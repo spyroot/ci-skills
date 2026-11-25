@@ -845,6 +845,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--description": "chain: runner description; omission uses --project-name, then the known consumer repository; otherwise required",
             "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label; omission uses --project-name, then the selected consumer repository",
             "--protected": "chain: true for ref_protected, false for not_protected; omission preserves provider default",
+            "--executor": "chain: runner job executor forwarded to the manager deploy step; "
+            "shell (default) keeps the Podman manager; kubernetes is forwarded "
+            "for planning only and is not available end-to-end through chain yet",
+            "--chart-version": "chain: kubernetes executor only; exact gitlab-runner "
+            "chart version forwarded to the manager deploy step; omission lets "
+            "the manager select the highest matching chart",
         },
         "repeatable_options": ("--tag",),
         "option_aliases": {
@@ -1607,9 +1613,15 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--tag": "GitLab runner tag given to gitlab_runner.py create --tag; "
             "repeat for multiple tags; --label is accepted as an alias; omission uses --project-name, then the selected consumer repository",
             "--image": "digest-pinned toolbox image containing gitlab-runner and "
-            "podman",
+            "podman; shell executor only",
+            "--executor": "runner job executor: shell (default) runs nested Podman "
+            "jobs on the exact worker; kubernetes schedules each job as a Pod "
+            "through the official gitlab-runner chart and omits Podman prerequisites",
+            "--chart-version": "kubernetes executor: exact gitlab-runner chart "
+            "version; omission selects the highest chart whose appVersion matches "
+            "the selected GitLab MAJOR.MINOR version",
             "--token-file": "one-time token file written by gitlab_runner.py create",
-            "--namespace": "existing caller namespace to preserve; omission reuses its live scope or plans an owned namespace from --project-name or the selected consumer repository",
+            "--namespace": "existing caller namespace to preserve; omission reuses its live scope or plans an owned namespace from --project-name or the selected consumer repository; kubernetes-executor delete requires the generated owned namespace: managers deployed into a caller-selected (borrowed) namespace are not discoverable by delete and must be removed with helm/kubectl directly",
             "--node": "exact worker already verified by image_build_readiness.py",
             "--cpu-request": "runner CPU request; repeat the proven probe value",
             "--cpu-limit": "runner CPU limit; repeat the proven probe value",
@@ -1650,7 +1662,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "result_schema": "schemas/results/toolbox-workflow.schema.json",
                 "requires_authorities": [GITLAB_AUTHORITY, KUBERNETES_AUTHORITY],
                 "side_effects": "Confirmed apply removes only run-owned manager "
-                "resources and preserves the GitLab runner record.",
+                "resources and preserves the GitLab runner record. "
+                "Kubernetes-executor delete requires the generated owned "
+                "namespace: managers deployed into a caller-selected (borrowed) "
+                "namespace are not discoverable by delete and must be removed "
+                "with helm/kubectl directly.",
                 "read_back": "Owned Deployment and Secrets absent, exact runner "
                 "record preserved with its current cached status, run-owned SCC "
                 "RoleBinding absent, and owned generated namespace absent.",
