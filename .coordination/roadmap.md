@@ -7,5 +7,5 @@
 | CI11 | Agent tools and workflows | Partial; partially verified; planned | Remaining tool delivery and live receipts |
 | CI12 | Node onboarding | Implemented; partially verified; planned | CSR/join proof is still mocked |
 | CI13 | Image build readiness | Partial; partially verified; planned | Consumer job proof remains external |
-| CI14 | GitLab connections | Not implemented; unverified; planned | Mirror and GitLab Agent workflows |
-| CI15 | Runner scopes and toolbox | Partial foundation; unverified; planned | Owned scopes, Conda toolbox, GitHub fleet, GitLab Kubernetes executor, GitLab.com proof <!-- markdownlint-disable-line MD013 --> |
+| CI14 | GitLab connections | Implemented; verified; delivered | None — receipts accepted on main; #130 closed |
+| CI15 | Runner scopes and toolbox | Partial foundation; partially verified; planned | #131, current-candidate Conda qualification, GitHub fleet, GitLab Kubernetes executor, GitLab.com proof <!-- markdownlint-disable-line MD013 --> |
