@@ -8,8 +8,8 @@ undelivered Agent.
 ## Purpose / Big Picture
 
 A user can synchronize a selected GitLab repository to GitHub, or connect a selected Kubernetes cluster to a
-GitLab project through the GitLab Agent. These are separate workflows. The mirror command already exists;
-the remaining implementation is the Agent workflow after its original design decisions are resolved.
+GitLab project through the GitLab Agent. These are separate workflows. Both are delivered in main and
+live-qualified; this plan is retained as the completed record.
 
 ## Progress
 
@@ -18,18 +18,22 @@ the remaining implementation is the Agent workflow after its original design dec
 - [x] PR #129 delivered named GitLab profiles, portability and explicit mirror evidence requirements.
 - [x] DEC-CI14-02: retain the approved official pinned Helm chart, existing provider services, owned-token handling
   and selected-project access requirement.
-- [ ] Resolve the exact chart pin and remaining Agent interface/ownership details within those settled choices.
-- [ ] Reconcile mirror follow-ups [#130](https://github.com/spyroot/ci-skills/issues/130) before new capability work.
-- [ ] Deliver PR-002/W-002 Agent registration, installation, connection and selected-project access read-back.
-- [ ] Complete the original Agent gates and qualify the affected candidate; retain mirror regression coverage.
+- [x] Resolve the exact chart pin and remaining Agent interface/ownership details within those settled choices.
+- [x] Reconcile mirror follow-ups [#130](https://github.com/spyroot/ci-skills/issues/130) (closed 2026-11-22).
+- [x] Deliver PR-002/W-002 Agent registration, installation, connection and selected-project access read-back.
+- [x] Complete the original Agent gates and qualify the affected candidate; retain mirror regression coverage.
 
 ## Surprises & Discoveries
 
-The phase still labels both workflows absent and mirror receipt enforcement unregistered. Current source contains
+The phase labeled both workflows absent when this plan was opened; that lag is now reconciled.
+Current source contains
 `ci-skills/bin/gitlab_mirror.py`, `core/gitlab/mirror/cli.py` and `workflow.py`, shared Git ref comparison in
-`core/git/mirroring.py`, GitHub repository access and installed input/result schemas. The candidate mirror receipts
-identify tested revision `bcf7d598`; their existence is recorded evidence, not execution on a new candidate.
-No `gitlab_agent.py`, `core/gitlab/cluster_agent/` or `core/kubernetes/gitlab_agent.py` implementation exists.
+`core/git/mirroring.py`, GitHub repository access and installed input/result schemas. The candidate mirror
+receipts identify tested revision `ec964431`; the original qualification identified `bcf7d598`. Their existence is
+recorded evidence, not execution on a new candidate.
+The Agent workflow was delivered after this plan's baseline: `ci-skills/bin/gitlab_agent.py`,
+`core/gitlab/cluster_agent/` and `core/kubernetes/gitlab_agent.py` are present in main, with the candidate
+Agent receipts (connect APPLIED/NO_OP, delete APPLIED/NO_OP, verify) accepted on main `47c55eb`.
 
 ## Decision Log
 
@@ -47,9 +51,8 @@ the selected installer or create a new provider.
 ## Outcomes & Retrospective
 
 PR-001's mirror capability is merged and qualified; [the recorded evidence][baseline] retains its tested revision,
-required CI and cleanup evidence. CI14 remains active because PR-002's Agent capability and project-through-Agent
-proof are absent. Next: reconcile #130, then prepare the exact Agent chart/interface delta without reimplementing
-the mirror command or repeating its completed smoke.
+required CI and cleanup evidence. CI14 is complete: PR-002's Agent capability was delivered and its project-through-Agent
+proof accepted. The mirror regression coverage is retained by the unchanged mirror path and its accepted receipts.
 
 ## Context and Orientation
 
@@ -123,8 +126,8 @@ including historical or proposed routes, retain the status recorded by their own
 The existing mirror retains independent ref verification, confirmed optional creation, redacted blockers and
 APPLIED/NO_OP behavior. Agent acceptance must show registration, actual cluster installation, connected GitLab
 state and the selected project's access, all for the chosen target. Schema validity, registration acceptance or
-Pod readiness alone does not establish that outcome. Use CI14's original requirement/gate map and preserve open
-D2 choices until resolved. No current Agent command invocation is advertised because it does not exist yet.
+Pod readiness alone does not establish that outcome; the accepted Agent receipts prove the exercised scenarios.
+Use CI14's original requirement/gate map. The installed Agent command is advertised through the existing catalog.
 
 ## Idempotence and Recovery
 
@@ -145,7 +148,14 @@ were created, verified, reused without mutation and removed by exact IDs. Select
 [APPLIED][mirror-applied] and [NO_OP][mirror-noop]; the [policy][policy] registers both operation requirements.
 Foundation [PR #129](https://github.com/spyroot/ci-skills/pull/129) delivered named profiles and required coverage.
 These completed subtasks do not establish Agent registration, connection or project-through-Agent access.
-These records retain their captured revision. The missing Agent slice has no live receipt. The
+These records retain their captured revision. The Agent slice was delivered later through the #148 series and
+[PR #154](https://github.com/spyroot/ci-skills/pull/154) (merged `c2b4168`): registration, installation, connection
+and selected-project access are proven by the accepted candidate Agent receipts
+(`tests/acceptance/candidate/agent-connect-applied.json`, `agent-connect-no-op.json`, `agent-delete-applied.json`,
+`agent-delete-no-op.json`, `agent-verify.json`; tested revision `ec964431`, accepted on main `47c55eb`). Follow-up
+[#130](https://github.com/spyroot/ci-skills/issues/130) is closed, and the previously retained owned fixture
+repository `1442655376` is verified absent (authenticated 404 by ID).
+The
 [plan map](../../plans/index.md) links both outcomes to CI14 and the existing repository checks.
 
 ## Interfaces and Dependencies

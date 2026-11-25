@@ -46,7 +46,7 @@ repeated delete of an absent runner scope returning NO_OP.
 [ci02]: ../phases/CI02-CLI.md#interface-gate
 [ci08]: ../phases/CI08-ROUTING.md#gates
 [ci11-inventory]: ../phases/CI11-TOOLS.md#source-rows-openshift-and-kubernetes-inventory-of-2026-10-06
-[ci14-plan]: active/ci14-gitlab-connections.md#surprises--discoveries
+[ci14-plan]: completed/ci14-gitlab-connections.md#surprises--discoveries
 [ci14-phase]: ../phases/CI14-GITLAB-CONNECTIONS.md#gates
 [ci15-plan]: active/ci15-runner-workflows.md#surprises--discoveries
 [exec-gitlab-targets]: active/gitlab-private-public-targets.md#decision-log

@@ -2,7 +2,7 @@
 
 Use `gitlab_agent.py connect|verify|delete` to register and install an owned Agent, prove selected-project CI access,
 or remove that owned run. The [D2/D3 contract](../../docs/phases/CI14-GITLAB-CONNECTIONS.md#contracts-and-open-decisions)
-defines ownership and proof; the [active plan](../../docs/exec-plans/active/ci14-gitlab-connections.md) tracks qualification.
+defines ownership and proof; the [active plan](../../docs/exec-plans/completed/ci14-gitlab-connections.md) tracks qualification.
 Caller naming connects the actual consumer project to its selected cluster; it does not connect this skill's repository.
 
 Words used here: "caller" is the program that runs this skill's commands; "project owner" is the team that owns the
