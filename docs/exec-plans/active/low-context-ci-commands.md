@@ -15,6 +15,8 @@ A successful machine read should spend its output budget on the requested data.
 ## Progress
 
 - [x] BASE. Mapped the reported calls to source at `fd757b83bbe3e664216b145446f37615f562c536` and existing issues.
+- [x] REPLAY. Recorded a paired consumer-guide trial on installed revision `12ddee80`.
+  See [replay results](#paired-consumer-replay).
 - [ ] H1. Reproduce the installed help failure, establish the discovery contract and deliver offline help.
 - [ ] H2. Deliver quiet machine reads, actionable errors and the target migration procedure.
 - [ ] H3. Deliver packaged commands and native client lookup in a non-interactive shell.
@@ -64,8 +66,8 @@ The [context-load study][study] measured a separate workload and found that wron
 
 ## Outcomes & Retrospective
 
-The baseline audit and delivery plan are available. Runtime fixes, installed-candidate measurements, remote checks
-and live consumer receipts are pending. Update this section with the candidate revision and each observed outcome.
+The [paired consumer replay](#paired-consumer-replay) measures the effect of revising the guide on the installed
+baseline. The candidate still needs the runtime changes, the same consumer replay, remote checks and live receipts.
 
 ## Context and Orientation
 
@@ -165,7 +167,9 @@ source head. Use the newest matching pipeline when selection is needed. Bound ad
 incomplete when the page or request limit prevents verification.
 `ci-mr diff IID --path '*.sql'` matches either side of a rename before rendering. Share the existing target,
 authentication, pagination and response limits. Summarize omissions and upstream truncation even when the matching
-patch cannot be retrieved. Keep [#134][i134]'s broader incremental evidence work separately identifiable.
+patch cannot be retrieved. Identify the base and source SHA of the diff returned. Optional `--sha` pins the source
+seen in the MR list. If the requested revision is unavailable, return `head_changed` and omit the replacement patch.
+Keep [#134][i134]'s broader incremental evidence work separately identifiable.
 
 ### H6. Explain pending jobs and retrieve failed-job evidence
 
@@ -195,11 +199,89 @@ target branch afterward. Report a mismatch, deferred merge or ambiguous result e
 
 ### H8. Shorten the common path and measure it end to end
 
-In `ci-skills/SKILL.md` lead with the four installed names, one target-selection paragraph, exit/status semantics and
-the focused navigator. Move detailed workflows into existing `ci-skills/references/` nodes and retain reachability.
-Update each command's examples as soon as it ships. [Issue 150][i150] proposes roughly 120 lines for the final
-guide. Measure bytes, calls and wrong guesses as well as line count. Compare the six-read batch, five-MR listing,
-filtered SQL diff, pending watch and failed-job trace from the same consumer setup before and after.
+Make the first screen of `ci-skills/SKILL.md` answer “what can I do?” with one task and one installed invocation per
+row. Put common target selection and exit conventions below the index. Link to verb help and one focused reference
+for optional detail. Use the release examples below only when the corresponding launcher and verb ship. Keep older
+installations on their working commands. [Issue 150][i150] proposes roughly 120 lines for the final guide. Judge
+it by whether a new consumer can obtain the requested evidence and how much context it uses along the way.
+
+### Consumer tasks and the first command to show
+
+These are tasks the consumer agent brought back from real repositories. Put the task and one runnable example
+together at the top of `SKILL.md` as its launcher ships. Substitute the caller's project and object IDs.
+Keep the shared resolver, interpreter setup and reference links in one place. The case names also identify the replays.
+
+**List open MRs (H5).** The list omitted detailed merge status and head pipeline. Four or five MRs cost one list call
+plus one sequential detail call per MR, taking 15–20 seconds. Show one row per IID with its verified pipeline SHA.
+
+    ci-mr list --project "$PROJECT" --state opened --with-pipeline --json
+
+**Review a SQL patch (H5).** On a large MR, unrelated patches filled the tool output before the SQL hunk arrived.
+Filter before rendering. Return the diff's base and source SHAs and its completeness. A caller may bind the source
+SHA seen in the MR list. If that revision is unavailable, return `head_changed` with zero replacement hunks.
+
+    ci-mr diff "$IID" --project "$PROJECT" --path '*.sql' --sha "$HEAD_SHA" --json
+
+**Open an MR (H3/H7).** The agent tried `ci-api post`, got exit 64 and wrote an HTTP client. Manual token-file
+parsing failed twice on file location or format. Lead with the existing create workflow under its installed name.
+
+    ci-mr create --project "$PROJECT" --source-branch "$SRC" --target-branch "$DST" --title "$TITLE" --dry-run --json
+
+**Merge a reviewed head (H7).** The consumer also fell back to an HTTP client to merge. A short SHA failed in
+one recorded attempt. Show the offline plan with the full source SHA and intended branch. It returns the digest
+for a separately confirmed apply. The generic API reader stays read-only.
+
+    ci-mr merge "$IID" --project "$PROJECT" --sha "$HEAD_SHA" --target-branch "$DST" --dry-run --json
+
+**Watch a queued pipeline (H6).** The agent waited 900 seconds while the pipeline stayed pending. It needed the
+first per-job queue observation while still watching, followed by status or runner changes. Supply the caller's limit.
+
+    ci-pipeline watch --project "$PROJECT" --pipeline-id "$PIPELINE_ID" --timeout "$SECONDS_LIMIT" --json --progress
+
+**Find a failed job and read its trace (H6).** A watcher exited 1 without identifying what failed. The agent then
+looked up failed jobs and fetched logs separately. Lead with the failed-job summary and a small requested excerpt.
+When the job ID is already known, go directly to its log.
+
+    ci-pipeline failures --project "$PROJECT" --pipeline-id "$PIPELINE_ID" --trace-lines 20 --json
+    ci-job logs --project "$PROJECT" --job-id "$JOB_ID" --trace-lines 20
+
+**Read plain text from an API (H6).** A trace returned exit 65 on the default JSON path. The consumer switched helpers.
+The installed GET supports explicit text and line selection for traces and raw repository blobs. Keep that example
+runnable on older installations. H6 adds the shorter `--raw` spelling.
+
+    ci-api get --provider gitlab --endpoint "projects/$PROJECT/jobs/$JOB_ID/trace" --output text --lines 1:20
+    ci-api get --provider gitlab --endpoint "$RAW_BLOB_ENDPOINT" --output text --lines 1:20
+
+**Pipe clean JSON and preserve the default target (H2).** A six-GET batch spent about 80% of its output on success
+and deprecation logs. Lead with ordinary JSON, which H2 makes quiet by default. After migrating the selected legacy
+table, the same check should resolve the same authority without repeating `--gitlab private` on every invocation.
+H2 specifies `[gitlab_routing].default = "gitlab_private"` and the explicit `--quiet` and log-level overrides.
+
+    ci-api get --provider gitlab --endpoint "$ENDPOINT" --json
+    ci-api check --provider gitlab --json
+
+**Discover one operation from a consumer shell (H1/H3).** `ci-api -h --json` printed human help. MR help imported
+Kubernetes and crashed. System Python 3.9, the sibling bootstrap import and missing PATH entries forced interpreter
+prefixes or inline scripts that broke approval-prefix matching. Lead with the installed command and verb. Use compact
+JSON help for discovery and one expanded reference for details. Bare `ci-api --json` must explain the missing verb.
+
+    ci-api -h --json
+    ci-pipeline watch -h --json
+    ci-mr --help
+
+**Diagnose a blocked GET (H2/H3).** A missing native client and a DNS or sandbox failure both surfaced as
+`PROVIDER_FAILED`. The same GET should report its bounded, sanitized cause. Resolve GitLab's native client from
+the supported install locations even when Homebrew is absent from PATH. Apply H3 lookup tests to each declared client.
+
+    ci-api get --provider gitlab --endpoint "$ENDPOINT" --json
+
+**Two later discovery examples.** To check one job now, show `ci-job get --job-url "$JOB_URL" --json` once H3
+installs the alias. For continued observation, point to the pipeline watch above and state its scope. To check
+available MR operations, show `ci-mr --describe`. Closing an MR without merging and watching one job continuously
+are outside the declared verbs. Give that answer directly when asked. These examples do not add write or watch verbs.
+
+H4's callback requirement applies behind these commands. Verify it through the executor and authenticated session.
+Publishing an example requires checking its installed verb help. Record source reads separately from CLI execution.
 
 ## Concrete Steps
 
@@ -251,7 +333,8 @@ fixtures before and after.
 `ci-skills/schemas/results/gitlab-mr-read.schema.json`. List records carry `iid:positive integer`,
 `title:string`, `head_sha:string or null`, `detailed_merge_status:string or null` and nullable
 `head_pipeline` with positive `id`, verified `sha` and `status:string`. Diff records carry `old_path`,
-`new_path`, `patch` strings. Carry `truncated:boolean` and per-IID/file errors in the enclosing result.
+`new_path`, `patch` strings. Include the MR IID and the diff revision’s `base_sha` and `source_sha` in the enclosing
+result, with `truncated:boolean` and per-IID/file errors. Record `head_changed` if the requested head is unavailable.
 
 **MODIFIED H6.** `core/gitlab/gitlab_pipeline_graph.py`, `gitlab_pipeline_watch_types.py` and
 `gitlab_pipeline_watch_runtime.py` in the same directory,
@@ -342,24 +425,15 @@ before/after comparison. The existing required workflow still runs its full sele
     python -W error -m pytest -q tests/python/test_gitlab_job_cli.py tests/python/test_gitlab_jobs.py tests/python/test_gitlab_pipeline.py tests/python/test_gitlab_pipeline_watch.py
     bats tests/bash/api.bats tests/bash/install.bats
 
-In an installed consumer directory replay these calls as the corresponding milestones land. Quote the glob so the
-consumer's shell passes it intact. Supply the selected fixture values in place of shell variables.
+From outside the checkout replay the [consumer tasks](#consumer-tasks-and-the-first-command-to-show) as each
+milestone ships. Use a numeric project ID in raw endpoints. High-level commands accept the existing project
+selector. Check both help-flag orders, the missing-verb diagnostic and the separate full contract.
 
     ci-api -h --json
     ci-api --json -h
     ci-api --json
-    ci-mr --help
-    ci-pipeline watch --help
     ci-job --describe
-    ci-api get --provider gitlab --endpoint "projects/$PROJECT/jobs/$JOB_ID/trace" --output text --lines 1:40
-    ci-mr list --project "$PROJECT" --state opened --with-pipeline --json
-    ci-mr diff "$IID" --project "$PROJECT" --path '*.sql' --json
-    ci-pipeline watch --project "$PROJECT" --pipeline-id "$PIPELINE_ID" --timeout 30 --json --progress
-    ci-pipeline failures --project "$PROJECT" --pipeline-id "$PIPELINE_ID" --trace-lines 20 --json
-    ci-job logs --project "$PROJECT" --job-id "$JOB_ID" --trace-lines 20
-    ci-mr merge "$IID" --project "$PROJECT" --sha "$HEAD_SHA" --target-branch "$TARGET_BRANCH" --dry-run --json
 
-Use a numeric project ID for the raw API endpoint above. The high-level commands accept the existing project selector.
 For the H7 write fixture alone, repeat the planned merge with `--apply --confirm-plan "$DIGEST"` in place of
 `--dry-run`. Use the candidate's installed help to verify the mode. Read back the IID, source SHA, target branch
 and merged state.
@@ -394,7 +468,8 @@ For five MRs measure calls and wall time on identical inputs.
 Plain listing issues zero detail reads. Enrichment fetches at most one MR detail per selected IID per pass.
 Count any paged exact-head lookups separately from retries and access checks. Include an older matching failed pipeline
 and a newer unrelated green one. Return the matching SHA and status. Also exercise missing and unverified pipelines.
-A SQL patch late in a large diff must survive filtering. Flag a provider-omitted hunk as incomplete.
+A SQL patch late in a large diff must survive filtering. Flag a provider-omitted hunk as incomplete. List head A,
+advance the MR to B and request the diff for A. Return A with its base SHA or `head_changed`, with zero hunks from B.
 
 For H6/H7, test pending → running → settled, pending through timeout, missing timing, and mixed manual/running jobs.
 For a pending-only watch, capture its first machine progress event before timeout. Observe the transition to running
@@ -404,7 +479,10 @@ errors. For merge, retarget an MR between plan and apply while keeping its IID a
 Also exercise stale SHA, unmet provider requirements, success, a lost write response and a changed branch at read-back.
 Only the verified merged head and branch yield repeat success with zero extra mutations.
 
-For H8, rerun the consumer tasks with identical selectors and record skill bytes loaded, stdout/stderr bytes, provider
+For H8, repeat each paired task on the installed candidate from a fresh consumer directory. Record the exact
+revision and guide digest, first and peak input context, cumulative input including cache, source reads and their
+specific reason, and whether scoped help supplied the answer. Verify requested evidence before comparing costs.
+Use identical selectors and record skill bytes loaded, stdout/stderr bytes, provider
 requests, elapsed time, wrong commands and whether the requested hunk/log line arrived. Separate cold and warm runs.
 Require six parseable GET results and zero default stderr bytes. For each SQL and trace replay, retain the requested
 hunk or line. Count total skill, help and tool-output bytes through delivery. Claim a context saving only when those
@@ -433,6 +511,67 @@ pre-change MR evidence ends in `ModuleNotFoundError: No module named 'kubernetes
 with the installed revision, command, exit, stream sizes, request count and the bounded observed fact.
 Record old/new catalog or schema diffs in their owning capability PR.
 
+### Paired consumer replay
+
+On 2026-11-25, `gpt-6-luna` replayed ten incident tasks and the two later discovery examples. Each pair used
+fresh consumer sessions, the same prompt, installed runtime `12ddee804361390b5c35f007a0251661dc663f15` and
+the same read-only GitLab fixture. Before used the installed guide (364 lines, 21,249 bytes). After used a staged
+task index (31 lines, 3,025 bytes) with the working interpreter and legacy commands for that installation.
+The staged guide is an experiment. H1–H8 still need validation against their released commands.
+
+Each cell shows **before / after**. Growth is peak sampled model-input tokens minus the first sample in that
+session. Total is all input tokens reported for the turn, including cached input. Calls count shell invocations.
+One shell invocation can make several provider requests. Each pair is one observation. Workspace lookups and
+failed attempts are included in the measurements.
+
+| Consumer task | Context growth | Total input tokens | Shell calls |
+| --- | ---: | ---: | ---: |
+| List five MRs | 23,200 / 5,591 | 316,856 / 188,600 | 6 / 8 |
+| Filter SQL diff | 7,421 / 2,612 | 270,984 / 141,448 | 6 / 3 |
+| Open MR dry run | 7,965 / 1,997 | 231,757 / 140,096 | 5 / 3 |
+| Merge head dry run | 16,792 / 9,478 | 587,154 / 309,085 | 12 / 7 |
+| Watch pending pipeline | 11,748 / 3,801 | 249,442 / 216,076 | 5 / 5 |
+| Failed job and trace | 14,625 / 3,749 | 289,332 / 218,348 | 6 / 5 |
+| Read trace and raw blob | 10,573 / 3,105 | 203,329 / 178,661 | 5 / 5 |
+| Six JSON reads | 8,510 / 2,452 | 442,212 / 176,093 | 10 / 9 |
+| Discover four CLIs | 18,772 / 16,097 | 395,060 / 429,621 | 8 / 28 |
+| Diagnose GET failures | 19,236 / 3,538 | 551,990 / 253,701 | 11 / 6 |
+| Watch individual job | 9,478 / 4,918 | 319,982 / 183,967 | 7 / 4 |
+| Discover MR close | 7,394 / 13,058 | 191,212 / 270,811 | 4 / 6 |
+
+**Evidence returned.** The failed-job pair returned the same job, `script_failure` and four trace lines. Provider
+requests fell from nine to two. Both text runs returned the same requested trace and file lines. Both six-GET runs
+returned parseable JSON and emitted six INFO lines. Neither verified migration or reproduced the deprecation warning.
+The task-first guide got five MR rows through six GETs and produced the create digest offline. The baseline list
+stopped on a workspace lookup and MR create failed on a Kubernetes import. Neither guide could return the filtered
+SQL hunk or a guarded merge plan. Both merge runs verified the source SHA. No writes were applied.
+
+**Watch and discovery.** With the staged guide the five-second watch timed out. A follow-up job-list GET identified
+job 7001, pending with no runner and 47 queued seconds. The pipeline watcher did not emit that per-job evidence
+during the wait. The individual-job replay also used the pipeline watch and a snapshot. Both baseline watch attempts
+stopped at import. For failure diagnosis the baseline agent supplied an extra `api/v4/` prefix and saw 404s.
+The revised guide led to valid endpoints and distinct authorization, connectivity and missing-client causes.
+Structured error detail, Homebrew fallback and target migration still need candidate evidence. Four-family discovery
+took 28 calls after versus eight before. Close-MR discovery returned the same unsupported result with higher growth.
+A shorter guide alone cannot supply missing verbs or repair their help.
+
+**Why Python entered context.** Count source lines returned by searches as well as files explicitly opened.
+The baseline create search returned two MR launcher lines while looking for the command. Baseline pipeline watch
+returned 29 launcher lines while looking for watch and runner options. Baseline close discovery searched the MR
+launcher and opened `bin/reference.py` to find its discovery interface. The staged merge run searched for
+confirmation and head binding across `bin/` and returned 50 matches from eight Python entrypoints. The MR
+reference and `--describe` already identified the supported verbs. In a discarded watch run, Luna passed
+`--help` to `sed` and requested 240 lines of the launcher. The focused watch reference and `--describe`
+supplied the flags. Count actual tool output even when the agent says it only ran the CLI. These cases motivate
+a runnable example for a supported operation and a short capability answer for an unsupported one.
+
+**Replay controls.** Use the same model (low reasoning effort), prompt, runtime and fixture in each pair. Record both guide
+digests. Fixture inputs included five MRs, a late SQL patch, a pending and a failed pipeline, a four-line trace, a raw blob and controlled failure responses. Supply a valid fixture identity URL
+and support both numeric and encoded project paths. Earlier attempts that lacked these inputs and a guide pilot with
+a literal `PY BIN/...` placeholder were excluded. The discovery pair exercised the non-interactive shell and missing
+Kubernetes import. The remaining comparison is the same replay on installed candidate binaries, including per-stream
+bytes, wrong guesses, direct PATH resolution, action receipts and live progress before timeout.
+
 ## Interfaces and Dependencies
 
 All four families use shared `--gitlab private|public` for GitLab selection, `--json` for machine output,
@@ -449,7 +588,9 @@ writes, replacement CI jobs and automatic sandbox approvals remain separate work
 history. Verify existing behavior before filing a duplicate. [Issue 134][i134] also covers approvals, artifacts,
 cleanup evidence and incremental refresh beyond the bounded list/diff scope here.
 
-Revision BASE recorded the consumer reports and source baseline. The November 25 review added the exact-head,
+Revision BASE recorded the consumer reports and source baseline. The November 25 consumer replay added command examples
+for each incident and the measured guide comparison.
+The November 25 review added the exact-head,
 destination, install-recovery and offline-help cases, observable queue progress, proof owners and replay criteria.
 
 [cli]: ../../phases/CI02-CLI.md
