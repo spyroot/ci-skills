@@ -53,7 +53,8 @@ The [context-load study][study] measured a separate workload and found that wron
   full `--describe` record. Governing sources are [CI11][tools] and [the command schema][command-schema].
 - DEC-02, proposed interface. `-h --json` requests machine help. Bare `ci-api --json` remains a usage error and
   returns a short machine-readable explanation. This preserves exit 64 for scripts that omitted required inputs.
-  Put the runnable example first in human help. Keep every accepted option and its mode restrictions discoverable.
+  Follow the pinned [help standard][help-standard]. Human help opens with a summary and optional description, then
+  shows explained examples, options, output modes and usage. Keep accepted options and their restrictions discoverable.
 - DEC-03, proposed logging change. Make successful JSON reads quiet by default. Still expose target-selection and
   deprecation events at an explicitly selected level. Preserve native values on successful API GETs. The relevant
   existing contracts are [target selection][targets] and the `bin/ci-api` entry in the catalog.
@@ -86,8 +87,9 @@ Capture separate stdout, stderr and exit status on the old install for `gitlab_m
 `ci-api -h --json` and `ci-api --json -h`. Use a supported base interpreter without the Kubernetes package,
 credentials or network. First establish the accepted records and caller-selected target fixture. Read the exact
 historical help schema and a conforming example through the source listed in the port inventory before claiming
-compatibility. If the original is unavailable, present the proposed compact record in Concrete Steps for review
-under its own schema identity. The independent import fix has its own before/after check and can ship first.
+compatibility. Compare the recovered example with the pinned six-field help requirement. Record any incompatibility.
+If the original is unavailable, present the compact record below for review under its own schema identity.
+The independent import fix has its own before/after check and can ship first.
 
 The first PR addresses [#139][i139]. Isolate lightweight argument declarations and defer workflow/provider imports until
 an operational verb needs them. Fix the transitive `REGISTRATION_SECRET_SUFFIX` dependency at its owning module, or
@@ -219,11 +221,13 @@ factories. Import Kubernetes only on the path that needs it.
 `core/help.py:CommandHelp`, `core/catalog.py`. One declaration supplies human help, machine help, accepted
 options and examples. Existing `--describe` validates against `schemas/command-contract.schema.json`.
 
-**INTRODUCED H1.** Compact `--help --json` projection, emitted by `core/help.py`. Prefer the recovered source
-shape if approved. For a new shape propose `schema_version:string`, `command:string` and `verbs:array`. Each
-verb has `name`, `purpose`, `usage`, `example` strings, `required_options:string[]`,
-`options:map<string,string>` and `mutates:boolean`. Use `schemas/command-help.schema.json` only for that
-distinct approved shape.
+**INTRODUCED H1.** `core/help.py` renders the same six fields for `--help --json` at command or verb scope.
+The pinned help standard names `summary`, `description`, `examples`, `options`, `output_modes` and `usage`.
+Use the existing catalog and help declarations for both formats. Preserve option applicability and runnable examples.
+If a new schema is needed, propose strings for summary, description and usage, description/command pairs for examples,
+and maps of names to explanations for options and output modes. Add `schema_version` and command identity. Each
+verb entry retains its name, purpose, usage, runnable example, required and optional arguments, and mutation flag.
+Review the proposed `schemas/command-help.schema.json` before implementation.
 
 **MODIFIED H1/H2.** `core/read_cli.py`, `core/read_tools.py`, `core/runtime.py`, `core/cli_api.py`,
 `core/logging.py`. API usage failure with `--json` writes one stdout record with `status="BLOCKED"`,
@@ -366,9 +370,11 @@ For H1, add an installed subprocess case in `tests/python/test_installed_package
 The job’s Conda environment normally includes Kubernetes. In the subprocess, make that import unavailable and prove
 the restriction with an import probe. From an unrelated directory with no credentials or network, show the old MR
 help failing and the candidate passing under identical conditions. Run `--help` and `--describe` for each family.
-Both JSON-help flag orders decode to the same record and write zero stderr bytes. The
-invalid `ci-api --json` case exits 64 and names the missing verb/provider in JSON. Before H3 use the installed
-legacy paths. After H3 repeat with the short names. Validate `--describe` against the existing command schema and
+Both JSON-help flag orders must return identical, schema-valid records and write zero stderr bytes. Assert all six
+keys and compare their values with the same scope’s human help, including examples, option names and output modes.
+Omit a required key in a negative fixture and verify validation fails. Bare `ci-api --json` exits 64 and names the
+missing verb/provider in JSON. Before H3 use the installed legacy paths. After H3 repeat with the short names.
+Validate `--describe` against the existing command schema and
 navigate one version 3 reference node. Make sure `watch` advertises its own timeout, interval and related-name flags.
 
 For H2/H3, six successful GETs produce six independently parseable values and zero stderr bytes with default JSON
@@ -459,6 +465,7 @@ destination, install-recovery and offline-help cases, observable queue progress,
 [ep]: ../../../gates/gate-ci-skills-endpoints.py
 [ac]: ../../../tools/check_live_acceptance.py
 [res]: ../../../tools/ci_required_result.py
+[help-standard]: https://github.com/spyroot/standards/blob/5bd31f1/docs/agents/contracts/documentation-contract.md#help
 [merge-api]: https://docs.gitlab.com/api/merge_requests/#merge-a-merge-request
 [i78]: https://github.com/spyroot/ci-skills/issues/78
 [i134]: https://github.com/spyroot/ci-skills/issues/134
