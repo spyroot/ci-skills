@@ -1,9 +1,6 @@
 {
-  "blocking_live_checks": [
-    "cilium_status",
-    "event_trace"
-  ],
-  "captured_at": "2026-11-25T19:49:36.428503+00:00",
+  "blocking_live_checks": [],
+  "captured_at": "2026-11-25T21:09:22.953636+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -13,7 +10,7 @@
     "gitlab": "file:path:29f247d18d3c",
     "kubernetes": "target:kubernetes.kubeconfigs"
   },
-  "execution_host": "1.0.0.127.in-addr.arpa",
+  "execution_host": "spyroots-macbook-pro.local",
   "kind": "access_check",
   "live_checks": {
     "ceph_cluster": {
@@ -25,40 +22,30 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "a62b2fabb13d31232ce1ae449511e68572c0e0fd821f07f8b111e0724126cac9",
+      "readback_sha256": "62f88d4f94c2a771f3fe08d85ae8e93ecc8544d2634ef91de7e4901075e20366",
       "record_count": 15,
       "status": "PASS"
     },
     "cilium_status": {
-      "access_proven": false,
+      "access_proven": true,
       "agent_health": {
         "passed": 13,
         "total": 13
       },
       "ciliumnode_count": 13,
-      "error_count": 1,
-      "errors": [
-        {
-          "reason": "authentication",
-          "source": "operators"
-        }
-      ],
-      "readback_sha256": "afe0f5b55dea66450a7f8bef2f236b02b89c498127ee421dae3b3ea7995aa439",
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "eac7b9d3ce920ff182266100a48afd17fdf2d9ff0640f58045d9b981abf403de",
       "record_count": 13,
-      "status": "PARTIAL"
+      "status": "PASS"
     },
     "event_trace": {
-      "access_proven": false,
-      "error_count": 1,
-      "errors": [
-        {
-          "reason": "timeout",
-          "source": "events_v1"
-        }
-      ],
-      "readback_sha256": "33b1157c6b350adeadd47eb3ea1bc0de0a58aa08e4324e7fa9697a530ac2af06",
-      "record_count": 0,
-      "status": "PARTIAL"
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "c11042fbf6ed1f223de27af7be42c160423bb208047c1f8d7c791cdb31d1d1a7",
+      "record_count": 12853,
+      "status": "PASS"
     },
     "gitlab_job": {
       "access_proven": true,
@@ -71,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "e3baff7326af9f9b99e72020f52dfa624adf4c5f45b56fb4cc6a8fbed9deab0b",
+      "readback_sha256": "918ceeed836e615d6bc4fd1ca20a61f48bc70c2008198516c01fd52fea6d7ae0",
       "record_count": 1,
       "status": "PASS"
     },
@@ -79,19 +66,19 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "b2695fe80145dfc8c4291beb92a0a0f0c085884f300260467922ab9af1491fc8",
-      "record_count": 85,
+      "readback_sha256": "28643cb6c40641f0dc86c89159a4de0c2c079fcabe1d62baa92edaaa988bc141",
+      "record_count": 87,
       "resource_counts": {
         "attachments": 38,
         "csidrivers": 6,
         "csinodes": 13,
         "daemonsets": 45,
-        "deployments": 234,
+        "deployments": 241,
         "nodes": 13,
-        "pods": 920,
-        "pvcs": 78,
-        "pvs": 85,
-        "replicasets": 578,
+        "pods": 900,
+        "pvcs": 80,
+        "pvs": 87,
+        "replicasets": 585,
         "statefulsets": 15,
         "storageclasses": 10
       },
@@ -122,7 +109,7 @@
       "verified": true
     }
   },
-  "status": "BLOCKED",
+  "status": "PASS",
   "surfaces": {
     "github": {
       "credential_source": "gh-credential-store:github.com",

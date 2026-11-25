@@ -1,24 +1,24 @@
 {
-  "captured_at": "2026-11-25T20:37:30.934954+00:00",
+  "captured_at": "2026-11-25T21:57:40.984478+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
   },
   "errors": [],
-  "execution_host": "spyroots-macbook-pro.local",
+  "execution_host": "1.0.0.127.in-addr.arpa",
   "filters": {
     "agent_name": "test",
     "job_url": null,
-    "namespace": null,
+    "namespace": "ci15-pr172-agent-proof",
     "operation": "delete",
     "project": "hott/test",
     "project_name": null,
-    "run_id": "pr172-agent3-20261125"
+    "run_id": "pr172-agent8-20261125"
   },
   "kind": "gitlab_agent",
   "mutated": false,
   "operation": "delete",
-  "plan_digest": "30b77b51135df16c9719239dee053ac37f14a0382db6435a1f006983cf35d658",
+  "plan_digest": "cfe34028e543697e1a5edaa9f5f13d5cef7b675abaa3336d6e91786ff9262efe",
   "records": [
     {
       "absence": {
@@ -35,12 +35,12 @@
         "agent_id": null,
         "agent_name": "test",
         "connection_ids": [],
-        "namespace": "test-70e1aeef8b0b5a9f9bf7",
+        "namespace": "ci15-pr172-agent-proof",
         "namespace_uid": null,
         "project_id": 123,
         "registration_credential_http_status": null,
         "registration_credential_ids": [],
-        "release": "test-agent-70e1aeef8b0b5a9f",
+        "release": "test-agent-c1812000e3710b1a",
         "release_revision": null,
         "release_storage_uid": null,
         "resources": []
@@ -50,12 +50,12 @@
         "agent_id": null,
         "agent_name": "test",
         "connection_ids": [],
-        "namespace": "test-70e1aeef8b0b5a9f9bf7",
+        "namespace": "ci15-pr172-agent-proof",
         "namespace_uid": null,
         "project_id": 123,
         "registration_credential_http_status": null,
         "registration_credential_ids": [],
-        "release": "test-agent-70e1aeef8b0b5a9f",
+        "release": "test-agent-c1812000e3710b1a",
         "release_revision": null,
         "release_storage_uid": null,
         "resources": []
@@ -167,133 +167,133 @@
       "agent": {
         "absent": true,
         "http_status": 404,
-        "id": 22,
+        "id": 27,
         "preserved": false
       },
       "registration_credential": {
         "absent": true,
         "http_status": 404,
-        "id": 22,
+        "id": 27,
         "preserved": false
       },
       "release_absent": true,
       "resources": [
         {
-          "absent": true,
+          "absent": false,
           "kind": "Namespace",
-          "name": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "ci15-pr172-agent-proof",
           "namespace": "",
-          "observed_uid": null,
-          "preserved": false,
-          "uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8"
+          "observed_uid": "940b536a-7c9b-4719-bce6-20e1e5c418ee",
+          "preserved": true,
+          "uid": "940b536a-7c9b-4719-bce6-20e1e5c418ee"
         },
         {
           "absent": true,
           "kind": "ConfigMap",
-          "name": "test-agent-recovery-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-recovery-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "95f09201-d4d1-4804-9f66-243172a4ef46"
+          "uid": "daedde8a-55b6-473d-b63c-b1dc90f04cff"
         },
         {
           "absent": true,
           "kind": "Secret",
-          "name": "test-agent-token-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-token-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "9293fce7-a9fa-4974-80ad-e4f231000229"
+          "uid": "f1c49b1c-c48f-4e08-af34-3d03170db36f"
         },
         {
           "absent": true,
           "kind": "Secret",
-          "name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "sh.helm.release.v1.test-agent-c1812000e3710b1a.v1",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc"
+          "uid": "06afe047-00d7-4f45-bfda-8468aa346f36"
         },
         {
           "absent": true,
           "kind": "ServiceAccount",
-          "name": "test-agent-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "ab288802-ee48-40ea-8a60-60402e84c0bd"
+          "uid": "fdee8905-9d91-490c-82c7-da66901d950e"
         },
         {
           "absent": true,
           "kind": "ClusterRoleBinding",
-          "name": "test-70e1aeef8b0b5a9f9bf7:test-agent-70e1aeef8b0b5a9f-cluster-admin",
+          "name": "ci15-pr172-agent-proof:test-agent-c1812000e3710b1a-cluster-admin",
           "namespace": "",
           "observed_uid": null,
           "preserved": false,
-          "uid": "a8bd1a03-8203-498b-9f3d-06c8716aaa72"
+          "uid": "ac03aa3b-f277-441c-ae74-05dceba1262d"
         },
         {
           "absent": true,
           "kind": "Service",
-          "name": "test-agent-70e1aeef8b0b5a9f-service",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-service",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "dc658385-bd20-4f56-a4e4-8f0262dcef50"
+          "uid": "a28e8e27-fbe5-48ab-9a79-ca715bb2c8b1"
         },
         {
           "absent": true,
           "kind": "Deployment",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "6ada2549-cc20-47e6-b6d6-03f138de8942"
+          "uid": "15a2a142-956a-4214-93d1-800327dad7f0"
         },
         {
           "absent": true,
           "kind": "Pod",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-b7qmt",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c-82jtr",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "7970b4c3-80b6-4d19-a107-086adeaf1863"
+          "uid": "b802a8eb-c94a-4f97-96a5-4ccb80315748"
         },
         {
           "absent": true,
           "kind": "Pod",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-qj5ln",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c-tpqpk",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "98751a75-b13b-4aa9-b14c-4fa865c6ae37"
+          "uid": "6f6e8bfb-a33b-4e63-a497-dd6682deca35"
         },
         {
           "absent": true,
           "kind": "ReplicaSet",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "2a9f4284-9f28-4097-893c-52b266eaa6ce"
+          "uid": "708f47fd-20f4-4f1a-b0ff-44ad7fefb516"
         },
         {
           "absent": true,
           "kind": "Lease",
-          "name": "agent-22-lock",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "agent-27-lock",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "a8224bd0-1f82-48d6-b464-008b6b2ecf2e"
+          "uid": "d583b19f-28f4-49d9-ac65-2a0ab5fa22e2"
         }
       ],
       "run_resources_absent": true
     },
-    "captured_at": "2026-11-25T20:39:18.834001+00:00",
+    "captured_at": "2026-11-25T21:59:12.344342+00:00",
     "execution_host": "spyroots-macbook-pro.local",
     "kind": "gitlab_agent_smoke_cleanup",
     "original_ownership": {
-      "agent_id": 22,
+      "agent_id": 27,
       "agent_name": "test",
       "app_version": "v18.5.2",
       "chart_sha256": "4d2214c73856533f27cefd2de673c7e0abbb7925352c0cb157458287eb591210",
@@ -302,140 +302,140 @@
       "created": {
         "agent": true,
         "credential_resource": true,
-        "namespace": true,
+        "namespace": false,
         "ownership_record": true,
         "registration_credential": true,
         "release": true
       },
-      "credential_resource_name": "test-agent-token-70e1aeef8b0b5a9f",
-      "credential_resource_uid": "9293fce7-a9fa-4974-80ad-e4f231000229",
+      "credential_resource_name": "test-agent-token-c1812000e3710b1a",
+      "credential_resource_uid": "f1c49b1c-c48f-4e08-af34-3d03170db36f",
       "image_digest": "sha256:748ca8c9e9f9f8ea4e777ce42c19a462a3cc3813795338c43f8e19d1f6bb87c5",
       "kind": "gitlab_agent_ownership",
-      "namespace": "test-70e1aeef8b0b5a9f9bf7",
-      "namespace_uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8",
+      "namespace": "ci15-pr172-agent-proof",
+      "namespace_uid": "940b536a-7c9b-4719-bce6-20e1e5c418ee",
       "origin": "https://gitlab.dcloud.run",
-      "ownership_record_name": "test-agent-recovery-70e1aeef8b0b5a9f",
-      "ownership_record_uid": "95f09201-d4d1-4804-9f66-243172a4ef46",
+      "ownership_record_name": "test-agent-recovery-c1812000e3710b1a",
+      "ownership_record_uid": "daedde8a-55b6-473d-b63c-b1dc90f04cff",
       "preexisting_registration_credential_ids": [],
       "project_id": 123,
       "project_path": "hott/test",
-      "registration_credential_id": 22,
-      "registration_credential_name": "test-agent-token-70e1aeef8b0b5a9f",
-      "release": "test-agent-70e1aeef8b0b5a9f",
+      "registration_credential_id": 27,
+      "registration_credential_name": "test-agent-token-c1812000e3710b1a",
+      "release": "test-agent-c1812000e3710b1a",
       "release_revision": 1,
-      "release_storage_name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
-      "release_storage_uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc",
+      "release_storage_name": "sh.helm.release.v1.test-agent-c1812000e3710b1a.v1",
+      "release_storage_uid": "06afe047-00d7-4f45-bfda-8468aa346f36",
       "resources": [
         {
           "api_version": "v1",
-          "created": true,
+          "created": false,
           "kind": "Namespace",
-          "name": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "ci15-pr172-agent-proof",
           "namespace": "",
           "state": "PRESENT",
-          "uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8"
+          "uid": "940b536a-7c9b-4719-bce6-20e1e5c418ee"
         },
         {
           "api_version": "v1",
           "created": true,
           "kind": "ConfigMap",
-          "name": "test-agent-recovery-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-recovery-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "95f09201-d4d1-4804-9f66-243172a4ef46"
+          "uid": "daedde8a-55b6-473d-b63c-b1dc90f04cff"
         },
         {
           "api_version": "v1",
           "created": true,
           "kind": "Secret",
-          "name": "test-agent-token-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-token-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "9293fce7-a9fa-4974-80ad-e4f231000229"
+          "uid": "f1c49b1c-c48f-4e08-af34-3d03170db36f"
         },
         {
           "api_version": "v1",
           "created": true,
           "kind": "Secret",
-          "name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "sh.helm.release.v1.test-agent-c1812000e3710b1a.v1",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc"
+          "uid": "06afe047-00d7-4f45-bfda-8468aa346f36"
         },
         {
           "api_version": "v1",
           "created": true,
           "kind": "ServiceAccount",
-          "name": "test-agent-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "ab288802-ee48-40ea-8a60-60402e84c0bd"
+          "uid": "fdee8905-9d91-490c-82c7-da66901d950e"
         },
         {
           "api_version": "rbac.authorization.k8s.io/v1",
           "created": true,
           "kind": "ClusterRoleBinding",
-          "name": "test-70e1aeef8b0b5a9f9bf7:test-agent-70e1aeef8b0b5a9f-cluster-admin",
+          "name": "ci15-pr172-agent-proof:test-agent-c1812000e3710b1a-cluster-admin",
           "namespace": "",
           "state": "PRESENT",
-          "uid": "a8bd1a03-8203-498b-9f3d-06c8716aaa72"
+          "uid": "ac03aa3b-f277-441c-ae74-05dceba1262d"
         },
         {
           "api_version": "v1",
           "created": true,
           "kind": "Service",
-          "name": "test-agent-70e1aeef8b0b5a9f-service",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-service",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "dc658385-bd20-4f56-a4e4-8f0262dcef50"
+          "uid": "a28e8e27-fbe5-48ab-9a79-ca715bb2c8b1"
         },
         {
           "api_version": "apps/v1",
           "created": true,
           "kind": "Deployment",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "6ada2549-cc20-47e6-b6d6-03f138de8942"
+          "uid": "15a2a142-956a-4214-93d1-800327dad7f0"
         },
         {
           "api_version": "v1",
           "created": true,
           "kind": "Pod",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-b7qmt",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c-82jtr",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "7970b4c3-80b6-4d19-a107-086adeaf1863"
+          "uid": "b802a8eb-c94a-4f97-96a5-4ccb80315748"
         },
         {
           "api_version": "v1",
           "created": true,
           "kind": "Pod",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-qj5ln",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c-tpqpk",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "98751a75-b13b-4aa9-b14c-4fa865c6ae37"
+          "uid": "6f6e8bfb-a33b-4e63-a497-dd6682deca35"
         },
         {
           "api_version": "apps/v1",
           "created": true,
           "kind": "ReplicaSet",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "2a9f4284-9f28-4097-893c-52b266eaa6ce"
+          "uid": "708f47fd-20f4-4f1a-b0ff-44ad7fefb516"
         },
         {
           "api_version": "coordination.k8s.io/v1",
           "created": true,
           "kind": "Lease",
-          "name": "agent-22-lock",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "agent-27-lock",
+          "namespace": "ci15-pr172-agent-proof",
           "state": "PRESENT",
-          "uid": "a8224bd0-1f82-48d6-b464-008b6b2ecf2e"
+          "uid": "d583b19f-28f4-49d9-ac65-2a0ab5fa22e2"
         }
       ],
-      "run_id": "pr172-agent3-20261125",
+      "run_id": "pr172-agent8-20261125",
       "schema_version": "1.0",
       "state": "CONNECTED"
     },
@@ -443,129 +443,129 @@
       "agent": {
         "absent": true,
         "http_status": 404,
-        "id": 22,
+        "id": 27,
         "preserved": false
       },
       "registration_credential": {
         "absent": true,
         "http_status": 404,
-        "id": 22,
+        "id": 27,
         "preserved": false
       },
       "release_absent": true,
       "resources": [
         {
-          "absent": true,
+          "absent": false,
           "kind": "Namespace",
-          "name": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "ci15-pr172-agent-proof",
           "namespace": "",
-          "observed_uid": null,
-          "preserved": false,
-          "uid": "7964ccc6-fcd1-4e03-b8b3-ab606b7952d8"
+          "observed_uid": "940b536a-7c9b-4719-bce6-20e1e5c418ee",
+          "preserved": true,
+          "uid": "940b536a-7c9b-4719-bce6-20e1e5c418ee"
         },
         {
           "absent": true,
           "kind": "ConfigMap",
-          "name": "test-agent-recovery-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-recovery-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "95f09201-d4d1-4804-9f66-243172a4ef46"
+          "uid": "daedde8a-55b6-473d-b63c-b1dc90f04cff"
         },
         {
           "absent": true,
           "kind": "Secret",
-          "name": "test-agent-token-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-token-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "9293fce7-a9fa-4974-80ad-e4f231000229"
+          "uid": "f1c49b1c-c48f-4e08-af34-3d03170db36f"
         },
         {
           "absent": true,
           "kind": "Secret",
-          "name": "sh.helm.release.v1.test-agent-70e1aeef8b0b5a9f.v1",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "sh.helm.release.v1.test-agent-c1812000e3710b1a.v1",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "2b24604c-705f-4faa-a936-aaf09bf2adbc"
+          "uid": "06afe047-00d7-4f45-bfda-8468aa346f36"
         },
         {
           "absent": true,
           "kind": "ServiceAccount",
-          "name": "test-agent-70e1aeef8b0b5a9f",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "ab288802-ee48-40ea-8a60-60402e84c0bd"
+          "uid": "fdee8905-9d91-490c-82c7-da66901d950e"
         },
         {
           "absent": true,
           "kind": "ClusterRoleBinding",
-          "name": "test-70e1aeef8b0b5a9f9bf7:test-agent-70e1aeef8b0b5a9f-cluster-admin",
+          "name": "ci15-pr172-agent-proof:test-agent-c1812000e3710b1a-cluster-admin",
           "namespace": "",
           "observed_uid": null,
           "preserved": false,
-          "uid": "a8bd1a03-8203-498b-9f3d-06c8716aaa72"
+          "uid": "ac03aa3b-f277-441c-ae74-05dceba1262d"
         },
         {
           "absent": true,
           "kind": "Service",
-          "name": "test-agent-70e1aeef8b0b5a9f-service",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-service",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "dc658385-bd20-4f56-a4e4-8f0262dcef50"
+          "uid": "a28e8e27-fbe5-48ab-9a79-ca715bb2c8b1"
         },
         {
           "absent": true,
           "kind": "Deployment",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "6ada2549-cc20-47e6-b6d6-03f138de8942"
+          "uid": "15a2a142-956a-4214-93d1-800327dad7f0"
         },
         {
           "absent": true,
           "kind": "Pod",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-b7qmt",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c-82jtr",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "7970b4c3-80b6-4d19-a107-086adeaf1863"
+          "uid": "b802a8eb-c94a-4f97-96a5-4ccb80315748"
         },
         {
           "absent": true,
           "kind": "Pod",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977-qj5ln",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c-tpqpk",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "98751a75-b13b-4aa9-b14c-4fa865c6ae37"
+          "uid": "6f6e8bfb-a33b-4e63-a497-dd6682deca35"
         },
         {
           "absent": true,
           "kind": "ReplicaSet",
-          "name": "test-agent-70e1aeef8b0b5a9f-v2-7fdc7ff977",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "test-agent-c1812000e3710b1a-v2-5c78d5b87c",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "2a9f4284-9f28-4097-893c-52b266eaa6ce"
+          "uid": "708f47fd-20f4-4f1a-b0ff-44ad7fefb516"
         },
         {
           "absent": true,
           "kind": "Lease",
-          "name": "agent-22-lock",
-          "namespace": "test-70e1aeef8b0b5a9f9bf7",
+          "name": "agent-27-lock",
+          "namespace": "ci15-pr172-agent-proof",
           "observed_uid": null,
           "preserved": false,
-          "uid": "a8224bd0-1f82-48d6-b464-008b6b2ecf2e"
+          "uid": "d583b19f-28f4-49d9-ac65-2a0ab5fa22e2"
         }
       ],
       "run_resources_absent": true
     },
-    "run_id": "pr172-agent3-20261125",
+    "run_id": "pr172-agent8-20261125",
     "skill_digest": "c671cac885f7177114e53e9c39b7f90381f3c0fea7e8b1b005b4f235c870cb64",
     "status": "PASS_INDEPENDENT_ABSENCE_AND_REPEAT",
     "tested_revision": "b6d05f1a07859bade973ffdbcd5bdfc78afbd604"
