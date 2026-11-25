@@ -398,6 +398,9 @@ The result's `trace_artifact` points to that file; smoke reports link the artifa
 - [Enable an OLM operator](ci-skills/bin/ocp_operator.py): resolve the channel, catalog source and Subscription
   for a package such as the NVIDIA Network Operator, apply the resource the package ships, and read back the
   status the operator writes.
+- [Inspect and pause NVIDIA GPU Operator](ci-skills/bin/nvidia_gpu_operator.py): run `health-check` across
+  `ClusterPolicy`/`GPUCluster`, `NVIDIADriver` pools, DaemonSets, validators, non-standard drivers and MCPs, or
+  confirm `pause`/`resume` across node, policy or `MachineConfigPool` scopes.
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and [ci-binary-build](ci-skills/bin/ci-binary-build) for
   exact-commit OpenShift build planning.
 
