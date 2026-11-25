@@ -554,3 +554,176 @@ def test_required_result_download_excludes_its_previous_artifact() -> None:
             if str(step.get("uses", "")).startswith("actions/upload-artifact@")
         ]
         assert uploads == [f"ci-evidence-{producer}"]
+
+
+PENDING_STEP_NAME: Final = "Publish and read back pending required status"
+FAKE_PENDING_STATUS_TOOLS: Final = r"""
+import json
+import os
+import pathlib
+import sys
+
+name = pathlib.Path(sys.argv[0]).name
+journal = pathlib.Path(os.environ["FAKE_JOURNAL"])
+if name == "sleep":
+    entry = {"method": "sleep"}
+else:
+    args = sys.argv[1:]
+    method = args[args.index("-X") + 1] if "-X" in args else "GET"
+    entry = {"method": method}
+    if method == "POST":
+        entry["body"] = json.loads(args[args.index("-d") + 1])
+with journal.open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps(entry) + "\n")
+if entry["method"] != "GET":
+    raise SystemExit(0)
+get_exit_status = int(os.environ["FAKE_GET_EXIT_STATUS"])
+if get_exit_status:
+    raise SystemExit(get_exit_status)
+
+reads = sum(
+    json.loads(line)["method"] == "GET"
+    for line in journal.read_text().splitlines()
+)
+status = {
+    "context": os.environ["STATUS_CONTEXT"],
+    "state": "pending",
+    "target_url": os.environ["FAKE_TARGET_URL"],
+}
+mismatch = os.environ["FAKE_STATUS_MISMATCH"]
+if mismatch == "delayed" and reads == 1:
+    status["state"] = "failure"
+elif mismatch == "state":
+    status["state"] = "failure"
+print(json.dumps({"sha": os.environ["CI_SOURCE_SHA"], "statuses": [status]}))
+"""
+
+
+def _run_pending_status(
+    fake_bin: Path,
+    call_journal: Path,
+    tmp_path: Path,
+    *,
+    mismatch: str = "",
+    get_exit_status: int = 0,
+) -> tuple[subprocess.CompletedProcess[str], Sequence[JSONObject], int]:
+    """Run the shared pending-status step against a deterministic status API.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Request journal owned by this test.
+    :param tmp_path: Isolated shell working directory.
+    :param mismatch: First-read staleness or persistent wrong status state.
+    :param get_exit_status: Curl GET exit status, including terminal HTTP failures.
+    :returns: Shell outcome, ordered requests, and the configured retry bound.
+    """
+    workflow = yaml.safe_load(_workflow_text())
+    step = next(
+        item
+        for item in workflow["jobs"]["validate"]["steps"]
+        if item.get("name") == PENDING_STEP_NAME
+    )
+    for tool in ("curl", "sleep"):
+        install_executable(
+            fake_bin, tool, f"#!{sys.executable}\n{FAKE_PENDING_STATUS_TOOLS}"
+        )
+    environment = {
+        **os.environ,
+        **{key: str(value) for key, value in step["env"].items()},
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "GH_TOKEN": "offline-test-token",
+        "GITHUB_REPOSITORY": LIVE_REPOSITORY,
+        "GITHUB_RUN_ID": LIVE_REPORT_URL.rsplit("/", 1)[1],
+        "CI_SOURCE_SHA": LIVE_SHA,
+        "FAKE_JOURNAL": str(call_journal),
+        "FAKE_TARGET_URL": REQUIRED_REPORT_URL,
+        "FAKE_STATUS_MISMATCH": mismatch,
+        "FAKE_GET_EXIT_STATUS": str(get_exit_status),
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    attempts = int(step["env"].get("STATUS_READBACK_ATTEMPTS", 1))
+    return result, read_journal(call_journal), attempts
+
+
+def test_pending_status_publishes_once_and_reads_back_immediate_visibility(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """Accept a first read that already shows the posted pending status.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Request journal owned by this test.
+    :param tmp_path: Isolated shell working directory.
+    """
+    result, calls, _attempts = _run_pending_status(fake_bin, call_journal, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert [item["method"] for item in calls] == ["POST", "GET"]
+    assert calls[0]["body"] == {
+        "state": "pending",
+        "context": "ci-skills/required",
+        "description": "Required CI is running",
+        "target_url": REQUIRED_REPORT_URL,
+    }
+
+
+def test_pending_status_retries_until_the_posted_status_is_visible(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """Wait for read-after-write visibility without republishing.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Request journal owned by this test.
+    :param tmp_path: Isolated shell working directory.
+    """
+    result, calls, _attempts = _run_pending_status(
+        fake_bin, call_journal, tmp_path, mismatch="delayed"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert [item["method"] for item in calls] == ["POST", "GET", "sleep", "GET"]
+
+
+def test_pending_status_persistent_mismatch_fails_after_the_bound(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """Reject a read-back that never shows the posted pending status.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Request journal owned by this test.
+    :param tmp_path: Isolated shell working directory.
+    """
+    result, calls, attempts = _run_pending_status(
+        fake_bin, call_journal, tmp_path, mismatch="state"
+    )
+
+    assert 0 < attempts <= REQUIRED_STATUS_MAX_ATTEMPTS
+    assert result.returncode != 0
+    methods = [item["method"] for item in calls]
+    assert methods.count("POST") == 1
+    assert methods.count("GET") == attempts
+    assert methods.count("sleep") == attempts - 1
+
+
+def test_pending_status_http_error_stops_readback_without_retry(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """Stop immediately on a curl HTTP failure instead of retrying.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Request journal owned by this test.
+    :param tmp_path: Isolated shell working directory.
+    """
+    result, calls, _attempts = _run_pending_status(
+        fake_bin, call_journal, tmp_path, get_exit_status=CURL_HTTP_FAILURE_EXIT
+    )
+
+    assert result.returncode != 0
+    assert [item["method"] for item in calls] == ["POST", "GET"]

@@ -33,8 +33,10 @@ defaults:
     shell: bash
 
 env:
+  # Miniforge provides conda; every job builds the environment.yml env and
+  # runs Python through it, the same environment operators create locally.
   CI_RUNNER_IMAGE: &ci_runner_image >-
-    python:3.11-bookworm@sha256:5887f265d8d44d8b4734d3658b21d668edf5aaf92e4945bc0c984afbfab105d3
+    condaforge/miniforge3:26.9.4-2@sha256:3a0d9b6b5d8b9059aca9b82ee7660b5f558b71fe764b94dea294549e88287bcf
   CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
@@ -44,6 +46,10 @@ jobs:
     container:
       image: *ci_runner_image
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -63,9 +69,13 @@ jobs:
       - name: Install declared validation tools
         id: tools
         run: |
+          mamba env create -f environment.yml
+          printf '%s\n' /opt/conda/envs/ci-skills/bin >>"$GITHUB_PATH"
+          export PATH="/opt/conda/envs/ci-skills/bin:$PATH"
+          python -m pip install pydoclint==0.10.1 yamllint==1.38.0
+          conda run -n ci-skills python -c "import jsonschema, mutmut, pytest, pytest_cov, yaml"
           apt-get update -qq
-          apt-get install -y -qq bats curl git jq shellcheck
-          python -m pip install -r requirements.txt pydoclint==0.10.1 yamllint==1.38.0
+          apt-get install -y -qq bats curl jq make shellcheck
           npm install --global markdownlint-cli2@0.23.2
           mkdir -p "$RUNNER_TEMP/ci-tools"
           GOBIN="$RUNNER_TEMP/ci-tools" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
@@ -80,6 +90,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS_CONTEXT: ci-skills/required
+          STATUS_READBACK_ATTEMPTS: 5
+          STATUS_READBACK_DELAY_SECONDS: 1
         run: |
           target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           body=$(jq -n --arg state pending --arg context "$STATUS_CONTEXT" \
@@ -91,15 +103,27 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             -d "$body" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${CI_SOURCE_SHA}" >/dev/null
-          curl -fsS \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CI_SOURCE_SHA}/status" \
-            | jq -e --arg context "$STATUS_CONTEXT" --arg sha "$CI_SOURCE_SHA" \
-              --arg target_url "$target_url" \
-              '.sha == $sha and (.statuses | map(select(.context == $context))[0] |
-               .state == "pending" and .target_url == $target_url)' >/dev/null
+          # The statuses API is eventually consistent: wait for the posted
+          # status to become visible, as the required-result read-back does.
+          # An HTTP failure stops immediately; only invisibility is retried.
+          for ((attempt = 1; attempt <= STATUS_READBACK_ATTEMPTS; attempt++)); do
+            status_response=$(curl -fsS \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CI_SOURCE_SHA}/status") || exit 1
+            if jq -e --arg context "$STATUS_CONTEXT" --arg sha "$CI_SOURCE_SHA" \
+                --arg target_url "$target_url" \
+                '.sha == $sha and (.statuses | map(select(.context == $context))[0] |
+                 .state == "pending" and .target_url == $target_url)' \
+                <<<"$status_response" >/dev/null; then
+              exit 0
+            fi
+            if ((attempt < STATUS_READBACK_ATTEMPTS)); then
+              sleep "$STATUS_READBACK_DELAY_SECONDS"
+            fi
+          done
+          exit 1
       - name: Check committed candidate with the GitHub static gate
         id: static
         env:
@@ -233,6 +257,7 @@ jobs:
         run: |
           mkdir -p reports/raw
           python -W error -m pytest -q --junitxml=reports/raw/validate-pytest.xml \
+            --cov --cov-report=term --cov-report=xml:reports/raw/coverage.xml \
             --ignore=tests/python/test_endpoints.py \
             --ignore=tests/python/test_agent_profile.py \
             --ignore=tests/python/test_installer.py \
@@ -350,6 +375,10 @@ jobs:
     container:
       image: *ci_runner_image
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -358,9 +387,12 @@ jobs:
       - name: Install endpoint gate tools
         id: tools
         run: |
+          mamba env create -f environment.yml
+          printf '%s\n' /opt/conda/envs/ci-skills/bin >>"$GITHUB_PATH"
+          export PATH="/opt/conda/envs/ci-skills/bin:$PATH"
+          conda run -n ci-skills python -c "import jsonschema, pytest, yaml"
           apt-get update -qq
           apt-get install -y -qq curl jq
-          python -m pip install -r requirements.txt
       - *pending_status
       - name: Check endpoint result schema
         id: schema
@@ -416,6 +448,10 @@ jobs:
     container:
       image: *ci_runner_image
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -424,9 +460,13 @@ jobs:
       - name: Install fixture and documentation check tools
         id: tools
         run: |
+          mamba env create -f environment.yml
+          printf '%s\n' /opt/conda/envs/ci-skills/bin >>"$GITHUB_PATH"
+          export PATH="/opt/conda/envs/ci-skills/bin:$PATH"
+          python -m pip install pydoclint==0.10.1
+          conda run -n ci-skills python -c "import jsonschema, pytest, yaml"
           apt-get update -qq
           apt-get install -y -qq bats curl jq
-          python -m pip install -r requirements.txt pydoclint==0.10.1
       - *pending_status
       - name: Validate toolchain schema and manifest
         id: schema
@@ -483,6 +523,10 @@ jobs:
     container:
       image: *ci_runner_image
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -493,7 +537,10 @@ jobs:
         run: |
           apt-get update -qq
           apt-get install -y -qq curl jq
-          python -m pip install -r requirements.txt
+          mamba env create -f environment.yml
+          printf '%s\n' /opt/conda/envs/ci-skills/bin >>"$GITHUB_PATH"
+          export PATH="/opt/conda/envs/ci-skills/bin:$PATH"
+          conda run -n ci-skills python -c "import jsonschema, yaml"
       - uses: actions/download-artifact@v5
         if: always()
         with:

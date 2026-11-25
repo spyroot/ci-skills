@@ -1,0 +1,74 @@
+---
+name: mutation
+"on":
+  # Weekly, offset from the validate freshness cron. Mutation runs execute the
+  # suite once per mutant, so they are scheduled rather than per-commit.
+  schedule:
+    - cron: "40 2 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Same pinned miniforge image as validate.yml; both files must move together.
+  CI_RUNNER_IMAGE: &ci_runner_image >-
+    condaforge/miniforge3:26.9.4-2@sha256:3a0d9b6b5d8b9059aca9b82ee7660b5f558b71fe764b94dea294549e88287bcf
+
+jobs:
+  mutation:
+    name: mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    container:
+      image: *ci_runner_image
+    steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git
+      - uses: actions/checkout@v5
+      - name: Trust and read back the exact GitHub workspace
+        run: |
+          git config --global --replace-all safe.directory "$GITHUB_WORKSPACE"
+          [[ $(git config --global --get-all safe.directory) == "$GITHUB_WORKSPACE" ]]
+          [[ $(git -C "$GITHUB_WORKSPACE" rev-parse --is-inside-work-tree) == true ]]
+      - name: Create the declared conda environment
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq curl jq
+          mamba env create -f environment.yml
+          printf '%s\n' /opt/conda/envs/ci-skills/bin >>"$GITHUB_PATH"
+          export PATH="/opt/conda/envs/ci-skills/bin:$PATH"
+          conda run -n ci-skills mutmut --version
+      - name: Run mutation testing against the shipped library
+        id: mutmut
+        run: |
+          mkdir -p reports/raw
+          mutmut run 2>&1 | tee reports/raw/mutmut-run.txt
+      - name: Publish mutation score and surviving-mutant evidence
+        if: always()
+        run: |
+          mkdir -p reports/raw
+          mutmut export-cicd-stats
+          cp mutants/mutmut-cicd-stats.json reports/raw/mutation-stats.json
+          mutmut badge --output reports/raw/mutation-score.json
+          mutmut results | tee reports/raw/mutation-results.txt
+          {
+            printf '## Mutation score\n\n```json\n'
+            cat reports/raw/mutation-stats.json
+            printf '\n```\n'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-evidence
+          path: reports
