@@ -565,9 +565,11 @@ reference and `--describe` already identified the supported verbs. In a discarde
 supplied the flags. Count actual tool output even when the agent says it only ran the CLI. These cases motivate
 a runnable example for a supported operation and a short capability answer for an unsupported one.
 
-**Replay controls.** Use the same model (low reasoning effort), prompt, runtime and fixture in each pair. Record both guide
-digests. Fixture inputs included five MRs, a late SQL patch, a pending and a failed pipeline, a four-line trace, a raw blob and controlled failure responses. Supply a valid fixture identity URL
-and support both numeric and encoded project paths. Earlier attempts that lacked these inputs and a guide pilot with
+**Replay controls.** Use the same model (low reasoning effort), prompt, runtime and fixture in each pair.
+Record both guide digests. Fixture inputs included five MRs, a late SQL patch, a pending and a failed pipeline,
+a four-line trace, a raw blob and controlled failure responses.
+Supply a valid fixture identity URL and support both numeric and encoded project paths.
+Earlier attempts that lacked these inputs and a guide pilot with
 a literal `PY BIN/...` placeholder were excluded. The discovery pair exercised the non-interactive shell and missing
 Kubernetes import. The remaining comparison is the same replay on installed candidate binaries, including per-stream
 bytes, wrong guesses, direct PATH resolution, action receipts and live progress before timeout.
