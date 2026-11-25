@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Final, Optional
+from typing import TYPE_CHECKING, Final, Optional
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject
-from lib.python.core.kubernetes.podman_runtime import PodmanRuntimeSettings
+
+if TYPE_CHECKING:
+    from lib.python.core.kubernetes.podman_runtime import PodmanRuntimeSettings
 
 RUNTIME_ROOT: Final = "/ci-skills/runner"
 

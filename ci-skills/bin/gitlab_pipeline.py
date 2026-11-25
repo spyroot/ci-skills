@@ -23,20 +23,15 @@ from lib.python.core.cli import _failure, output_mode, parser
 from lib.python.core.gitlab.cli import resolve_gitlab_target
 from lib.python.core.gitlab.gitlab_actions import ActionError
 from lib.python.core.gitlab.gitlab_api import GitLabAPIError
-from lib.python.core.gitlab.gitlab_pipeline_start import (
-    DEFAULT_REQUEST_TIMEOUT,
-    PIPELINE_KIND,
-    start_workflow,
-)
-from lib.python.core.gitlab.gitlab_pipeline_watch import (
+from lib.python.core.gitlab.gitlab_pipeline_watch_types import (
     DEFAULT_WATCH_INTERVAL,
     DEFAULT_WATCH_TIMEOUT,
-    execute_pipeline_watch,
-    watch_failure_report,
 )
 from lib.python.core.gitlab.gitlab_pipelines import (
+    DEFAULT_REQUEST_TIMEOUT,
     MAX_JOB_PAGES,
     PAGE_SIZE,
+    PIPELINE_KIND,
     attach_pipeline_provenance,
     read_pipeline,
 )
@@ -281,6 +276,8 @@ def _watch(args: argparse.Namespace) -> int:
     :raises GitLabAPIError: Authentication or the root pipeline read fails.
     """
     target, target_source, reference = _select_target(args)
+    from lib.python.core.gitlab.gitlab_pipeline_watch import execute_pipeline_watch
+
     return execute_pipeline_watch(
         args,
         target,
@@ -302,6 +299,8 @@ def _pipeline_failure(args: argparse.Namespace, reason: str) -> int:
     if args.action != "watch":
         source = "arguments" if args.action == "get" else f"pipeline.{args.action}"
         return _failure(args, KIND, source, reason)
+    from lib.python.core.gitlab.gitlab_pipeline_watch import watch_failure_report
+
     data = watch_failure_report(args, reason)
     try:
         sys.stdout.write(emit(data, output_mode(args)))
@@ -341,6 +340,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ):
             raise ActionError("dry_run_cannot_write_output")
         if args.action == "start":
+            from lib.python.core.gitlab.gitlab_pipeline_start import start_workflow
+
             return start_workflow(args).execute()
         if args.action == "watch":
             return _watch(args)

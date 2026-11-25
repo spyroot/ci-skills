@@ -41,6 +41,10 @@ from lib.python.core.gitlab.gitlab_api import (
     create_guard,
     uncertain_write,
 )
+from lib.python.core.gitlab.gitlab_pipelines import (
+    DEFAULT_REQUEST_TIMEOUT,
+    PIPELINE_KIND,
+)
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -51,9 +55,7 @@ from lib.python.core.json_types import (
 from lib.python.core.target import GitLabOperationTarget, GitLabSelection
 from lib.python.sys.status import DRY_RUN, PLANNED
 
-PIPELINE_KIND = "gitlab_pipeline"
 PIPELINE_PLAN_VARIABLE = "CI_SKILLS_PIPELINE_PLAN_DIGEST"
-DEFAULT_REQUEST_TIMEOUT = 25
 _FULL_SHA = re.compile(r"[0-9a-f]{40}")
 _VARIABLE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 

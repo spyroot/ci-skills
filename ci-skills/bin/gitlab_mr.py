@@ -11,7 +11,6 @@ from collections.abc import Sequence
 from typing import Optional
 
 import _bootstrap  # noqa: F401
-from lib.python.core.gitlab.gitlab_action import GitLabWorkflow
 from lib.python.core.gitlab.gitlab_actions import action_parser
 
 
@@ -30,6 +29,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     :returns: Existing report exit code.
     """
     args = build_parser().parse_args(argv)
+    from lib.python.core.gitlab.gitlab_action import GitLabWorkflow
+
     return GitLabWorkflow.from_args(args).execute()
 
 
