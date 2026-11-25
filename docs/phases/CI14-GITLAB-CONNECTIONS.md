@@ -1,8 +1,13 @@
-# NOT_IMPLEMENTED: CI14 — Connect a GitLab project to GitHub and Kubernetes
+# IMPLEMENTED: CI14 — Connect a GitLab project to GitHub and Kubernetes
 
 - grounding: GROUNDED
-- verification: UNVERIFIED
+- verification: VERIFIED
 - planningStage: PLANNED
+- reconciled: 2026-11-25 — both workflows are installed in main and live-qualified for the tested
+  scenarios; mirror receipts (APPLIED/NO_OP) and Agent receipts (connect APPLIED/NO_OP, delete
+  APPLIED/NO_OP, verify) are accepted by the live-acceptance checker, `ci-skills/required` reads
+  back success on main `47c55eb`, follow-up #130 is closed, and the owned fixture repository
+  `1442655376` is verified absent. See the completed ExecPlan for the recorded evidence.
 
 ## Authority
 
@@ -49,8 +54,9 @@ catalog generation and installed schema validation. This planning pass verified 
 Reuse `core/target.py`, `core/executor.py`, `core/abstract/`, `core/gitlab/gitlab_session.py`, `core/github/github.py`,
 `core/kubernetes/kubernetes.py`, `core/kubernetes/resources.py` and `core/schema.py` under `ci-skills/lib/python/`.
 
-### NOT_IMPLEMENTED: GitLab-to-GitHub synchronization
+### IMPLEMENTED: GitLab-to-GitHub synchronization
 
+Delivered and live-qualified; this planning text is retained as the historical record.
 Main has GitLab repository-file operations and GitHub runner operations, but no Git repository mirror command. Proposed
 `ci-skills/bin/gitlab_mirror.py` calls shared services in `core/gitlab/mirror/` and `core/github/repository.py`.
 Callbacks discover both repositories and existing mirrors, plan and apply confirmed work, request synchronization, then
@@ -60,8 +66,9 @@ Current `GitHubAuth` assumes the destination exists and reads its runners. Extra
 before repository lookup or optional creation; preserve runner verification for existing callers. Missing auth,
 permissions or mirror key material returns redacted structured `BLOCKED` evidence.
 
-### NOT_IMPLEMENTED: GitLab Agent connection
+### IMPLEMENTED: GitLab Agent connection
 
+Delivered and live-qualified; this planning text is retained as the historical record.
 Existing Kubernetes runner deployment is distinct from GitLab Agent registration. Proposed
 `ci-skills/bin/gitlab_agent.py` uses shared `core/gitlab/cluster_agent/` and `core/kubernetes/gitlab_agent.py`
 callbacks. Discover the selected project, cluster, existing registrations/installations and KAS prerequisites; plan the
@@ -104,15 +111,15 @@ phase.
 
 | Requirement / authority | Status | Delivery / dependency | Gate and gap |
 | --- | --- | --- | --- |
-| R-001 installed / A3 | NOT_IMPLEMENTED / UNVERIFIED | both; PR-001/002 W-001/002; foundation | G-001/004; absent |
-| R-002 mirror / A1 | NOT_IMPLEMENTED / UNVERIFIED | mirror; PR-001/W-001; D1/D3 | G-002; ref receipt absent |
-| R-003 create / A1 | NOT_IMPLEMENTED / UNVERIFIED | GitHub; PR-001/W-001; D1/D3 | G-002; create proof absent |
-| R-004 blocker / A1 | NOT_IMPLEMENTED / UNVERIFIED | auth/report; PR-001/W-001; D1/D3 | G-001/002; JSON absent |
-| R-005 agent / A2 | NOT_IMPLEMENTED / UNVERIFIED | agent; PR-002/W-002; D2/D3 | G-003; access proof absent |
-| R-006 discovery / A3 | NOT_IMPLEMENTED / UNVERIFIED | both; PR-001/002 W-001/002; target | G-002/003; IDs absent |
-| R-007 reuse / A3 | NOT_IMPLEMENTED / UNVERIFIED | libraries; PR-001/002 W-001/002; foundation | G-001/004; absent |
-| R-008 schemas / A3 | NOT_IMPLEMENTED / UNVERIFIED | catalog; PR-001/002 W-001/002; D3 | G-001/004; schemas absent |
-| R-009 proof / A4 | NOT_IMPLEMENTED / UNVERIFIED | both; PR-001/002 W-001/002; commands | G-002/003/004; absent |
+| R-001 installed / A3 | IMPLEMENTED / VERIFIED | both; PR-001/002 W-001/002; foundation | G-001/004; required green |
+| R-002 mirror / A1 | IMPLEMENTED / VERIFIED | mirror; PR-001/W-001; D1/D3 | G-002; APPLIED/NO_OP receipts accepted |
+| R-003 create / A1 | IMPLEMENTED / VERIFIED | GitHub; PR-001/W-001; D1/D3 | G-002; creation proven in APPLIED receipt |
+| R-004 blocker / A1 | IMPLEMENTED / VERIFIED | auth/report; PR-001/W-001; D1/D3 | G-001/002; blockers proven |
+| R-005 agent / A2 | IMPLEMENTED / VERIFIED | agent; PR-002/W-002; D2/D3 | G-003; access proof receipt accepted |
+| R-006 discovery / A3 | IMPLEMENTED / VERIFIED | both; PR-001/002 W-001/002; target | G-002/003; IDs in receipts |
+| R-007 reuse / A3 | IMPLEMENTED / VERIFIED | libraries; PR-001/002 W-001/002; foundation | G-001/004; reuse proven |
+| R-008 schemas / A3 | IMPLEMENTED / VERIFIED | catalog; PR-001/002 W-001/002; D3 | G-001/004; schemas enforced |
+| R-009 proof / A4 | IMPLEMENTED / VERIFIED | both; PR-001/002 W-001/002; commands | G-002/003/004; receipts accepted |
 
 Completion requires both installed workflows and their applicable gates. A mirror sync request, agent registration or
 ready Pod alone does not prove the outcome. Additional project sharing, user-access integration and unrelated phase

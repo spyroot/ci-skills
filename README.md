@@ -567,7 +567,7 @@ command read-only or mutating, lists its subcommands and options, and routes an 
 
 Use `gitlab_agent.py connect|verify|delete` for an owned installation and actual selected-project CI access.
 The [Agent reference](ci-skills/references/gitlab-agent.md) explains prerequisites and
-[the active plan](docs/exec-plans/active/ci14-gitlab-connections.md) tracks qualification.
+[the active plan](docs/exec-plans/completed/ci14-gitlab-connections.md) tracks qualification.
 Pass `connect --project group/app --live-plan` to inspect fresh prerequisites and get a plan digest, then repeat
 with its `--run-id RUN_ID --apply --confirm-plan DIGEST`. Optional `--project-name` supplies the consumer naming base;
 explicit Agent/namespace names win without changing real provider identity. Live-plan reports fresh-workload egress
