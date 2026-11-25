@@ -368,3 +368,38 @@ remote mirror, and repositories `1467998784` and `1467987884` returned 404 by ID
 `46`) passed and was cleaned up the same way; its receipts are not kept because the pydoclint fix changed
 `ci-skills/lib`. The `238ab84` set from `main` is preserved under `tests/acceptance/historical/pre-ci16-olm-at-238ab84/`
 and this branch's `62ef623` set under `tests/acceptance/historical/pre-ci16-olm-main-integration/`.
+
+## CI15 Debian Conda toolbox read-back — 2026-11-22
+
+Installed revision `96602b5` built `ci15-conda-debian` from the immutable
+`debian:bookworm-slim` base (digest
+`sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc`).
+The [ToolboxSpec](../../ci-skills/schemas/toolbox.schema.json) declared Miniforge `26.9.4-2`
+as a checksum-verified `dependencies[].linux` installer that runs when `conda` is absent.
+Its `spec.conda` selected a Python 3.11 environment at `/opt/ci-skills/env`.
+
+The installed `toolbox.py create` command built and read back Harbor digest
+`sha256:d74ec415ece4d314e91e7fec4ff8b0117207b895efa53ba5b9ad57aceebcb01d`.
+The installed `prepare_tool_pod.py prepare` command ran that exact digest and read back
+Debian 12, UID 1001, Conda 26.9.4, and Python 3.11.18 at `/opt/ci-skills/env/bin/python`.
+An independent native read matched the Pod image digest and verified the temporary Build
+and build Secret were absent. The build namespace, BuildConfig and immutable image are retained
+for the CI15 consumer tests. The retained namespace UID is
+`5d56573b-148e-44e1-99fe-8369683a0819`, and the BuildConfig UID is
+`20063746-ff5b-4a44-becd-8b3e559020d9`.
+
+The installed `prepare_tool_pod.py remove` command removed the run's Pod, ConfigMap and
+namespace. Independent reads confirmed all three absent and the same build configuration
+retained. Repeating removal returned `NO_OP`.
+
+[CI15 G-003](../phases/CI15-RUNNER-WORKFLOWS.md#gates) consumer jobs passed on the two allocated
+fixtures. GitLab project `262`, pipeline `16199`, ran job `131789` on dedicated runner `134`.
+The job ran the verified Debian image in nested Podman and passed the environment assertions.
+Project CI returned to `disabled`; the runner, manager namespace and temporary ref were absent.
+
+[GitHub job 137189577082](https://github.com/spyroot/test-self-runner/actions/runs/45016413118/job/137189577082)
+ran on self-hosted runner `22`. Its toolbox extended the same Conda image with the Actions runner
+and GitHub CLI, yielding digest
+`sha256:2c1db33d6e8ad6814a547cf82c3aefcc09d498dc36d2dd66c37f5c4b09a6a0cd`.
+The job printed Conda 26.9.4 and `/opt/ci-skills/env/bin/python`.
+The runner, workload namespace and temporary workflow ref were removed and read back absent.

@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-24T20:39:40.267290+00:00",
+  "captured_at": "2026-11-25T19:25:41.492668+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "8b8a0fec3663267ef78b12ad1fca8dafe2b712ac9a3f1bdf6bdbc2a55dd4a319",
+  "plan_digest": "8414b8a2250400b09e9f544f6ace909206708cfc496e66014c8f36ac1cd335e5",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1470793012,
+        "id": 1472244190,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 50,
+        "id": 51,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-24T20:39:08.357Z",
+        "last_successful_update_at": "2026-11-25T19:25:30.372Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -92,12 +92,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "5fa734b362dc296b387a4efece7e1a75c87fbf856c6f56a3616549f01f3132d3",
+    "digest": "c671cac885f7177114e53e9c39b7f90381f3c0fea7e8b1b005b4f235c870cb64",
     "file_count": 331,
-    "functional_digest": "44bf2114877c159f41c37e2e217443e0d14aa71b9ff2b58b5ee2d8e6692fa715",
+    "functional_digest": "006c909ad8cb9929cc0e9d6983bcf37c9a5b5016b485e95e49e9eda1172bff65",
     "revision": {
       "source": "installer_record",
-      "value": "ec964431aa011966ef2d52045cabc272829475e7",
+      "value": "b6d05f1a07859bade973ffdbcd5bdfc78afbd604",
       "verified": true
     }
   },
@@ -108,5 +108,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user;argv:--gitlab=private",
-  "tested_revision": "ec964431aa011966ef2d52045cabc272829475e7"
+  "tested_revision": "b6d05f1a07859bade973ffdbcd5bdfc78afbd604"
 }
