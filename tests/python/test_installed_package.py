@@ -706,6 +706,70 @@ def test_installed_python_entrypoints_import_from_unrelated_directory(
         assert str(REPO_ROOT) not in result.stderr
 
 
+@pytest.mark.parametrize("script_name", ("gitlab_mr.py", "gitlab_pipeline.py"))
+def test_installed_gitlab_discovery_without_kubernetes(
+    tmp_path: Path, script_name: str
+) -> None:
+    """Exercise offline discovery even when Conda normally provides Kubernetes.
+
+    :param tmp_path: Isolated installation and unrelated command working directory.
+    :param script_name: Installed GitLab merge request or pipeline command.
+    :returns: None; assertions verify installed help and description results.
+    """
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    entrypoint = installed / "bin" / script_name
+    no_kubernetes = """
+import runpy
+import sys
+from pathlib import Path
+
+sys.modules["kubernetes"] = None
+try:
+    import kubernetes
+except ModuleNotFoundError:
+    pass
+else:
+    raise AssertionError("Kubernetes import must be unavailable")
+
+def block_external_access(event, args):
+    if event in {"socket.__new__", "subprocess.Popen"}:
+        raise AssertionError(f"offline discovery attempted {event}")
+
+sys.addaudithook(block_external_access)
+sys.argv = sys.argv[1:]
+sys.path.insert(0, str(Path(sys.argv[0]).parent))
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+    validator = Draft202012Validator(
+        json.loads(
+            (REPO_ROOT / "schemas" / "command-contract.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    for option in ("--help", "--describe"):
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", no_kubernetes, str(entrypoint), option],
+            check=False,
+            capture_output=True,
+            cwd=unrelated,
+            env={"HOME": str(unrelated), "PATH": ""},
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        if option == "--help":
+            assert "--describe" in result.stdout
+        else:
+            contract = json.loads(result.stdout)
+            validator.validate(contract)
+            assert contract["kind"] == "command_contract"
+            assert contract["command"] == script_name
+
+
 def test_installed_read_entrypoints_describe_json_yaml_and_help_without_target(
     tmp_path: Path,
 ) -> None:

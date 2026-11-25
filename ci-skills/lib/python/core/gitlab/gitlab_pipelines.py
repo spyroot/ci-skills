@@ -21,6 +21,8 @@ from lib.python.core.json_types import JSONObject, JSONValue, copy_json, json_ob
 
 PAGE_SIZE = 100
 MAX_JOB_PAGES = 5
+PIPELINE_KIND = "gitlab_pipeline"
+DEFAULT_REQUEST_TIMEOUT = 25
 
 
 def attach_pipeline_provenance(
