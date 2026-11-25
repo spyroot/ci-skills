@@ -497,3 +497,37 @@ class HelmClient:
         if observed is None or observed.revision != 1 or observed.status != "deployed":
             raise HelmError("helm_install_unverified")
         return observed
+
+    def uninstall(
+        self,
+        release: str,
+        namespace: str,
+        *,
+        timeout: float | None = None,
+    ) -> bool:
+        """Remove one installed release and independently verify its absence.
+
+        :param release: Exact release name.
+        :param namespace: Exact release storage namespace.
+        :param timeout: Optional remaining workflow seconds.
+        :returns: Whether a release was removed; verified absence needs no change.
+        :raises HelmError: Invalid selection, a failed native uninstall, or a
+            release that remains present afterwards.
+        """  # noqa: DOC502 - Selection checks and native history propagate errors.
+        self._validate_selection(release, namespace)
+        deadline = self._deadline(timeout)
+        self._verify_target(deadline)
+        if self._status(release, namespace, deadline) is None:
+            return False
+        result = self._run(
+            namespace,
+            "uninstall",
+            release,
+            deadline=deadline,
+            native_timeout=True,
+        )
+        if result.returncode:
+            raise HelmError("helm_uninstall_" + error_class(result))
+        if self._status(release, namespace, deadline) is not None:
+            raise HelmError("helm_uninstall_unverified")
+        return True

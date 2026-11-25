@@ -18,6 +18,7 @@ from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.gitlab.runner_manager import (
     DeleteManagerRunner,
+    DeployKubernetesManagerChart,
     DeployManagerRunner,
     GitLabManagerAuth,
     GitLabRunnerManagerAction,
@@ -27,8 +28,10 @@ from lib.python.core.gitlab.runner_manager import (
     ObserveGitLabRunner,
     OpenManagerRunScope,
     PullManagerImage,
+    SelectManagerChart,
     SelectManagerPlanScope,
     SelectResolvedManagerScope,
+    UninstallKubernetesManagerChart,
     VerifyGitLabRunnerOnline,
     VerifyGitLabRunnerPreserved,
     workload_action,
@@ -48,6 +51,7 @@ from lib.python.core.kubernetes.scc_access import (
     EnsureSCCAccess,
     RemoveSCCAccess,
 )
+from lib.python.core.runner_options import EXECUTOR_KUBERNETES
 from lib.python.core.toolbox_actions import ConfirmWorkflow, workflow_parser
 
 
@@ -74,10 +78,16 @@ def workflow(
         GitLabManagerAuth(action),
     ]
     if action.args.action == "deploy":
+        if action.executor == EXECUTOR_KUBERNETES:
+            repository = action.consumer_name.value
+            if not repository:
+                raise ValueError("harbor_repository_required: supply --project-name")
+        else:
+            repository = action.repository
         callbacks.append(
             HarborAuth(
                 action.target,
-                action.repository,
+                repository,
                 ("pull",),
                 action.args.timeout,
             )
@@ -88,17 +98,38 @@ def workflow(
         callbacks.append(SelectResolvedManagerScope(workload))
     else:
         callbacks.append(SelectManagerPlanScope(workload))
-    callbacks.extend((ObserveGitLabRunner(action), ConfirmWorkflow(action)))
+    callbacks.append(ObserveGitLabRunner(action))
+    if action.args.action == "deploy" and action.executor == EXECUTOR_KUBERNETES:
+        callbacks.append(SelectManagerChart(action))
+    callbacks.append(ConfirmWorkflow(action))
     if action.args.apply:
         if action.args.action == "deploy":
+            if action.executor == EXECUTOR_KUBERNETES:
+                callbacks.extend(
+                    (
+                        OpenManagerRunScope(workload),
+                        DeployKubernetesManagerChart(workload),
+                        VerifyGitLabRunnerOnline(action),
+                    )
+                )
+            else:
+                callbacks.extend(
+                    (
+                        OpenManagerRunScope(workload),
+                        EnsureSCCAccess(action.scc_access()),
+                        PullManagerImage(workload),
+                        GitLabRunnerRuntime(action),
+                        DeployManagerRunner(workload),
+                        VerifyGitLabRunnerOnline(action),
+                    )
+                )
+        elif action.executor == EXECUTOR_KUBERNETES:
             callbacks.extend(
                 (
-                    OpenManagerRunScope(workload),
-                    EnsureSCCAccess(action.scc_access()),
-                    PullManagerImage(workload),
-                    GitLabRunnerRuntime(action),
-                    DeployManagerRunner(workload),
-                    VerifyGitLabRunnerOnline(action),
+                    UninstallKubernetesManagerChart(workload),
+                    VerifyGitLabRunnerPreserved(action),
+                    present_manager_cleanup(RemoveScope(resolve)),
+                    ObserveManagerNamespace(workload),
                 )
             )
         else:

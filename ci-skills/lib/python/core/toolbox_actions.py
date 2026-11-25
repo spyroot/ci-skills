@@ -486,10 +486,10 @@ class WorkflowAction(SkillAction):
         """
         if self.spec is not None:
             return self.spec.image_repository
-        selected = getattr(self.args, "repository", "")
+        selected = getattr(self.args, "repository", None) or ""
         if selected:
             return selected
-        image = getattr(self.args, "image", "")
+        image = getattr(self.args, "image", None) or ""
         if self.target.harbor is None:
             raise ValueError("harbor_target_missing")
         prefix = f"{self.target.harbor.host}/{self.target.harbor.project}/"

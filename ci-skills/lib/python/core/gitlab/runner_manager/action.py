@@ -12,6 +12,7 @@ from typing import Final, Optional
 
 from lib.python.access.credentials import bind_sources
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.catalog import COMMAND_BY_KIND, missing_required_options
 from lib.python.core.endpoints import (
     GITLAB_AUTHORITY,
     HARBOR_AUTHORITY,
@@ -46,7 +47,9 @@ from lib.python.core.runner_identity import (
     resolve_repository,
 )
 from lib.python.core.runner_options import (
+    EXECUTOR_KUBERNETES,
     RUNNER_NAME_LIMIT,
+    parse_executor,
     parse_protected,
     runner_tags,
 )
@@ -59,6 +62,7 @@ from lib.python.core.target import (
 )
 from lib.python.core.toolbox_actions import WorkflowAction
 
+from .chart_selection import CHART_NAME, ResolvedRunnerChart
 from .token import (
     DeferredRunnerToken,
     NoRunnerToken,
@@ -69,6 +73,10 @@ from .token import (
 
 MANAGER_ROLE: Final = "gitlab-runner-manager"
 PROTECTION_DEPLOY_ONLY: Final = "protected_only_valid_for_manager_deploy"
+# The kubernetes executor installs the official chart with UBI images and
+# schedules jobs as Pods, so the shell worker image and Podman node inputs
+# stay unused; the catalog help marks both options shell-only.
+KUBERNETES_OPTIONAL_DEPLOY_OPTIONS: Final = ("--image", "--node")
 
 
 def runner_evidence(record: RunnerRecord) -> JSONObject:
@@ -166,6 +174,11 @@ class ManagerWorkloadAction(SkillAction):
         :returns: Exact node, account, privilege, storage, labels, and runner fields.
         """
         runner = self.runner(scope)
+        constraint = (
+            PRIVILEGED_CONSTRAINT
+            if self.workflow.executor != EXECUTOR_KUBERNETES
+            else None
+        )
         return {
             "runner": {
                 "namespace": runner.namespace,
@@ -175,7 +188,7 @@ class ManagerWorkloadAction(SkillAction):
                 "timeout": runner.timeout,
                 "ownership_id": runner.ownership_id,
             },
-            "security_constraint": PRIVILEGED_CONSTRAINT,
+            "security_constraint": constraint,
             "podman": runner.podman.plan() if runner.podman is not None else None,
         }
 
@@ -193,6 +206,9 @@ class ManagerWorkloadAction(SkillAction):
             if candidate
             else getattr(workflow.args, "namespace", "") or None
         )
+        constraint = (
+            PRIVILEGED_CONSTRAINT if workflow.executor != EXECUTOR_KUBERNETES else None
+        )
         return {
             "runner": {
                 "namespace": namespace,
@@ -208,7 +224,7 @@ class ManagerWorkloadAction(SkillAction):
                 "timeout": workflow.args.timeout,
                 "ownership_id": run_id,
             },
-            "security_constraint": PRIVILEGED_CONSTRAINT,
+            "security_constraint": constraint,
             "podman": (
                 workflow.podman_runtime.plan()
                 if workflow.podman_runtime is not None
@@ -263,6 +279,12 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :type: Optional[PodmanRuntimeSettings]
 
         Exact deploy settings; deletion has no Podman runtime input.
+
+    .. attribute :: chart_selection
+        :type: Optional[ResolvedRunnerChart]
+
+        Bound official chart and pinned archive for the kubernetes executor,
+        assigned by the plan-time chart callback before confirmation.
     """
 
     context: GitLabRunnerManagerState = field(default_factory=GitLabRunnerManagerState)
@@ -275,6 +297,11 @@ class GitLabRunnerManagerAction(WorkflowAction):
     podman_runtime: Optional[PodmanRuntimeSettings] = field(
         init=False,
         default=None,
+    )
+    chart_selection: Optional[ResolvedRunnerChart] = field(
+        init=False,
+        default=None,
+        repr=False,
     )
 
     @property
@@ -325,6 +352,18 @@ class GitLabRunnerManagerAction(WorkflowAction):
             project_name=self.project_name,
         )
         return labels
+
+    @property
+    def executor(self) -> str:
+        """Read the canonical runner job executor selected for this operation.
+
+        :returns: ``shell`` or ``kubernetes``; omission selects ``shell``.
+        :raises ValueError: Preparation did not resolve the executor.
+        """
+        value = getattr(self.args, "executor", None)
+        if not isinstance(value, str) or not value:
+            raise ValueError("runner_manager_executor_unresolved")
+        return value
 
     @property
     def node(self) -> str:
@@ -402,6 +441,37 @@ class GitLabRunnerManagerAction(WorkflowAction):
             DEFAULT_SERVICE_ACCOUNT,
             name_prefix=self.consumer_name.value or None,
         )
+
+    def _validate(self) -> None:
+        """Reject invalid modes and bind each executor's exact required inputs.
+
+        The shared catalog contract keeps ``--image`` and ``--node`` required
+        for the deploy verb because the default shell executor needs both; the
+        kubernetes executor installs the official chart instead and omits them.
+
+        :raises ValueError: If required inputs, timeout, or plan/apply flags conflict.
+        """
+        args = self.args
+        if not args.action:
+            raise ValueError("action_required")
+        if args.apply and args.dry_run:
+            raise ValueError("apply_and_dry_run_conflict")
+        if args.confirm_plan and not args.apply:
+            raise ValueError("confirm_plan_requires_apply")
+        if args.timeout <= 0:
+            raise ValueError("timeout_must_be_positive")
+        missing = missing_required_options(COMMAND_BY_KIND[args.kind], args)
+        if (
+            parse_executor(getattr(args, "executor", None)) == EXECUTOR_KUBERNETES
+            and args.action == "deploy"
+        ):
+            missing = [
+                option
+                for option in missing
+                if option not in KUBERNETES_OPTIONAL_DEPLOY_OPTIONS
+            ]
+        if missing:
+            raise ValueError("missing_options:" + ",".join(missing))
 
     def _prepare_scope(self) -> None:
         """Prepare a deploy candidate or validate delete lookup identity.
@@ -482,6 +552,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
             pending=target_kind == "project",
         )
         self.args.runner_id = self.runner_id
+        self.args.executor = parse_executor(getattr(self.args, "executor", None))
         self.args.description = self.resolved_description.value or None
         parse_protected(getattr(self.args, "protected", None))
         self.args.tag = list(self.labels)
@@ -509,23 +580,27 @@ class GitLabRunnerManagerAction(WorkflowAction):
         if self.args.action == "delete":
             self.runner_token = NoRunnerToken()
             return
-        self.args.node = self.node
-        defaults = PodmanResources()
-        resources = PodmanResources(
-            cpu_request=getattr(self.args, "cpu_request", None) or defaults.cpu_request,
-            cpu_limit=getattr(self.args, "cpu_limit", None) or defaults.cpu_limit,
-            memory_request=getattr(self.args, "memory_request", None)
-            or defaults.memory_request,
-            memory_limit=getattr(self.args, "memory_limit", None)
-            or defaults.memory_limit,
-            storage_size=getattr(self.args, "storage_size", None)
-            or defaults.storage_size,
-        )
-        self.podman_runtime = PodmanRuntimeSettings(
-            node_name=self.args.node,
-            service_account=DEFAULT_SERVICE_ACCOUNT,
-            resources=resources,
-        )
+        if self.executor == EXECUTOR_KUBERNETES:
+            self.podman_runtime = None
+        else:
+            self.args.node = self.node
+            defaults = PodmanResources()
+            resources = PodmanResources(
+                cpu_request=getattr(self.args, "cpu_request", None)
+                or defaults.cpu_request,
+                cpu_limit=getattr(self.args, "cpu_limit", None) or defaults.cpu_limit,
+                memory_request=getattr(self.args, "memory_request", None)
+                or defaults.memory_request,
+                memory_limit=getattr(self.args, "memory_limit", None)
+                or defaults.memory_limit,
+                storage_size=getattr(self.args, "storage_size", None)
+                or defaults.storage_size,
+            )
+            self.podman_runtime = PodmanRuntimeSettings(
+                node_name=self.args.node,
+                service_account=DEFAULT_SERVICE_ACCOUNT,
+                resources=resources,
+            )
         path = token_path(getattr(self.args, "token_file", ""))
         self.runner_token = (
             DeferredRunnerToken(path) if self.args.dry_run else read_runner_token(path)
@@ -593,6 +668,28 @@ class GitLabRunnerManagerAction(WorkflowAction):
             "tag_list": list(self.labels),
         }
 
+    def _chart_evidence(self) -> JSONObject | None:
+        """Render the bound chart selection for confirmation, or absence.
+
+        The resolved version, application version, provenance and archive
+        digest bind the confirmed plan to one exact chart install.
+
+        :returns: Nonsecret chart identity, or ``None`` outside the kubernetes
+            deploy path.
+        """
+        selected = self.chart_selection
+        if selected is None:
+            return None
+        selection = selected.selection
+        return {
+            "chart": CHART_NAME,
+            "chart_version": selection.chart_version,
+            "app_version": selection.app_version,
+            "gitlab_version": selection.gitlab_version,
+            "requested": selection.requested,
+            "digest": selected.digest,
+        }
+
     def scope_plan(self) -> tuple[JSONObject, JSONObject]:
         """Bind deploy selection and exact delete scope without volatile reuse state.
 
@@ -634,6 +731,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
                 "protected": parse_protected(getattr(self.args, "protected", None)),
                 "kind": self.args.kind,
                 "operation": self.args.action,
+                "executor": self.executor,
                 "skill": copy_json(self.target.skill),
                 "tested_revision": self.target.tested_revision,
                 "target_file": str(target_file),
@@ -665,8 +763,9 @@ class GitLabRunnerManagerAction(WorkflowAction):
                     for observation in self.context.runner_scopes.values()
                 ],
                 "workload": workload,
+                "chart": self._chart_evidence(),
                 "authorization": self.scc_access().plan()
-                if self.args.action == "deploy"
+                if self.args.action == "deploy" and self.executor != EXECUTOR_KUBERNETES
                 else None,
             }
         )

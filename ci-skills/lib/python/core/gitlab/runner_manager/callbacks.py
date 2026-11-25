@@ -36,12 +36,13 @@ from lib.python.core.kubernetes.scc_access import resolve_role_binding_name
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.runner import (
     REGISTRATION_SECRET_SUFFIX,
+    REGISTRY_SECRET_SUFFIX,
     RUNTIME_ROOT,
     RunnerRuntime,
     runner_runtime_identities,
 )
 from lib.python.core.runner_identity import NameSource, ResolvedName
-from lib.python.core.runner_options import parse_protected
+from lib.python.core.runner_options import EXECUTOR_KUBERNETES, parse_protected
 from lib.python.core.target import (
     GitLabOperationTarget,
     TargetError,
@@ -53,6 +54,7 @@ from .action import (
     GitLabRunnerManagerState,
     runner_evidence,
 )
+from .helm_deploy import runner_deployment_helm_owned, runner_token_secret_name
 from .token import BoundRunnerToken, read_runner_token
 
 GITLAB_INIT_SCRIPT: Final = SKILL_ROOT / "lib/bash/runner/gitlab-init.bash"
@@ -306,8 +308,13 @@ class ObserveGitLabRunner(GitLabManagerComponent):
     def _require_owned_online_manager(self) -> None:
         """Require one exact manager in the resolved run scope.
 
+        The shell manager is owned through shared operation labels; the
+        kubernetes manager is owned by its Helm release and verified through
+        the exact native Helm annotations instead.
+
         :returns: None after verifying resource ownership.
         :raises ActionError: Scope or manager ownership is absent or ambiguous.
+        :raises KubernetesError: Manager ownership metadata is malformed.
         """
         scopes = tuple(self.manager_state.found_scopes)
         if len(scopes) != 1:
@@ -317,8 +324,14 @@ class ObserveGitLabRunner(GitLabManagerComponent):
         current = self.state.kubernetes.read(
             "deployment", runner.name, runner.namespace
         )
+        if current is None:
+            raise ActionError("runner_online_outside_selected_manager")
+        if getattr(self.workflow.args, "executor", None) == EXECUTOR_KUBERNETES:
+            if not runner_deployment_helm_owned(current, runner.name, runner.namespace):
+                raise ActionError("runner_online_outside_selected_manager")
+            return
         resources = ResourceSet(self.state.kubernetes, runner.namespace, scope.run_id)
-        if current is None or not resources.owns(current):
+        if not resources.owns(current):
             raise ActionError("runner_online_outside_selected_manager")
 
     def run(self) -> JSONObject:
@@ -440,6 +453,10 @@ def retain_manager_resources(
 ) -> None:
     """Retain resources needed by one successfully delivered manager.
 
+    The kubernetes manager keeps its run-owned credential Secrets and its
+    operation-owned namespace; the chart workload itself is retained through
+    its Helm release until the confirmed delete removes it.
+
     :param state: Shared manager state containing the exact run scope.
     :param workflow: Deploy action whose owned resources must remain available.
     :returns: None after recording retained resource identities.
@@ -449,6 +466,20 @@ def retain_manager_resources(
     retained = state.retained_resources
     if scope.owns_namespace:
         retained.add(resource_identity("Namespace", scope.namespace, ""))
+    if getattr(workflow.args, "executor", None) == EXECUTOR_KUBERNETES:
+        retained.add(
+            resource_identity(
+                "Secret", runner_token_secret_name(scope, runner.name), scope.namespace
+            )
+        )
+        retained.add(
+            resource_identity(
+                "Secret",
+                runner.name + REGISTRY_SECRET_SUFFIX,
+                scope.namespace,
+            )
+        )
+        return
     retained.update(
         resource_identity(kind, name, scope.namespace)
         for kind, name in runner_runtime_identities(runner.name)

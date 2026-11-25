@@ -405,6 +405,8 @@ def _manager_args(
         token_file=str(state.token_path),
         run_id=action.manager_scope.run_id,
         namespace=action.args.namespace,
+        executor=getattr(action.args, "executor", None),
+        chart_version=getattr(action.args, "chart_version", None),
         apply=True,
         dry_run=False,
         live_plan=False,

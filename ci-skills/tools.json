@@ -1162,12 +1162,14 @@
       "options": [
         "--apply",
         "--binding",
+        "--chart-version",
         "--confirm-plan",
         "--cpu-limit",
         "--cpu-request",
         "--describe",
         "--description",
         "--dry-run",
+        "--executor",
         "--gitlab",
         "--gitlab-profile",
         "--group",
@@ -1225,7 +1227,7 @@
             "kubernetes"
           ],
           "result_schema": "schemas/results/toolbox-workflow.schema.json",
-          "side_effects": "Confirmed apply removes only run-owned manager resources and preserves the GitLab runner record."
+          "side_effects": "Confirmed apply removes only run-owned manager resources and preserves the GitLab runner record. Kubernetes-executor delete requires the generated owned namespace: managers deployed into a caller-selected (borrowed) namespace are not discoverable by delete and must be removed with helm/kubectl directly."
         },
         "deploy": {
           "read_back": "Exact-node privileged Deployment and immutable Pod image, then the exact scoped GitLab runner online with contact evidence.",
@@ -1409,12 +1411,14 @@
       "options": [
         "--apply",
         "--binding",
+        "--chart-version",
         "--confirm-plan",
         "--cpu-limit",
         "--cpu-request",
         "--describe",
         "--description",
         "--dry-run",
+        "--executor",
         "--gitlab",
         "--gitlab-profile",
         "--group",
