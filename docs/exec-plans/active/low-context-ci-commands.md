@@ -211,19 +211,65 @@ Paths beginning with `core/` have the expansion given in Context and Orientation
 define the review surface. Compare each with the shipped schema and submit the exact versioned contract diff before
 changing a published record. An optional field added to a closed record still requires compatibility review.
 
-| Change | Files and interface | Invariant or read-back |
-| --- | --- | --- |
-| REFACTOR H1 | `ci-skills/bin/gitlab_mr.py`, `ci-skills/bin/gitlab_pipeline.py`, `core/gitlab/gitlab_actions.py`, `core/runner_options.py` | Parse help before importing operational factories. Import Kubernetes only on the path that needs it. |
-| MODIFIED H1 | `core/cli.py:MachineArgumentParser`, `core/read_cli.py:ReadArgumentParser`, `core/help.py:CommandHelp`, `core/catalog.py` | One declaration supplies human help, machine help, accepted options and examples. Existing `--describe` validates against `schemas/command-contract.schema.json`. |
-| INTRODUCED H1 | Compact `--help --json` projection, emitted by `core/help.py` | Prefer the recovered source shape if approved. For a new shape propose `schema_version:string`, `command:string` and `verbs:array`. Each verb has `name`, `purpose`, `usage`, `example` strings, `required_options:string[]`, `options:map<string,string>` and `mutates:boolean`. Use `schemas/command-help.schema.json` only for that distinct approved shape. |
-| MODIFIED H1/H2 | `core/read_cli.py`, `core/read_tools.py`, `core/runtime.py`, `core/cli_api.py`, `core/logging.py` | API usage failure with `--json` writes one stdout record with `status="BLOCKED"`, `error_class="invalid_arguments"`, `missing:string[]`, `usage:string` and exit 64. A provider failure keeps stdout free of partial provider data and writes one diagnostic to stderr with `error_class:string` and a bounded sanitized `detail:string`, serialized as JSON for machine callers. |
-| MODIFIED H3 | `pyproject.toml`, `install.sh`, `tools/install_ci_skills.py`, `ci-skills/bin/` | Console names resolve to one installed distribution. Map `ci-api` to `lib.python.core.read_cli:api_main`. Move the three domain mains to `core/gitlab/entrypoints.py` as `mr_main`, `pipeline_main` and `job_main`, each accepting `argv=None` and returning the existing exit code. Old and new launchers delegate to those functions. Include package data and verify discovery after a wheel install outside the checkout. |
-| REFACTOR H4 | `ci-skills/bin/gitlab_pipeline.py`, `core/gitlab/cli.py`, `core/gitlab/gitlab_pipelines.py`, `core/gitlab/job_read.py`, `core/gitlab/gitlab_jobs.py` | Compose `GitLabAuth` → one `GitlabCallback.run()` for pipeline get, job get or job list. Retain output and independent access read-back. Compare the same fixtures before and after. |
-| INTRODUCED H5 | `core/gitlab/gitlab_merge_requests.py`, `core/catalog.py`, proposed `ci-skills/schemas/results/gitlab-mr-read.schema.json` | List records carry `iid:positive integer`, `title:string`, `head_sha:string or null`, `detailed_merge_status:string or null` and nullable `head_pipeline` with positive `id`, verified `sha` and `status:string`. Diff records carry `old_path`, `new_path`, `patch` strings. Carry `truncated:boolean` and per-IID/file errors in the enclosing result. |
-| MODIFIED H6 | `core/gitlab/gitlab_pipeline_graph.py`, `gitlab_pipeline_watch_types.py` and `gitlab_pipeline_watch_runtime.py` in the same directory, `ci-skills/schemas/results/gitlab-pipeline-watch.schema.json` | Retain existing totals. For each retained unsettled job expose `id`, `name`, `status`, nullable positive `runner_id`, nullable nonnegative `queue_seconds` and `run_seconds`, and `queue_time_source` of `provider`, `observed_pending` or `unknown`. Report truncation explicitly. |
-| INTRODUCED H6 | `core/gitlab/job_read.py`, `core/gitlab/gitlab_pipeline_graph.py`, `core/catalog.py`, proposed `ci-skills/schemas/results/gitlab-failure-summary.schema.json` | Failures return job `id`, `name`, `status`, nullable `failure_reason` and optional bounded `trace_tail:string` with truncation or a per-job error. `--trace-lines N` requests excerpts. Zero trace fetches without it. `ci-job logs` uses the same bounded tail. |
-| MODIFIED H7 | `core/gitlab/gitlab_merge_requests.py`, `core/gitlab/gitlab_action.py`, `core/catalog.py` and, if required, `ci-skills/schemas/results/gitlab-action.schema.json` | `merge` requires a positive IID, full source SHA and target branch. Read-back identifies `iid`, `state`, `source_sha`, `target_branch` and nullable `merge_commit_sha`. A deferred/unknown state cannot produce a verified merge. |
-| MODIFIED H8 | `ci-skills/SKILL.md`, `core/catalog.py` and the affected files in `ci-skills/references/` | Regenerate `ci-skills/tools.json` from the catalog. One node offers the relevant installed command and immediate reading pointers. |
+**REFACTOR H1.** `ci-skills/bin/gitlab_mr.py`, `ci-skills/bin/gitlab_pipeline.py`,
+`core/gitlab/gitlab_actions.py`, `core/runner_options.py`. Parse help before importing operational
+factories. Import Kubernetes only on the path that needs it.
+
+**MODIFIED H1.** `core/cli.py:MachineArgumentParser`, `core/read_cli.py:ReadArgumentParser`,
+`core/help.py:CommandHelp`, `core/catalog.py`. One declaration supplies human help, machine help, accepted
+options and examples. Existing `--describe` validates against `schemas/command-contract.schema.json`.
+
+**INTRODUCED H1.** Compact `--help --json` projection, emitted by `core/help.py`. Prefer the recovered source
+shape if approved. For a new shape propose `schema_version:string`, `command:string` and `verbs:array`. Each
+verb has `name`, `purpose`, `usage`, `example` strings, `required_options:string[]`,
+`options:map<string,string>` and `mutates:boolean`. Use `schemas/command-help.schema.json` only for that
+distinct approved shape.
+
+**MODIFIED H1/H2.** `core/read_cli.py`, `core/read_tools.py`, `core/runtime.py`, `core/cli_api.py`,
+`core/logging.py`. API usage failure with `--json` writes one stdout record with `status="BLOCKED"`,
+`error_class="invalid_arguments"`, `missing:string[]`, `usage:string` and exit 64. A provider failure keeps
+stdout free of partial provider data and writes one diagnostic to stderr with `error_class:string` and a
+bounded sanitized `detail:string`, serialized as JSON for machine callers.
+
+**MODIFIED H3.** `pyproject.toml`, `install.sh`, `tools/install_ci_skills.py`, `ci-skills/bin/`. Console
+names resolve to one installed distribution. Map `ci-api` to `lib.python.core.read_cli:api_main`. Move the
+three domain mains to `core/gitlab/entrypoints.py` as `mr_main`, `pipeline_main` and `job_main`, each
+accepting `argv=None` and returning the existing exit code. Old and new launchers delegate to those functions.
+Include package data and verify discovery after a wheel install outside the checkout.
+
+**REFACTOR H4.** `ci-skills/bin/gitlab_pipeline.py`, `core/gitlab/cli.py`, `core/gitlab/gitlab_pipelines.py`,
+`core/gitlab/job_read.py`, `core/gitlab/gitlab_jobs.py`.
+Compose `GitLabAuth` → one `GitlabCallback.run()`
+for pipeline get, job get or job list. Retain output and independent access read-back. Compare the same
+fixtures before and after.
+
+**INTRODUCED H5.** `core/gitlab/gitlab_merge_requests.py`, `core/catalog.py`, proposed
+`ci-skills/schemas/results/gitlab-mr-read.schema.json`. List records carry `iid:positive integer`,
+`title:string`, `head_sha:string or null`, `detailed_merge_status:string or null` and nullable
+`head_pipeline` with positive `id`, verified `sha` and `status:string`. Diff records carry `old_path`,
+`new_path`, `patch` strings. Carry `truncated:boolean` and per-IID/file errors in the enclosing result.
+
+**MODIFIED H6.** `core/gitlab/gitlab_pipeline_graph.py`, `gitlab_pipeline_watch_types.py` and
+`gitlab_pipeline_watch_runtime.py` in the same directory,
+`ci-skills/schemas/results/gitlab-pipeline-watch.schema.json`. Retain existing totals. For each retained
+unsettled job expose `id`, `name`, `status`, nullable positive `runner_id`, nullable nonnegative
+`queue_seconds` and `run_seconds`, and `queue_time_source` of `provider`, `observed_pending` or `unknown`.
+Report truncation explicitly.
+
+**INTRODUCED H6.** `core/gitlab/job_read.py`, `core/gitlab/gitlab_pipeline_graph.py`, `core/catalog.py`,
+proposed `ci-skills/schemas/results/gitlab-failure-summary.schema.json`. Failures return job `id`, `name`,
+`status`, nullable `failure_reason` and optional bounded `trace_tail:string` with truncation or a per-job
+error. `--trace-lines N` requests excerpts. Zero trace fetches without it. `ci-job logs` uses the same bounded
+tail.
+
+**MODIFIED H7.** `core/gitlab/gitlab_merge_requests.py`, `core/gitlab/gitlab_action.py`, `core/catalog.py`
+and, if required, `ci-skills/schemas/results/gitlab-action.schema.json`. `merge` requires a positive IID,
+full source SHA and target branch. Read-back identifies `iid`, `state`, `source_sha`, `target_branch` and
+nullable `merge_commit_sha`. A deferred/unknown state cannot produce a verified merge.
+
+**MODIFIED H8.** `ci-skills/SKILL.md`, `core/catalog.py` and the affected files in `ci-skills/references/`.
+Regenerate `ci-skills/tools.json` from the catalog. One node offers the relevant installed command and
+immediate reading pointers.
 
 The successful API `get` value remains native JSON or explicitly selected text. For `--raw`/`--output text`,
 preserve line numbering with `--lines`. Reject contradictory JSON/text or raw-pagination selections. An invalid
@@ -235,20 +281,20 @@ only from positive evidence. Never echo tokens, response bodies, arbitrary stder
 
 | Variable Name | Type | Default / Required | Source / Scope | Description & Invariants |
 | --- | --- | --- | --- | --- |
-| `CI_SKILLS_LOG_LEVEL` | string enum | Optional, mode default | Proposed CLI setting | `debug`, `info`, `warning`, `error`. Explicit CLI setting wins. |
-| `CI_SKILLS_PYTHON` | executable path | Optional, prepared environment | Existing installer, extended for launchers | Explicit path must resolve to the supported interpreter. |
-| `PATH` | path list | Supplied by caller | Process environment | First choice for native executables. Test with Homebrew absent from PATH. |
-| `CI_SKILLS_TARGET` | path | Optional | Existing target resolver | Explicit binding and the existing repository/user selection rules keep their precedence. |
-| `CI_SOURCE_SHA` | commit SHA | Required in validation | GitHub validation workflow | Binds checks to the candidate commit. |
+| `CI_SKILLS_LOG_LEVEL` | Enum | Mode default | CLI environment | `debug`, `info`, `warning`, `error`. CLI wins. |
+| `CI_SKILLS_PYTHON` | Path | Prepared interpreter | Installer | Explicit value must pass base import/version checks. |
+| `PATH` | Path list | Caller-supplied | Process | Search native clients here first. |
+| `CI_SKILLS_TARGET` | Path | Optional | Target resolver | Preserve existing selection precedence. |
+| `CI_SOURCE_SHA` | SHA | Required | GitHub workflow | Exact candidate revision. |
 
 No credential variable is introduced. Use the existing configured target for live reads and an explicitly selected
 disposable project and MR for write acceptance. The example variables select the fixture objects and reviewed digest.
 
 | Variable Name | Type | Default / Required | Source / Scope | Description & Invariants |
 | --- | --- | --- | --- | --- |
-| `PROJECT` | positive integer | Required in examples | Disposable project | Exact GitLab project ID, including in the raw API path. |
-| `PIPELINE_ID`, `JOB_ID`, `IID` | positive integers | Per example | Provider read-back | Pipeline ID, job ID and project-local MR number for the selected project. |
-| `HEAD_SHA`, `TARGET_BRANCH`, `DIGEST` | strings | Merge example | Reviewed MR and plan output | Expected source commit, destination branch and confirmation digest. |
+| `PROJECT` | Positive ID | Required | Fixture project | GitLab project ID for the API and workflow examples. |
+| `PIPELINE_ID`, `JOB_ID`, `IID` | Positive IDs | Per verb | GitLab read-back | Pipeline, job and project-local MR. |
+| `HEAD_SHA`, `TARGET_BRANCH`, `DIGEST` | Strings | Merge only | MR and plan | Source SHA, destination, confirmation. |
 
 ### CI pipelines and jobs
 
@@ -256,10 +302,10 @@ All rows use [.github/workflows/validate.yml][workflow].
 
 | Pipeline / Job Name | Type / Trigger | Stage / Order | File Path | Required Inputs & Artifacts |
 | --- | --- | --- | --- | --- |
-| `validate` | PR, push, schedule, manual | Parallel | [Workflow][workflow] | Candidate checkout, manifest and schema checks, Python/Bats results. |
-| `gate-ci-skills-endpoints` | Same | Parallel | [Workflow][workflow] | Endpoint inventory and evidence for the candidate. |
-| `test-install` | Same | Parallel | [Workflow][workflow] | Installed-package and installer results for the candidate. |
-| `required-result` | Same | After all three | [Workflow][workflow] | Aggregate their evidence and read back `ci-skills/required` for the same SHA. |
+| `validate` | PR, push, schedule, manual | Parallel | [Workflow][workflow] | Candidate, schema and test results. |
+| `gate-ci-skills-endpoints` | Same | Parallel | [Workflow][workflow] | Endpoint inventory and evidence. |
+| `test-install` | Same | Parallel | [Workflow][workflow] | Installed package and installer results. |
+| `required-result` | Same | After all three | [Workflow][workflow] | Exact-head `ci-skills/required` status. |
 
 ### Verification gates
 
@@ -268,14 +314,14 @@ Use the [repository gate table][gates] and its existing owners. The gate table c
 
 | Gate ID | Gate Type / Class | Pass Condition | Fail-Closed Condition | Producer / Owner |
 | --- | --- | --- | --- | --- |
-| `validate` | Static and behavioral | Candidate catalog, schemas and affected positive/negative cases pass | Drift, failure or missing evidence | [Workflow][workflow], `tools/render_manifest.py` |
-| `test-install` | Installed package | Candidate runs from outside its checkout with documented dependencies | Traceback, wrong revision or missing installation evidence | `tests/python/test_installed_package.py` |
-| `gate-ci-skills-endpoints` | Endpoint contract | Existing endpoint checks pass | Invalid authority or missing endpoint evidence | `gates/gate-ci-skills-endpoints.py` |
-| `validate.live_acceptance` | Existing receipt coverage | Operations selected by `inventory/ci/live-acceptance.json` have accepted receipts | Missing required operation or invalid receipt | `tools/check_live_acceptance.py` |
-| `ci-skills/required` | Required GitHub status | Aggregate succeeds on the exact head | Failed, skipped or mismatched required evidence | `tools/ci_required_result.py` |
+| `validate` | Static/behavior | Catalog, schemas and tests pass | Drift, failure, missing evidence | [CI][workflow] |
+| `test-install` | Installation | External invocation succeeds | Wrong revision or missing proof | [Install][install] |
+| `gate-ci-skills-endpoints` | Endpoint | Valid authority and evidence | Invalid or missing evidence | [Gate][ep] |
+| `validate.live_acceptance` | Receipts | Selected operations verified | Invalid or missing receipt | [Checker][ac] |
+| `ci-skills/required` | GitHub status | Exact head passes | Failed, skipped or mismatched evidence | [Result][res] |
 
-At baseline the live inventory requires access, mirror and agent operations. Its green status alone cannot establish
-MR, watch, trace or merge acceptance. `test-install` owns offline discovery and upgrade recovery. `validate` owns
+At baseline `inventory/ci/live-acceptance.json` requires access, mirror and agent operations. Its green status cannot
+prove MR, watch, trace or merge acceptance. `test-install` owns offline discovery and upgrade recovery. `validate` owns
 parser, callback and stream assertions. For H5–H7, each capability PR supplies installed-candidate evidence for its
 claimed live action on the selected fixture. H7 records the intended head and branch before the write and reads both
 back after merge. Cite the receipt and its exact revision separately unless that operation is selected by the inventory.
@@ -409,6 +455,10 @@ destination, install-recovery and offline-help cases, observable queue progress,
 [command-schema]: ../../../schemas/command-contract.schema.json
 [workflow]: ../../../.github/workflows/validate.yml
 [gates]: ../../plans/index.md#repository-gates
+[install]: ../../../tests/python/test_installed_package.py
+[ep]: ../../../gates/gate-ci-skills-endpoints.py
+[ac]: ../../../tools/check_live_acceptance.py
+[res]: ../../../tools/ci_required_result.py
 [merge-api]: https://docs.gitlab.com/api/merge_requests/#merge-a-merge-request
 [i78]: https://github.com/spyroot/ci-skills/issues/78
 [i134]: https://github.com/spyroot/ci-skills/issues/134
