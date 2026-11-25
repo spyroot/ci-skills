@@ -21,7 +21,8 @@ contains identity/scope/interface code; the next work separates its live proof f
   repeat completed cases.
 - [x] Deliver the approved optional `--project-name` override and propagate its consumer-specific names
   ([PR #145](https://github.com/spyroot/ci-skills/pull/145), merged).
-- [ ] Deliver PR-002 plain Debian/Ubuntu Conda provisioning and a consuming toolbox job.
+- [x] Record historical Debian Conda proof on both runner paths (see [consumer jobs][conda-proof]).
+- [ ] Complete PR-002 plain Debian/Ubuntu Conda provisioning and qualify both runner paths on the current candidate.
 - [ ] Deliver PR-003 repository-scoped ARC with `--runner-mode persistent|ephemeral` (default `persistent`).
 - [ ] Deliver PR-004 `--executor shell|kubernetes` (default `shell`) through manager and build chain; the
   Kubernetes mode must not require Podman prerequisites.
@@ -32,9 +33,9 @@ contains identity/scope/interface code; the next work separates its live proof f
 R-002, R-004, R-009 and R-010 implementation labels lag current source. Shared identity and scope handling now
 exists, including repository-derived names, namespace ownership and selected runner protection. Tests are not live
 proof. The completed baseline supplies bounded historical proof for the two consumer paths above, not the
-remaining namespace/protection matrix. `CondaInput._render` in `core/toolbox.py` still requires an existing `conda`; it
-does not provision Conda on
-plain Debian/Ubuntu. The manager bootstrap still configures the shell executor, not the proposed Kubernetes executor.
+remaining namespace/protection matrix. `CondaInput._render` in `core/toolbox.py` requires `conda` after the declared
+dependencies run. The historical Debian jobs used the existing installer dependency to supply it. The manager
+bootstrap still configures the shell executor, not the proposed Kubernetes executor.
 
 ## Decision Log
 
@@ -54,10 +55,9 @@ when absent on the selected plain Debian/Ubuntu base and verifies the environmen
 
 ## Outcomes & Retrospective
 
-The bounded PR-001 baseline is complete. Next: reconcile #132 and the pre-existing shared-namespace failure
-limitation [#131](https://github.com/spyroot/ci-skills/issues/131), then execute only the unchecked work above.
-CI15 stays active because consumer override, remaining qualification variants, Conda bootstrap, ARC, Kubernetes
-executor and GitLab.com qualification are unfinished. Historical DCloud proof does not qualify GitLab.com.
+The bounded PR-001 baseline is complete. The shared build namespace failure tracked in
+[#131](https://github.com/spyroot/ci-skills/issues/131) remains open. CI15 stays active for the remaining runner
+qualification variants, current-candidate Conda proof, ARC, Kubernetes executor and GitLab.com qualification.
 
 ## Context and Orientation
 
@@ -97,8 +97,8 @@ provision the required Conda environment, rather than stopping at `command -v co
 callbacks and the existing toolbox specification. Before changing any specification fields, show the exact original
 field/type/invariant delta; this plan chooses no new fields or image defaults. Read back OS, Conda and a real
 consuming job as required by G-003. Select the OS through `baseImage`, not another flavor flag. Qualify the
-same toolbox contract in both nested Podman and Kubernetes-hosted private-runner paths; existing Conda support
-is not evidence that bootstrap on an image without Conda already works.
+same toolbox contract in both nested Podman and Kubernetes-hosted private-runner paths on the current candidate.
+Use the [historical Debian runs][conda-proof] as the baseline.
 
 ### CI15-M3: deliver the separately requested fleet and executor slices
 
@@ -191,9 +191,19 @@ separate ownership-primitive repeat proved absence with zero further DELETE; the
 repeated as NO_OP. Preserve that distinction. The failed, unqualified image remains retained because exclusive
 reference proof was incomplete; reuse only the qualified image in the inventory.
 
-These are historical results for the stated source and scope. No Conda, ARC, Kubernetes-executor, GitLab.com or
-remaining explicit namespace/protection qualification is recorded as complete. The [plan map](../../plans/index.md)
-retains the original phase/gate relationship.
+These are historical results for the stated source and scope. The [plan map](../../plans/index.md) retains the
+original phase/gate relationship. ARC, Kubernetes executor, GitLab.com and remaining namespace/protection
+qualification are open.
+
+### Historical Debian Conda proof
+
+Installed revision `96602b5` built a digest-pinned plain Debian 12 image. The toolbox dependency list supplied
+checksum-pinned Miniforge, and `spec.conda` created the Python 3.11 environment at `/opt/ci-skills/env`.
+[GitHub job 137189577082][conda-github] passed on its Kubernetes-hosted runner and printed Conda 26.9.4 and the
+environment's interpreter path. [GitLab job 131789][conda-gitlab] passed on its shell runner by running the Debian
+image in nested Podman and asserting the environment prefix and Python version. Both temporary runner
+registrations, namespaces and refs were verified absent; GitLab project CI returned to `disabled`. G-003
+qualification on the current candidate remains open.
 
 ## Interfaces and Dependencies
 
@@ -204,6 +214,9 @@ and the original phase are the authority for the remaining mechanisms and select
 Revision DEC-CI15-01: separated delivered PR-001 code from missing proof and later capability slices while
 preserving the unchanged phase and its caller-choice invariants.
 
+[conda-proof]: #historical-debian-conda-proof
+[conda-github]: https://github.com/spyroot/test-self-runner/actions/runs/45016413118/job/137189577082
+[conda-gitlab]: https://gitlab.dcloud.run/hott/test-self-runner/-/jobs/131789
 [phase]: ../../phases/CI15-RUNNER-WORKFLOWS.md
 [phase-gates]: ../../phases/CI15-RUNNER-WORKFLOWS.md#gates
 [workflow]: ../../../.github/workflows/validate.yml

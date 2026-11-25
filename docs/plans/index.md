@@ -26,7 +26,7 @@ The [CI11-TOOLS plan](../phases/CI11-TOOLS.md) distinguishes installed commands 
 | [CI12][ci12] | [Completed][exec-ci12] | Tool Pod/ISO proved; accepted CSR/join mock boundary | [Onboarding][ci12-gates] |
 | [CI13][ci13] | [Active][exec-ci13] | Probe/historical chain proof → interruption/current-chain job | [Readiness][ci13-gates] |
 | [CI14][ci14] | [Completed][exec-ci14] | Qualified mirror and Agent delivery; receipts accepted on main | [Connections][ci14-gates] |
-| [CI15][ci15] | [Active][exec-ci15] | Qualified baseline → remaining naming/Conda/ARC/executors | [Runners][ci15-gates] |
+| [CI15][ci15] | [Active][exec-ci15] | Runner and Debian Conda proof → remaining qualification | [Runners][ci15-gates] |
 | [CI16][ci16] | [Active][exec-ci16] | No OLM code → enable operator, apply shipped resources | [Operator][ci16-gates] |
 
 The ExecPlans retain each phase's existing decisions and requirement boundaries. Source-phase status prose is
@@ -38,9 +38,8 @@ phases.
 [CI13 evidence][ci13-evidence] retains outstanding interruption and chain proof.
 
 The completed [CI14 evidence][mirror-proof] and active [CI15 evidence][baseline] record the completed PRs and actual
-consumer job IDs/cleanup. CI14 is filed under completed; CI15 remains active. Conda bootstrap
-remains approved unfinished CI15 work, not a new
-development-machine prerequisite.
+consumer job IDs and cleanup. CI14 is filed under completed. CI15 remains active, with historical Debian Conda
+consumer proof and current-candidate qualification still open.
 
 Completed records live in [completed/](../exec-plans/completed/); unfinished plans live in
 [active/](../exec-plans/active/).

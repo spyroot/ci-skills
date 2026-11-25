@@ -6,7 +6,7 @@
 - reconciled: 2026-11-25 — PR-001 (identity, scope, aliases, protection) is delivered in main with bounded
   live proof (PR #127: one GitHub persistent consumer job and one GitLab shell/Podman job, same-ID NO_OP and
   exact-owned cleanup); follow-up #132 is closed; the approved `--project-name` override is delivered in PR #145.
-  Remaining open work: #131, PR-002 Conda bootstrap on plain Debian/Ubuntu, PR-003 ARC fleet,
+  Remaining open work: #131, PR-002 Conda qualification on the current candidate, PR-003 ARC fleet,
   PR-004 Kubernetes executor and PR-005 GitLab.com qualification.
 
 ## Authority
@@ -276,11 +276,11 @@ mutation. This GitLab setting has no implicit GitHub equivalent.
 ### PARTIALLY_IMPLEMENTED: Debian/Ubuntu and Conda toolbox
 
 `ToolboxSpec` already selects `baseImage`, dependencies and optional `conda`;
-the build fingerprints the Conda environment file. Current rendering requires
-`conda` in the base image, so a plain Debian or Ubuntu base is not yet an
-out-of-box Conda toolbox. The selected base must resolve to an immutable
-digest. Read its actual OS identity, use the existing dependency mechanism to
-provide Conda when absent, and verify the requested environment's interpreter
+the build fingerprints the Conda environment file. The environment creation step requires `conda` after
+the declared dependencies run. A checksum-pinned installer dependency supplied it for the
+[historical Debian jobs][conda-proof]. The selected base must resolve to an immutable digest.
+Read its actual OS identity, use the existing dependency mechanism to provide Conda when absent,
+and verify the requested environment's interpreter
 and tools inside the resulting image and consuming runner. The agent selects
 Debian or Ubuntu only through `baseImage`; read-back reports the actual OS.
 Do not add a separate OS-flavor input. Qualify the same toolbox contract in
@@ -410,9 +410,8 @@ workflow callbacks. Passing static checks alone does not satisfy live gates.
   G-002; retention proven by the PR #127 cleanup read-back.
 - **R-004 Interface parity / CI15-ARGS-001:** IMPLEMENTED / VERIFIED. Delivery: PR-001/W-001;
   catalog, parsers, shared result schemas. Gate and gap: G-001/007; names, aliases, repetition and omission.
-- **R-005 OS and Conda / CI15:** PARTIALLY_IMPLEMENTED / UNVERIFIED. Delivery: PR-002/W-002. Gate and gap:
-  G-003; real job. Conda environments build when the base image already provides Conda; bootstrap on a plain
-  Debian/Ubuntu base remains undelivered.
+- **R-005 OS and Conda / CI15:** PARTIALLY_IMPLEMENTED / PARTIALLY_VERIFIED. Delivery: PR-002/W-002. Gate and gap:
+  G-003; [historical Debian jobs][conda-proof] passed on both runner paths. Current-candidate qualification remains open.
 - **R-006 GitHub fleet / CI15:** NOT_IMPLEMENTED / UNVERIFIED. Delivery: PR-003/W-003. Gate and gap: G-004;
   one-job fleet.
 - **R-007 K8s executor / CI15:** NOT_IMPLEMENTED / UNVERIFIED. Delivery: PR-004/W-004. Gate and gap: G-005;
@@ -520,3 +519,5 @@ G-005 passes when one consumer job runs in a job Pod in the selected namespace, 
 the job image digest, the runner ID, tags and `access_level`, the job Pod is absent afterwards while the manager
 remains, and the delete removes the release and the Secret while the runner record stays until
 `gitlab_runner.py delete`.
+
+[conda-proof]: ../exec-plans/active/ci15-runner-workflows.md#historical-debian-conda-proof
