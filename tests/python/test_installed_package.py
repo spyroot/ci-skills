@@ -767,7 +767,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             contract = json.loads(result.stdout)
             validator.validate(contract)
             assert contract["kind"] == "command_contract"
-            assert contract["command"] == f"bin/{script_name}"
+            assert contract["command"] == script_name
 
 
 def test_installed_read_entrypoints_describe_json_yaml_and_help_without_target(
