@@ -28,8 +28,9 @@ live-qualified; this plan is retained as the completed record.
 The phase labeled both workflows absent when this plan was opened; that lag is now reconciled.
 Current source contains
 `ci-skills/bin/gitlab_mirror.py`, `core/gitlab/mirror/cli.py` and `workflow.py`, shared Git ref comparison in
-`core/git/mirroring.py`, GitHub repository access and installed input/result schemas. The candidate mirror receipts
-identify tested revision `ec964431`; the original qualification identified `bcf7d598`. Their existence is recorded evidence, not execution on a new candidate.
+`core/git/mirroring.py`, GitHub repository access and installed input/result schemas. The candidate mirror
+receipts identify tested revision `ec964431`; the original qualification identified `bcf7d598`. Their existence is
+recorded evidence, not execution on a new candidate.
 The Agent workflow was delivered after this plan's baseline: `ci-skills/bin/gitlab_agent.py`,
 `core/gitlab/cluster_agent/` and `core/kubernetes/gitlab_agent.py` are present in main, with the candidate
 Agent receipts (connect APPLIED/NO_OP, delete APPLIED/NO_OP, verify) accepted on main `47c55eb`.
