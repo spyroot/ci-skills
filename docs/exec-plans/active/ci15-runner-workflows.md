@@ -19,7 +19,8 @@ contains identity/scope/interface code; the next work separates its live proof f
 - [x] Reconcile runner follow-ups [#132](https://github.com/spyroot/ci-skills/issues/132) (closed 2026-11-22).
 - [ ] Finish uncovered PR-001 explicit/default selection, borrowed namespace and protection variants; do not
   repeat completed cases.
-- [ ] Deliver the approved optional `--project-name` override and propagate its consumer-specific names.
+- [x] Deliver the approved optional `--project-name` override and propagate its consumer-specific names
+  ([PR #145](https://github.com/spyroot/ci-skills/pull/145), merged).
 - [ ] Deliver PR-002 plain Debian/Ubuntu Conda provisioning and a consuming toolbox job.
 - [ ] Deliver PR-003 repository-scoped ARC with `--runner-mode persistent|ephemeral` (default `persistent`).
 - [ ] Deliver PR-004 `--executor shell|kubernetes` (default `shell`) through manager and build chain; the

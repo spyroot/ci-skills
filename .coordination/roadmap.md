@@ -8,4 +8,4 @@
 | CI12 | Node onboarding | Implemented; partially verified; planned | CSR/join proof is still mocked |
 | CI13 | Image build readiness | Partial; partially verified; planned | Consumer job proof remains external |
 | CI14 | GitLab connections | Implemented; verified; delivered | None — receipts accepted on main; #130 closed |
-| CI15 | Runner scopes and toolbox | Partial foundation; partially verified; planned | #131, `--project-name` override, Conda bootstrap, GitHub fleet, GitLab Kubernetes executor, GitLab.com proof <!-- markdownlint-disable-line MD013 --> |
+| CI15 | Runner scopes and toolbox | Partial foundation; partially verified; planned | #131, Conda bootstrap, GitHub fleet, GitLab Kubernetes executor, GitLab.com proof <!-- markdownlint-disable-line MD013 --> |

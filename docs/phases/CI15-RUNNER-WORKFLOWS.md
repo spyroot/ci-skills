@@ -5,9 +5,9 @@
 - planningStage: PLANNED
 - reconciled: 2026-11-25 — PR-001 (identity, scope, aliases, protection) is delivered in main with bounded
   live proof (PR #127: one GitHub persistent consumer job and one GitLab shell/Podman job, same-ID NO_OP and
-  exact-owned cleanup); follow-up #132 is closed. Remaining open work: #131, the approved `--project-name`
-  override, PR-002 Conda bootstrap on plain Debian/Ubuntu, PR-003 ARC fleet, PR-004 Kubernetes executor and
-  PR-005 GitLab.com qualification.
+  exact-owned cleanup); follow-up #132 is closed; the approved `--project-name` override is delivered in PR #145.
+  Remaining open work: #131, PR-002 Conda bootstrap on plain Debian/Ubuntu, PR-003 ARC fleet,
+  PR-004 Kubernetes executor and PR-005 GitLab.com qualification.
 
 ## Authority
 
@@ -425,7 +425,7 @@ workflow callbacks. Passing static checks alone does not satisfy live gates.
 - **R-010 Repository-derived names / CI15-IDENTITY-001:** IMPLEMENTED / VERIFIED. Delivery:
   PR-001/W-001; shared identity and scope resolver, catalog and parsers. Gate and gap: G-001/002; caller
   repository, explicit overrides, missing-input handling and identity preservation. The approved optional
-  `--project-name` consumer override remains undelivered.
+  `--project-name` consumer override is delivered in PR #145.
 
 Earlier DCloud receipts do not prove this CI-Skills candidate or GitLab.com
 behavior. G-007 must pass for each actual PR head.
