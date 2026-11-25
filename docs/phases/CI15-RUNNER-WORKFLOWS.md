@@ -421,3 +421,94 @@ workflow callbacks. Passing static checks alone does not satisfy live gates.
 
 Earlier DCloud receipts do not prove this CI-Skills candidate or GitLab.com
 behavior. G-007 must pass for each actual PR head.
+
+## Proposed D-001/D-002 resolution — pending approval
+
+This section proposes the D-001 and D-002 choices. It is not approved and nothing in it is implemented. Product
+facts live in the skill references [github-arc.md](../../ci-skills/references/github-arc.md) and
+[gitlab-runner-helm.md](../../ci-skills/references/gitlab-runner-helm.md); this section records only the choices.
+
+Two earlier statements change. The Kubernetes executor installs the official `gitlab-runner` chart instead of
+extending `DeployRunner` with `RunnerAction.podman=None`. The ARC keys below add a target table, although this
+phase's Consumer section says "No target key is added here".
+
+The ARC keys also conflict with the target contract. `ci-skills/lib/python/core/endpoints.py` limits target keys to
+endpoints and access and says namespaces are read from the live system at run time; `tools/skillkit/endpoint_gate.py`
+rule `VALUE_INTRODUCED` refuses a new value key. `[github.arc].token_file` is an access key and fits the contract;
+`controller_namespace` and `controller_release` are value keys and do not. Implementation needs one of two
+decisions: change the contract to admit these two keys, or take the controller as an operation input
+(`--arc-controller-namespace`, `--arc-controller-release`) and keep only `token_file` in the target.
+
+### D-001: GitHub ephemeral fleet (PR-003)
+
+- **Selection:** `create_selfhosted_runner.py --runner-mode ephemeral` installs an ARC scale set; the default
+  `persistent` keeps the current Deployment. Basis: DEC-CI15-02.
+- **Charts:** `gha-runner-scale-set-controller` and `gha-runner-scale-set`, default `0.15.1`; `--chart-version`
+  overrides. With a borrowed controller the scale set uses the controller's chart version, and a different
+  `--chart-version` returns `BLOCKED`. Basis: team decision; ARC keeps both chart versions equal.
+- **Controller:** `[github.arc]` keys `controller_namespace` and `controller_release` name it. When present, the
+  command borrows it and the scale set uses its chart version. When absent, the command installs the selected version
+  there as run-owned. Without the table the command returns `BLOCKED`. Basis: team decision that the target names
+  the controller.
+- **Credential:** `[github.arc].token_file` names a token with `repo` and `workflow` scopes and without
+  `delete_repo`. The command copies it into a run-owned Secret with key `github_token`. `[github].token_file` stays
+  unchanged because mirror cleanup needs `delete_repo`. Basis: team decision.
+- **Scope and name:** `githubConfigUrl` comes from the selected repository; `runnerScaleSetName` comes from
+  CI15-IDENTITY-001 and `--project-name`.
+- **Runner image:** the retained `test-self-runner-toolbox` digest from the
+  [smoke inventory](../2026-10-31/live-smoke-inventory.md), runner command `/opt/actions-runner/run.sh`,
+  `containerMode` unset. Basis: inventory reuse rule; ARC custom image contract.
+- **Capacity:** `minRunners=0`, `maxRunners=1`, two sequential two-minute jobs, 20-minute observation. Basis: smoke
+  inventory run budget.
+- **Cleanup:** the command uninstalls the scale set, deletes the run-owned Secret, removes the controller only when
+  this run installed it, then reads absence. Basis: CI15-NS-001 ownership.
+
+G-004 passes when both consumer jobs succeed on the scale set, their runner names and Pod UIDs differ, and no runner
+Pod remains after the jobs.
+
+### D-002: GitLab Kubernetes executor (PR-004)
+
+```mermaid
+sequenceDiagram
+    participant C as gitlab_runner_manager.py
+    participant G as GitLab API
+    participant K as Kubernetes API
+    C->>G: GET /api/v4/version (18.5.2-ee)
+    C->>C: chart index: highest appVersion 18.5.x -> chart 0.82.0
+    C->>K: create run-owned Secret runner-token
+    C->>K: helm install gitlab-runner 0.82.0, runners.secret
+    K-->>C: manager Pod UID, image digest
+    C->>G: read runner online, tags, access_level
+```
+
+- **Selection:** `gitlab_runner_manager.py --executor kubernetes`; the default `shell` keeps the Podman
+  Deployment. `image_build_readiness.py chain --executor` passes the same value to its manager deploy step. Basis:
+  DEC-CI15-02 and the ExecPlan's "through manager and build chain".
+- **Install:** `helm install` of the official chart through the selected `[kubernetes]` authority. Basis: GitLab Helm
+  install guide.
+- **Agent route:** not used. GitLab deprecated pull-based agent deployment in 16.2 and announced its removal for
+  17.0. Basis: GitLab deprecations.
+- **Version:** the command reads the selected instance's `/api/v4/version`, keeps `MAJOR.MINOR` and selects the
+  highest chart whose `appVersion` matches, else the highest lower minor in the same major. `--chart-version`
+  overrides; the plan reports both. Basis: GitLab runner version rule; team decision.
+- **Runner record and token:** `gitlab_runner.py create --token-out` creates the record before deploy, as today;
+  deploy keeps `--runner-id` and `--token-file`. A run-owned Secret holds key `runner-token`; chart value
+  `runners.secret` names it. Basis: current manager contract; chart values; the Helm contract keeps secrets out of
+  values.
+- **Permissions:** the chart Role with GitLab's rule list for default executor settings and
+  `rbac.clusterWideAccess: false`. Basis: GitLab chart configuration.
+- **Job namespace:** the release namespace (`runners.jobNamespace` unset), selected under CI15-NS-001. Basis: chart
+  default.
+- **Images:** UBI `gitlab-runner-ocp:v<appVersion>` and `gitlab-runner-helper-ocp:x86_64-v<appVersion>`,
+  `useTini: true`, `runAsNonRoot`, no fixed user ID. Basis: GitLab non-root guide; `restricted-v2`.
+- **Job image:** the retained `ci13-runner-toolbox` digest from the smoke inventory, pulled with
+  `image_pull_secrets`. Basis: inventory reuse rule.
+- **Concurrency:** `concurrent = 1`. Basis: smoke inventory bounded execution.
+- **Delete:** the command pauses the runner, waits for running jobs within `--timeout`, runs `helm uninstall`,
+  deletes the token Secret, then reads absence. It preserves the runner record; `gitlab_runner.py delete` removes it,
+  as today. Basis: GitLab uninstall guide; current manager contract.
+
+G-005 passes when one consumer job runs in a job Pod in the selected namespace, the read-back shows that Pod's UID,
+the job image digest, the runner ID, tags and `access_level`, the job Pod is absent afterwards while the manager
+remains, and the delete removes the release and the Secret while the runner record stays until
+`gitlab_runner.py delete`.

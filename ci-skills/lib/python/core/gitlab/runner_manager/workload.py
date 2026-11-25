@@ -16,21 +16,21 @@ from lib.python.core.abstract.callback import (
 )
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject
+from lib.python.core.kubernetes.kinds import (
+    DEPLOYMENT_KIND,
+    ROLE_BINDING_KIND,
+    SECRET_KIND,
+)
 from lib.python.core.kubernetes.kubernetes import (
     K8SCallback,
     KubernetesError,
     KubernetesService,
 )
-from lib.python.core.kubernetes.resources import (
-    MANAGER_LABEL,
-    MANAGER_VALUE,
-    OPERATION_LABEL,
-)
 from lib.python.core.kubernetes.run_scope import (
-    RUN_ID_LABEL,
     OpenRunScope,
     RunScope,
     RunScopeAction,
+    run_ownership_selector,
     validate_namespace,
 )
 from lib.python.core.kubernetes.runner import (
@@ -70,19 +70,12 @@ _SECRET_COLUMNS: Final = (
 
 
 def _run_secret_remnants(service: KubernetesService, run_id: str) -> bool:
-    selector = ",".join(
-        (
-            f"{MANAGER_LABEL}={MANAGER_VALUE}",
-            f"{OPERATION_LABEL}={run_id}",
-            f"{RUN_ID_LABEL}={run_id}",
-        )
-    )
     result = service.command(
         "get",
         "secrets",
         "--all-namespaces",
         "-l",
-        selector,
+        run_ownership_selector(run_id),
         "-o",
         _SECRET_COLUMNS,
         "--no-headers",
@@ -128,9 +121,7 @@ def _require_manager_resources_absent(
     for kind, name in sorted(resources):
         if service.read(kind, name, scope.namespace) is not None:
             raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
-    if not getattr(workflow.args, "namespace", None) and _run_secret_remnants(
-        service, scope.run_id
-    ):
+    if _run_secret_remnants(service, scope.run_id):
         raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
 
 
@@ -340,7 +331,7 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
             owned = scope.resources(self.kubernetes)
             if any(
                 owned.owned_objects(kind)
-                for kind in ("Deployment", "Secret", "RoleBinding")
+                for kind in (DEPLOYMENT_KIND, SECRET_KIND, ROLE_BINDING_KIND)
             ):
                 raise KubernetesError(MANAGER_SCOPE_NOT_UNIQUE)
         _require_manager_resources_absent(self.kubernetes, self.action, scope)

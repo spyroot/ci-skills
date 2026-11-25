@@ -502,11 +502,13 @@ scope = RunScope.new(namespace=pod_action.namespace, run_id=pod_action.run_id)
 callbacks = [K8SAuth(target)]
 if pod_action.run_id is not None:
     callbacks.append(ResolveRunScopes(ResolveRunScopeAction(pod_action.run_id)))
-callbacks.extend([
-    OpenRunScope(RunScopeAction(scope)),
-    StageToolPod(pod_action),
-    ReadToolState(tools_action),
-])
+callbacks.extend(
+    [
+        OpenRunScope(RunScopeAction(scope)),
+        StageToolPod(pod_action),
+        ReadToolState(tools_action),
+    ]
+)
 callbacks.extend(tool_callbacks(tools_action))
 callbacks.append(VerifyTools(tools_action))
 return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks)).run()

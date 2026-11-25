@@ -71,16 +71,21 @@ from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequenc
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http import HTTPMethod, HTTPStatus
-from importlib import import_module
 from pathlib import Path
 from types import FrameType, ModuleType
 from typing import Any, Final, Optional, TypeVar
 from urllib.parse import quote
 
+from skillkit.installed_copy import (
+    InstalledCopyError,
+    bind_skill,
+    installed_module,
+)
 from skillkit.smoke_cleanup import (
     AFTER_FIELD,
     BEFORE_FIELD,
     CAPTURED_AT_FIELD,
+    CLEANUP_PASS,
     DELETE_FIELD,
     EXECUTION_HOST_FIELD,
     KIND_FIELD,
@@ -154,7 +159,6 @@ CLEANUP_PENDING: Final = "PENDING"
 MIRROR_DELETE_PENDING: Final = "MIRROR_DELETE_PENDING"
 DESTINATION_DELETE_PENDING: Final = "MIRROR_ABSENT_DESTINATION_DELETE_PENDING"
 VERIFY_PENDING: Final = "DELETES_RETURNED_204_VERIFY_PENDING"
-CLEANUP_PASS: Final = "PASS_INDEPENDENT_ABSENCE_AND_REPEAT"
 PENDING_STATES: Final = frozenset(
     {
         APPLY_PENDING,
@@ -185,8 +189,6 @@ SEED_REF_MOVED: Final = "seed_ref_moved"
 # ``installed_bindings`` formats ``name`` with the missing attribute name;
 # ``_installed_module`` formats it with the dotted module name.
 INSTALLED_LIB_INCOMPATIBLE: Final = "installed_lib_incompatible:{name}"
-INSTALLED_LIB_UNAVAILABLE: Final = "installed_lib_unavailable:{name}"
-INSTALLED_LIB_SHADOWED: Final = "installed_lib_shadowed:{name}"
 # ``mirror_targets`` reports this reason when the installed ``repository_url_key``
 # raises ``ValueError`` on the mirror URL or the destination clone URL.
 REPOSITORY_URL_MALFORMED: Final = "repository_url_malformed"
@@ -796,9 +798,7 @@ def installed_bindings(skill: Path) -> InstalledBindings:
     :raises QualificationError: A module cannot be imported, loads from another
         directory, or lacks a bound name.
     """
-    root = str(skill)
-    if root not in sys.path:
-        sys.path.insert(0, root)
+    bind_skill(skill)
     catalog = _installed_module(skill, CATALOG_MODULE)
     cli_api = _installed_module(skill, CLI_API_MODULE)
     gitlab_api = _installed_module(skill, GITLAB_API_MODULE)
@@ -1845,13 +1845,9 @@ def _installed_module(skill: Path, name: str) -> ModuleType:
         another directory.
     """
     try:
-        module = import_module(name)
-    except ImportError as exc:
-        raise QualificationError(INSTALLED_LIB_UNAVAILABLE.format(name=name)) from exc
-    location = Path(module.__file__ or "").resolve()
-    if not location.is_relative_to(skill.resolve()):
-        raise QualificationError(INSTALLED_LIB_SHADOWED.format(name=name))
-    return module
+        return installed_module(skill, name)
+    except InstalledCopyError as exc:
+        raise QualificationError(str(exc)) from exc
 
 
 def _owned_id(

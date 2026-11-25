@@ -42,13 +42,13 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from importlib import util
 from pathlib import Path
 from types import ModuleType
 from typing import Final, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from skillkit.installed_copy import file_module
 from skillkit.mirror_qualification import (
     DEFAULT_SETTLE_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
@@ -175,12 +175,7 @@ def repository_status() -> ModuleType:
     :returns: The repository's status module.
     :raises ImportError: ``importlib.util`` returns no spec or loader for the file.
     """
-    spec = util.spec_from_file_location(REPOSITORY_STATUS_NAME, REPOSITORY_STATUS_FILE)
-    if spec is None or spec.loader is None:
-        raise ImportError(str(REPOSITORY_STATUS_FILE), name=REPOSITORY_STATUS_NAME)
-    module = util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return file_module(REPOSITORY_STATUS_NAME, REPOSITORY_STATUS_FILE)
 
 
 def _blocked(reason: str) -> int:

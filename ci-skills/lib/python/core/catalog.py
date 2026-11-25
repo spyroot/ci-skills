@@ -65,6 +65,10 @@ SCHEMA_VERSION = "1.0"
 ROUTED_RESULT_SCHEMA_VERSION: Final = "1.1"
 SKILL_NAME = "ci-skills"
 GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
+# Reference names that commands list in `references` and that key PROPOSITION_REFERENCES.
+GITHUB_ARC_REFERENCE: Final = "GitHub Actions Runner Controller"
+GITLAB_RUNNER_HELM_REFERENCE: Final = "GitLab Runner Helm chart"
+OPENSHIFT_SCC_REFERENCE: Final = "OpenShift SCC access"
 # `--gitlab private|public` selects one GitLab instance table. The deprecated
 # `--gitlab-profile NAME` selects a legacy [gitlab.NAME] table (TD-11).
 GITLAB_TARGET_HELP: Final = (
@@ -321,6 +325,118 @@ TARGET_FILENAME = "target.toml"
 PROJECT_DIR = ".ci-skills"
 
 COMMANDS: Mapping[str, CommandDefinition] = {
+    "gitlab_agent.py": {
+        "kind": "gitlab_agent",
+        "purpose": "Connect a selected GitLab project to Kubernetes through its Agent.",
+        "use_when": "Install an Agent, verify selected-project CI access, or remove one owned run.",
+        "requires": (GITLAB_AUTHORITY, KUBERNETES_AUTHORITY),
+        "capabilities": ("namespaced",),
+        "mutates": True,
+        "options": {
+            **PROJECT_NAMING_OPTIONS,
+            "--project": "exact project path or ID; otherwise use the selected target project",
+            "--agent-name": "optional exact name on connect; required on every delete",
+            "--namespace": "exact existing namespace to preserve; connect omission creates an owned consumer namespace",
+            "--run-id": "run identity returned by connect; required for verify and delete",
+            "--job-url": "verify: exact selected-project native CI job producing agent-access.json",
+            "--live-plan": "connect/delete: inspect fresh prerequisites and identities without mutation",
+            "--apply": "connect/delete: perform the operation bound by a fresh live plan",
+            "--confirm-plan": "exact digest binding intent, native identities and installed candidate",
+            "--timeout": "positive operation timeout in seconds, at most 300 (default: 300)",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write the sanitized installed Agent operation receipt",
+                read_operations=("verify",),
+                live_plan=True,
+            ),
+        },
+        "subcommands": {
+            "connect": {
+                "purpose": "Register, install and independently verify one owned Agent connection.",
+                "required_options": [],
+                "result_schema": "schemas/results/gitlab-agent.schema.json",
+                "read_back": "Match native registration, immutable chart/image and active GraphQL "
+                "connection metadata to independently read owned Pod UIDs.",
+            },
+            "verify": {
+                "purpose": "Verify actual selected-project CI access through that Agent.",
+                "required_options": ["--run-id", "--job-url"],
+                "result_schema": "schemas/results/gitlab-agent.schema.json",
+                "mutates": False,
+                "read_back": "Match native project/job/pipeline/consumer SHA and the staged "
+                ".gitlab-ci.yml, ci_access_probe.py and ci_access_proof.py bytes to the "
+                "installed candidate, real KAS context and selected cluster UID.",
+            },
+            "delete": {
+                "purpose": "Remove only exact run-owned native identities.",
+                "required_options": ["--run-id", "--agent-name"],
+                "result_schema": "schemas/results/gitlab-agent.schema.json",
+                "read_back": "Check known native IDs/UIDs absent and borrowed objects preserved; "
+                "absent-record repeat proves logical Agent/release/run-marker absence.",
+            },
+        },
+        "related": ("gitlab_access.py", "gitlab_pipeline.py", "gitlab_job.py"),
+        "references": ("GitLab Agent connectivity",),
+        "required_tools": ("glab", "kubectl", "helm", "skopeo"),
+        "returns": "Confirmed plan or native installation, connection, selected-project CI proof "
+        "and exact-owned cleanup evidence.",
+        "execution_surface": "selected GitLab API and Kubernetes authority; shared Helm/OCI adapters",
+        "side_effects": "Confirmed connect may create one Agent registration, token, owned namespace, "
+        "token Secret, nonsecret recovery ConfigMap and Helm release. Successful connect retains "
+        "the installation; failure compensates only run-created objects. Unowned Agent/release "
+        "collisions are blocked and preserved. Verify is read-only. Confirmed delete preserves "
+        "borrowed resources. Connection alone never proves CI access.",
+        "credentials": (
+            (
+                "T1 GitLab token: the credential access_protocol.gitlab resolves for the selected "
+                "GitLab instance. It reads the project and KAS metadata, registers the Agent, creates "
+                "the Agent token and reads connections."
+            ),
+            (
+                "T2 Kubernetes credential: the kubeconfig access_protocol.kubernetes resolves for the "
+                "selected cluster. It creates the namespace, recovery ConfigMap and token Secret, "
+                "installs the Helm release and reads Pods."
+            ),
+            (
+                "T3 Agent token: GitLab returns it once; the command writes it only to Secret key "
+                "token; agentk mounts that Secret and connects to KAS. T3 never appears in argv, "
+                "Helm values, reports or logs."
+            ),
+            (
+                "T4 CI job credential (verify): GitLab gives the consumer proof job a KUBECONFIG "
+                "with context <project path>:<agent name> that authenticates to KAS with a token "
+                "built from the job's CI_JOB_TOKEN. The command never reads T4; the job artifact "
+                "agent-access.json records kubeconfig_source gitlab_ci, the context and the KAS "
+                "proxy URL."
+            ),
+            (
+                "Flow: T1 -> GitLab creates T3 -> T2 stores T3 in the Secret -> agentk Pod -> KAS. "
+                "Result field credentials lists each GitLab request, each created object, the T3 ID, "
+                "its Secret UID and the connected Pods."
+            ),
+        ),
+        "examples": (
+            {
+                "description": "Inspect selected-project prerequisites",
+                "command": "gitlab_agent.py connect --project group/app --live-plan --json",
+            },
+            {
+                "description": "Apply the exact returned run identity and live plan",
+                "command": "gitlab_agent.py connect --project group/app --run-id RUN_ID "
+                "--apply --confirm-plan DIGEST --json",
+            },
+            {
+                "description": "Verify one real selected-project consumer job",
+                "command": "gitlab_agent.py verify --project group/app --run-id RUN_ID "
+                "--job-url JOB_URL --receipt-out agent-verify.json --json",
+            },
+            {
+                "description": "Inspect owned cleanup with a stable repeat selector",
+                "command": "gitlab_agent.py delete --project group/app --run-id RUN_ID "
+                "--agent-name AGENT_NAME --live-plan --json",
+            },
+        ),
+    },
     "gitlab_mirror.py": {
         "kind": "gitlab_mirror",
         "purpose": "Synchronize a selected GitLab project to GitHub with independent ref verification.",
@@ -408,6 +524,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("toolbox.py", "harbor_push.py", "harbor_pull.py"),
+        "references": (GITHUB_ARC_REFERENCE, OPENSHIFT_SCC_REFERENCE),
         "required_tools": ("gh", "kubectl", "oc", "skopeo"),
         "returns": "Versioned operation plan or independently verified callback results, with "
         "cleanup evidence.",
@@ -773,7 +890,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "references": (
             "Nested Podman readiness",
             "Image build chain",
-            "OpenShift SCC access",
+            OPENSHIFT_SCC_REFERENCE,
             "Podman inside a Pod",
             "Harbor API shapes",
         ),
@@ -786,6 +903,144 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "execution_surface": "configured Kubernetes API; chain also uses the selected GitLab project and Harbor registry",
         "side_effects": "Probe creates and removes temporary cluster resources. Chain publishes the toolbox "
         "and leaves its configured runner and manager available.",
+    },
+    "ocp_operator.py": {
+        "kind": "olm_operator",
+        "purpose": "Enable an OLM operator such as the NVIDIA Network Operator and apply the resource its package ships.",
+        "use_when": "An OpenShift cluster needs an OLM package enabled, its shipped default resource applied, or an answer stating what the caller must supply.",
+        "requires": (KUBERNETES_AUTHORITY,),
+        "capabilities": ("namespaced",),
+        "mutates": True,
+        "required_tools": (
+            "kubectl",
+            "oc on OpenShift",
+        ),
+        "returns": "A plan or operation evidence: resolved channel, catalog source and Subscription state, or the applied resource status.",
+        "execution_surface": "configured Kubernetes API; the registry Secret callback reads a matched [registry.<name>] profile",
+        "side_effects": "Apply mode creates the Namespace, OperatorGroup, Subscription and the selected custom resource. "
+        "A matched registry profile may create a pull Secret in the package namespace. The cluster-wide pull secret is never edited.",
+        "options": {
+            "--package": "OLM package name, e.g. nvidia-network-operator",
+            "--namespace": "namespace the package enables into",
+            "--channel": "override the PackageManifest default channel",
+            "--source": "override the catalog source serving the package",
+            "--source-namespace": "override the catalog source namespace",
+            "--install-mode": "override the resolved install mode",
+            "--approval": "Automatic or Manual install plan approval",
+            "--starting-csv": "pin the starting ClusterServiceVersion",
+            "--kind": "shipped custom resource kind to apply",
+            "--shipped-default": "apply the example document the package ships",
+            "--spec": "caller document with site values",
+            "--wait-for": "status field and value that mean the applied resource is done",
+            "--timeout": "positive operation deadline in seconds",
+            "--live-plan": "read cluster state and print an apply-ready digest",
+            "--apply": "run the confirmed operation and read back its result",
+            "--confirm-plan": "exact fingerprint returned by the live plan",
+            "--receipt-out": "write a sanitized operation receipt to this exact path",
+        },
+        "subcommands": {
+            "install": {
+                "purpose": "Resolve or create the Namespace, OperatorGroup and Subscription that enable one package.",
+                "requires_authorities": (KUBERNETES_AUTHORITY,),
+                "result_schema": "schemas/results/olm-operator.schema.json",
+                "mutates": True,
+                "side_effects": "Apply mode creates the Namespace, OperatorGroup and Subscription.",
+                "read_back": "PackageManifest channel and source, Subscription identity and the installed CSV phase.",
+            },
+            "apply": {
+                "purpose": "Apply the resource document the package ships as its example, or the caller's --spec document.",
+                "requires_authorities": (KUBERNETES_AUTHORITY,),
+                "result_schema": "schemas/results/olm-operator.schema.json",
+                "mutates": True,
+                "side_effects": "Apply mode creates the selected custom resource and waits for the caller-stated status field.",
+                "read_back": "The status the operator's controller wrote for the applied object.",
+            },
+            "remove": {
+                "purpose": "Remove one applied custom resource, or the package Subscription when no kind is named.",
+                "requires_authorities": (KUBERNETES_AUTHORITY,),
+                "result_schema": "schemas/results/olm-operator.schema.json",
+                "mutates": True,
+                "side_effects": "Deletes the named object or the package enablement; CRDs always stay.",
+                "read_back": "Independent absence of every deleted object.",
+            },
+        },
+        "examples": [
+            {
+                "description": "Preview enabling the NVIDIA Network Operator",
+                "command": "ocp_operator.py install --package nvidia-network-operator --namespace nvidia-network-operator --live-plan",
+            },
+        ],
+        "related": (
+            "reference.py",
+            "access_check.py",
+        ),
+    },
+    "nvidia_gpu_operator.py": {
+        "kind": "nvidia_gpu_operator",
+        "purpose": "Inspect NVIDIA GPU Operator health and safely pause or resume node, policy, or MachineConfigPool reconciliation on OpenShift.",
+        "use_when": "An OpenShift cluster needs GPU Operator health verification (standard, DRA, or non-standard/Secure Boot drivers) or symmetric pause/resume before maintenance.",
+        "requires": (KUBERNETES_AUTHORITY,),
+        "capabilities": ("namespaced", "node_scoped"),
+        "mutates": True,
+        "required_tools": (
+            "kubectl",
+            "oc on OpenShift",
+        ),
+        "returns": "Health evidence across ClusterPolicy, GPUCluster, NVIDIADriver pools, DaemonSets, validators, nodes, and MCPs, or a confirmed pause/resume read-back.",
+        "execution_surface": "configured Kubernetes API",
+        "side_effects": "health-check is read-only. pause and resume mutate only the confirmed Node label, upgradePolicy.autoUpgrade field, or MachineConfigPool.spec.paused field.",
+        "options": {
+            "--namespace": "NVIDIA GPU Operator namespace (default: nvidia-gpu-operator)",
+            "--node": "target GPU node name or '*' for all GPU nodes",
+            "--scope": "pause/resume scope: upgrade-skip, operands, driver, auto-upgrade, or mcp",
+            "--nvidia-driver": "NVIDIADriver CR name for auto-upgrade pause/resume",
+            "--mcp": "OpenShift MachineConfigPool name for mcp pause/resume",
+            "--timeout": "positive operation deadline in seconds",
+            "--live-plan": "read cluster state, server-dry-run, and emit an apply-ready digest",
+            "--apply": "run the confirmed pause or resume mutation and read back its result",
+            "--confirm-plan": "exact fingerprint returned by the live plan",
+            "--receipt-out": "write a sanitized operation receipt to this exact path",
+        },
+        "subcommands": {
+            "health-check": {
+                "purpose": "Read ClusterPolicy/GPUCluster, NVIDIADriver pools, DRA, MCO/MCP, DaemonSets, validators, and GPU node drift.",
+                "requires_authorities": (KUBERNETES_AUTHORITY,),
+                "result_schema": "schemas/results/nvidia-gpu-operator.schema.json",
+                "mutates": False,
+                "side_effects": "None; read-only cluster inspection.",
+                "read_back": "Structured health snapshot and non-standard/drift findings.",
+            },
+            "pause": {
+                "purpose": "Pause GPU operands, driver upgrades, autoUpgrade, or an OpenShift MachineConfigPool.",
+                "requires_authorities": (KUBERNETES_AUTHORITY,),
+                "result_schema": "schemas/results/nvidia-gpu-operator.schema.json",
+                "mutates": True,
+                "side_effects": "Apply mode sets the confirmed pause label or spec flag after server-side dry-run.",
+                "read_back": "Independent read-back verifying the paused state.",
+            },
+            "resume": {
+                "purpose": "Resume GPU operands, driver upgrades, autoUpgrade, or an OpenShift MachineConfigPool.",
+                "requires_authorities": (KUBERNETES_AUTHORITY,),
+                "result_schema": "schemas/results/nvidia-gpu-operator.schema.json",
+                "mutates": True,
+                "side_effects": "Apply mode clears or restores the confirmed pause label or spec flag after server-side dry-run.",
+                "read_back": "Independent read-back verifying the resumed state.",
+            },
+        },
+        "examples": [
+            {
+                "description": "Inspect NVIDIA GPU Operator health across all GPU nodes",
+                "command": "nvidia_gpu_operator.py health-check --json",
+            },
+            {
+                "description": "Preview pausing the worker MachineConfigPool",
+                "command": "nvidia_gpu_operator.py pause --scope mcp --mcp worker --live-plan --json",
+            },
+        ],
+        "related": (
+            "ocp_operator.py",
+            "access_check.py",
+        ),
     },
     "access_check.py": {
         "kind": "access_check",
@@ -1108,6 +1363,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--source-branch": "existing source branch for create",
             "--target-branch": "existing target branch for create",
             "--title": "MR title for create",
+            "--description-file": "file containing the requested MR description for create",
             "--mr-iid": "project-local MR number for update, not its global ID",
             "--milestone-id": "global milestone ID, not its project-local IID",
             "--apply": "perform the confirmed MR change",
@@ -1123,7 +1379,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "required_options": ["--source-branch", "--target-branch", "--title"],
                 "result_schema": GITLAB_ACTION_SCHEMA,
                 "mutates": True,
-                "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+                "read_back": "Read the exact MR IID, branches, title, requested description and milestone.",
             },
             "update": {
                 "required_options": ["--mr-iid", "--milestone-id"],
@@ -1135,7 +1391,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "examples": [
             {
                 "description": "Plan an MR",
-                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example"',
+                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example" --description-file description.md',
             },
             {
                 "description": "Plan its milestone assignment",
@@ -1408,8 +1664,9 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         ),
         "references": (
             "GitLab runner manager",
-            "OpenShift SCC access",
+            OPENSHIFT_SCC_REFERENCE,
             "GitLab runner",
+            GITLAB_RUNNER_HELM_REFERENCE,
             "GitLab Agent connectivity",
         ),
         "required_tools": ("glab", "kubectl", "oc on OpenShift"),
@@ -1590,7 +1847,7 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
                 "required_options": ["--provider", "--endpoint"],
             },
         },
-        "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads.",
+        "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads. Once the host is selected, the stderr result event (PASS, DRY_RUN or BLOCKED) carries target_file, target_source, target_selection and credential_sources; target fields are null when no target table supplied the host.",
         "examples": [
             {
                 "description": "Read the configured GitLab identity",
@@ -1602,12 +1859,12 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
             },
         ],
         "output_modes": {
-            "json": "native JSON or selected content; default",
-            "yaml": "the same selected value as YAML",
-            "text": "raw endpoint text or one selected scalar",
+            "json": "native JSON or selected content; check adds the target and credential fields; default",
+            "yaml": "the same value as YAML",
+            "text": "raw endpoint text, one selected scalar, or the check identity name",
         },
         "usage": "Choose check or get and one provider. Target resolution is automatic; CI_SKILLS_TARGET and ci-skills-smoke support tests and live smoke.",
-        "returns": "Bounded JSON, YAML or selected text; dry-run returns a request plan.",
+        "returns": "get: the bounded provider value, unchanged. check: provider, host, authenticated, user and id plus target_file, target_source, target_selection and credential_sources. Dry-run: a request plan with the same four fields; credential_sources names the selected source without reading the token.",
         "read_only": True,
         "side_effects": "none",
         "execution_surface": "installed Python command and one caller-selected provider API",
@@ -1679,6 +1936,14 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "OpenShift Runner spec.env, spec.config, ConfigMap examples and versioned properties.",
             "pointer": "references/gitlab-runner-operator.md",
         },
+        GITLAB_RUNNER_HELM_REFERENCE: {
+            "summary": "Chart version from the GitLab version, token Secret, RBAC rules and OpenShift UBI images.",
+            "pointer": "references/gitlab-runner-helm.md",
+        },
+        GITHUB_ARC_REFERENCE: {
+            "summary": "ARC controller and scale-set charts, matching versions, values and runner image.",
+            "pointer": "references/github-arc.md",
+        },
         "GitLab milestone dates": {
             "summary": "Milestone dates, state changes and distinct tag or label identities.",
             "pointer": "references/gitlab-milestones.md",
@@ -1723,7 +1988,7 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Build and publish a toolbox, then start a runner using its immutable image.",
             "pointer": "references/image-build-chain.md",
         },
-        "OpenShift SCC access": {
+        OPENSHIFT_SCC_REFERENCE: {
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
             "pointer": "references/openshift-scc.md",
         },
@@ -1732,7 +1997,7 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "pointer": "references/gitlab-runner-manager.md",
         },
         "GitLab Agent connectivity": {
-            "summary": "When a cluster can attach to a GitLab project, KAS address and the planned attach flow.",
+            "summary": "Confirmed Agent connection, selected-project CI proof and exact-owned cleanup.",
             "pointer": "references/gitlab-agent.md",
         },
         "Native OCP YAML example": {
@@ -2071,6 +2336,11 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
         "mutates": entry.get("mutates", False),
         "subcommands": entry.get("subcommands", {}),
         "side_effects": entry.get("side_effects", "none"),
+        **(
+            {"credentials": list(json_strings(entry["credentials"]))}
+            if "credentials" in entry
+            else {}
+        ),
         "execution_surface": entry.get("execution_surface", "selected authority API"),
         "required_tools": list(json_strings(entry.get("required_tools", ()))),
         "status_values": STATUS_MEANING,
@@ -2220,6 +2490,8 @@ def manifest() -> MutableMapping[str, JSONValue]:
             "routing": {
                 "prove nested Podman runtime readiness": "image_build_readiness.py",
                 "build and publish a toolbox for a running GitLab runner": "image_build_readiness.py",
+                "enable an OLM operator such as the NVIDIA Network Operator": "ocp_operator.py",
+                "inspect NVIDIA GPU Operator health or pause and resume reconciliation": "nvidia_gpu_operator.py",
                 "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
                 "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
@@ -2239,6 +2511,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "read or manage a GitLab runner": "gitlab_runner.py",
                 "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
                 "mirror GitLab to GitHub": "gitlab_mirror.py",
+                "connect a GitLab project to Kubernetes through its Agent": "gitlab_agent.py",
                 "a volume or claim is stuck": "storage_report.py",
                 "what the cluster said during an interval": "event_trace.py",
                 "connectivity or CNI health": "cilium_status.py",

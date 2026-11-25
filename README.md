@@ -331,7 +331,11 @@ and `source_repo`, plus strings `source_commit` and `commit_label`:
 ```python
 from lib.python.core.abstract.callbacks import Callbacks
 from lib.python.core.executor import WorkflowExecutor
-from lib.python.core.binary_build import BinaryBuildAction, BinaryBuildState, PlanBinaryBuild
+from lib.python.core.binary_build import (
+    BinaryBuildAction,
+    BinaryBuildState,
+    PlanBinaryBuild,
+)
 
 action = BinaryBuildAction(
     spec=spec,
@@ -375,8 +379,8 @@ The result's `trace_artifact` points to that file; smoke reports link the artifa
   state.
 - [Commit repository files](ci-skills/bin/gitlab_repository.py): take caller-supplied file actions, branch and message,
   then return the verified commit SHA and file digests.
-- [Manage merge requests](ci-skills/bin/gitlab_mr.py): create an MR from selected branches or assign an existing MR's
-  milestone, then read back its IDs and assignment.
+- [Manage merge requests](ci-skills/bin/gitlab_mr.py): create an MR from selected branches with an optional description
+  file, or assign an existing MR's milestone, then read back its IDs, description and assignment.
 - [Open bug issues](ci-skills/bin/gitlab_issue.py): create or reuse an issue with caller-supplied labels and an optional
   milestone.
 - [Write wiki pages](ci-skills/bin/gitlab_wiki.py): create or update a page from supplied content, including
@@ -391,6 +395,12 @@ The result's `trace_artifact` points to that file; smoke reports link the artifa
 - [Probe nested Podman readiness](ci-skills/bin/image_build_readiness.py): run an inner container on one worker,
   verify bind-mount writes and exit propagation, and remove the temporary Job and namespace. See the
   [installed command example](ci-skills/SKILL.md#nested-podman-readiness).
+- [Enable an OLM operator](ci-skills/bin/ocp_operator.py): resolve the channel, catalog source and Subscription
+  for a package such as the NVIDIA Network Operator, apply the resource the package ships, and read back the
+  status the operator writes.
+- [Inspect and pause NVIDIA GPU Operator](ci-skills/bin/nvidia_gpu_operator.py): run `health-check` across
+  `ClusterPolicy`/`GPUCluster`, `NVIDIADriver` pools, DaemonSets, validators, non-standard drivers and MCPs, or
+  confirm `pause`/`resume` across node, policy or `MachineConfigPool` scopes.
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and [ci-binary-build](ci-skills/bin/ci-binary-build) for
   exact-commit OpenShift build planning.
 
@@ -553,6 +563,20 @@ the exact identity and project assignments before `--apply --confirm-plan DIGEST
 Run `<command> --describe` for the machine contract and `--help` for examples. The generated `tools.json` marks each
 command read-only or mutating, lists its subcommands and options, and routes an agent to the correct first access call.
 
+### GitLab Agent connection
+
+Use `gitlab_agent.py connect|verify|delete` for an owned installation and actual selected-project CI access.
+The [Agent reference](ci-skills/references/gitlab-agent.md) explains prerequisites and
+[the active plan](docs/exec-plans/active/ci14-gitlab-connections.md) tracks qualification.
+Pass `connect --project group/app --live-plan` to inspect fresh prerequisites and get a plan digest, then repeat
+with its `--run-id RUN_ID --apply --confirm-plan DIGEST`. Optional `--project-name` supplies the consumer naming base;
+explicit Agent/namespace names win without changing real provider identity. Live-plan reports fresh-workload egress
+UNPROVEN; connect must verify a real GraphQL/owned-Pod connection before PASS. Connection alone is not CI proof:
+`verify --project group/app --run-id RUN_ID --job-url JOB_URL` checks an actual selected-project consumer job.
+Successful connect retains its installation. Initial and repeated cleanup both use
+`delete --project group/app --run-id RUN_ID --agent-name AGENT_NAME` with existing live-plan/confirmation controls.
+Cleanup removes only verified run-owned native IDs/UIDs and preserves every pre-existing object.
+
 ## For agents
 
 Read the package [SKILL.md](ci-skills/SKILL.md) to choose a command and understand target resolution, status
@@ -587,8 +611,8 @@ paired JSON and text files; without that option no report file is written.
   `gitlab_issue.py open-bug|create-bug` creates or reuses a bug.
 - `gitlab_repository.py commit` accepts a selected GitLab project, branch, commit message and caller-supplied native
   file actions. Its confirmed apply returns the commit SHA, branch and independently verified file digests.
-- `gitlab_mr.py create|update` accepts selected branches and a title for creation, or an MR IID and milestone ID for
-  assignment. Its confirmed apply returns the verified MR ID, IID and milestone ID.
+- `gitlab_mr.py create|update` accepts selected branches, a title and an optional `--description-file` for creation, or
+  an MR IID and milestone ID for assignment. Its confirmed apply returns the verified MR ID, IID and milestone ID.
 - `gitlab_wiki.py create|update` manages one selected page; `gitlab_runner.py assign|create|tag|delete` changes a
   selected runner scope. These actions require a matching plan fingerprint to apply; `get|list` are live reads.
 - `prepare_tool_pod.py prepare|remove` accepts a tool specification or an existing run ID. Confirmed preparation
@@ -730,3 +754,22 @@ Kubernetes; GitHub is additionally required only when publication checking is se
    `tests/acceptance/runner-lifecycle/` and the tag pair under `tests/acceptance/runner-tag/`.
 4. Run the checker locally and commit only a `PASS` set. Move a superseded receipt to
    `tests/acceptance/historical/` instead of deleting it.
+
+The GitLab Agent series is five receipts from one run of one installed copy, plus one cleanup record:
+
+1. `gitlab_agent.py connect --live-plan`, then `--run-id RUN_ID --apply --confirm-plan DIGEST --receipt-out
+   agent-connect-applied.json`; repeat the confirmed connect for `agent-connect-no-op.json`.
+2. Stage the proof job and run it as in the [Agent reference](ci-skills/references/gitlab-agent.md#ci-access-proof-job),
+   then `gitlab_agent.py verify --run-id RUN_ID --job-url JOB_URL --receipt-out agent-verify.json`.
+3. `gitlab_agent.py delete --run-id RUN_ID --agent-name AGENT_NAME` with live plan and confirmation, receipt
+   `agent-delete-applied.json`, then
+   `python tools/qualify_agent_cleanup.py observe --skill SKILL --connect-receipt agent-connect-applied.json
+   --out after.json`, with the `--binding`, `--gitlab` or `--gitlab-profile` the series used.
+4. Repeat the confirmed delete for `agent-delete-no-op.json`, observe again into `repeat.json`, then
+   `python tools/qualify_agent_cleanup.py attach --skill SKILL --connect-receipt agent-connect-applied.json
+   --after after.json --repeat repeat.json --receipt agent-delete-no-op.json
+   --out agent-delete-no-op-with-cleanup.json`.
+5. Commit the four receipts and the attached NO_OP receipt. `observe` refuses another installed copy and refuses
+   while the Agent, its token or any run-created object in the ownership record still exists; `attach` requires the
+   `after` read before the repeat receipt and the `repeat` read after it; `check_agent_series` rejects the series
+   without the record.

@@ -41,6 +41,7 @@ BARE_TOML_KEY: Final = re.compile(r"[A-Za-z0-9_-]+\Z")
 # Authority names: each is the top-level table of that authority in TARGET_CONTRACT.
 GITHUB_AUTHORITY: Final = "github"
 HARBOR_AUTHORITY: Final = "harbor"
+REGISTRY_AUTHORITY: Final = "registry"
 KUBERNETES_AUTHORITY: Final = "kubernetes"
 # The one GitLab authority and its two instance tables. `--gitlab` choices are
 # the keys of GITLAB_SELECTORS; each value is the table that choice reads.
@@ -71,6 +72,17 @@ GITLAB_ROUTED_AUTHORITIES: Final = (KUBERNETES_AUTHORITY, HARBOR_AUTHORITY)
 # and how the instance was selected (ROUTING_SELECTED_BY_* or the caller's option).
 ROUTING_RESULT_KEY: Final = "routing"
 ROUTING_SELECTED_BY_KEY: Final = "selected_by"
+# Result fields that name the target a command read. In `Target.selection_report`,
+# which `access_check` and `ci-api` use: the file; the source that selected it
+# (`env:CI_SKILLS_TARGET`, `project`, `user`, `argv:--target` or `binding`); and the
+# selection string with any `--gitlab` option appended. GitLab action and mirror
+# results append options to `target_source` itself. CREDENTIAL_SOURCES_KEY maps each
+# provider to the `file:`, `env:` or native-store reference of its token.
+TARGET_FILE_KEY: Final = "target_file"
+TARGET_SOURCE_KEY: Final = "target_source"
+TARGET_SELECTION_KEY: Final = "target_selection"
+TARGET_REPORT_KEYS: Final = (TARGET_FILE_KEY, TARGET_SOURCE_KEY, TARGET_SELECTION_KEY)
+CREDENTIAL_SOURCES_KEY: Final = "credential_sources"
 ROUTING_SELECTED_BY_DEFAULT: Final = "default"
 ROUTING_SELECTED_BY_LEGACY: Final = "legacy"
 ROUTING_ARGV_PREFIX: Final = "argv:"
@@ -445,6 +457,18 @@ TARGET_CONTRACT = TargetContract(
             + Field.of(
                 Role.ACCESS, "credential_file", "username_file", "password_file"
             ),
+        ),
+        # Pull-registry credentials for operator images that need a login
+        # (CI16). One named child table per registry, with the keys and rules
+        # of [harbor]; presence of a matching table is the caller's consent
+        # for the command to create a pull Secret in the package namespace.
+        Table(
+            REGISTRY_AUTHORITY,
+            Field.of(Role.ENDPOINT, "url")
+            + Field.of(
+                Role.ACCESS, "credential_file", "username_file", "password_file"
+            ),
+            named_profiles=True,
         ),
         Table(
             KUBERNETES_AUTHORITY,

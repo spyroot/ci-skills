@@ -1960,16 +1960,30 @@ COMMANDS["gitlab_milestone.py"]["subcommands"]["adjust-time"] = {
     "purpose": "Change only an exact milestone's start or due date, with read-back.",
 }
 PLANNED_VERBS = {"gitlab_milestone.py": {"list": "CI11-TOOLS"}}
-REFERENCES = {"gitlab-labels": {"source": "vendored", "index": "references/vendor/gitlab-labels/index.json",
-                                 "summary": "GitLab label families and how they relate."}}
+REFERENCES = {
+    "gitlab-labels": {
+        "source": "vendored",
+        "index": "references/vendor/gitlab-labels/index.json",
+        "summary": "GitLab label families and how they relate.",
+    }
+}
 REFERENCE_SECTIONS = (
-    {"reference": "gitlab-labels", "anchor": "priority-labels", "nodes": (("gitlab", "issue"),),
-     "summary": "priority::1 to priority::4; their meaning lives in the handbook triage page.",
-     "when": "Read when setting priority; choosing a level needs the handbook page."},
+    {
+        "reference": "gitlab-labels",
+        "anchor": "priority-labels",
+        "nodes": (("gitlab", "issue"),),
+        "summary": "priority::1 to priority::4; their meaning lives in the handbook triage page.",
+        "when": "Read when setting priority; choosing a level needs the handbook page.",
+    },
 )
 RELATIONS = (
-    {"reference": "gitlab-labels", "from": "group-labels", "rel": "infers", "to": "stage-labels",
-     "evidence": "group-labels"},
+    {
+        "reference": "gitlab-labels",
+        "from": "group-labels",
+        "rel": "infers",
+        "to": "stage-labels",
+        "evidence": "group-labels",
+    },
 )
 ```
 

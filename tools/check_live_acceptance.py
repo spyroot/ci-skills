@@ -55,6 +55,13 @@ from lib.python.core.cli_api import response_decoder
 from lib.python.core.endpoints import GITLAB_AUTHORITY, KUBERNETES_AUTHORITY
 from lib.python.core.git.mirroring import MirrorField
 from lib.python.core.git.remote import GIT_EXECUTABLE
+from lib.python.core.gitlab.cluster_agent.evidence import (
+    AGENT_KIND,
+    AGENT_OPERATION_KEYS,
+    agent_operation_key,
+    check_agent_receipt,
+    check_agent_series,
+)
 from lib.python.core.gitlab.gitlab_actions import (
     RUNNER_CONTROLS,
     runner_control_plan_digest,
@@ -308,19 +315,22 @@ SUPPORTED_GITLAB_OPERATIONS: Final = (
 SUPPORTED_REQUIRED_OPERATIONS: Final[frozenset[OperationKey]] = (
     SUPPORTED_GITLAB_OPERATIONS
     | REQUIRED_CAPABILITY_OPERATIONS
+    | frozenset(AGENT_OPERATION_KEYS)
     | {(RECEIPT_KIND, None, None)}
 )
 IMAGE_BUILD_READINESS_SCHEMA: Final = "results/image-build-readiness.schema.json"
 
 
 def _operation_key(receipt: JSONObject) -> Optional[OperationKey]:
-    """Normalize the existing envelope and mirror record action conventions.
+    """Normalize envelope and capability-specific operation keys.
 
     :param receipt: Selected receipt whose shape will be independently validated.
     :returns: Comparable operation key, or None for malformed key fields.
     """
     kind = receipt.get(KIND_FIELD)
     operation = receipt.get("operation")
+    if kind == AGENT_KIND:
+        return agent_operation_key(receipt)
     action = receipt.get("result_action")
     if kind == MIRROR_KIND:
         records = receipt.get(MirrorReceiptField.RECORDS)
@@ -1574,7 +1584,7 @@ class AcceptanceReview:
                 self.problems.append(f"{name}:receipt_not_declared")
                 continue
             kind, operation, result_action = operation_key
-            if (
+            if operation_key in AGENT_OPERATION_KEYS or (
                 kind in {"image_build_readiness", MIRROR_KIND}
                 and operation_key in REQUIRED_CAPABILITY_OPERATIONS
             ):
@@ -1756,6 +1766,20 @@ class AcceptanceReview:
             ValueError,
         ):
             self.problems.append(prefix + "mirror_pair_invalid_shape")
+
+    def agent_receipts(self) -> None:
+        """Require one complete Agent lifecycle from individually verified receipts."""
+        selected = [
+            self.receipts[name]
+            for name in self.accepted
+            if name in self.receipts
+            and self.receipts[name].get(KIND_FIELD) == AGENT_KIND
+        ]
+        if selected:
+            self.problems.extend(
+                f"{AGENT_KIND}:{problem}"
+                for problem in check_agent_series(selected, now=self.now)
+            )
 
     def required_coverage(self, required_operations: Sequence[OperationKey]) -> None:
         """Require policy coverage from receipts that passed their full validators.
@@ -2249,6 +2273,10 @@ def _check_targeted_receipt(
             problems.extend(
                 f"{name}:{problem}" for problem in check_mirror_receipt(receipt)
             )
+        elif kind == AGENT_KIND:
+            problems.extend(
+                f"{name}:{problem}" for problem in check_agent_receipt(receipt)
+            )
         elif kind == "ocp_node_onboard" and operation == "verify":
             validate_specification(receipt, "results/ocp-node-onboard.schema.json")
             problems.extend(_check_ocp_verify_readback(name, receipt))
@@ -2347,6 +2375,7 @@ def evaluate(
                 review.accepted.append(name)
     review.runner_control_receipts()
     review.mirror_receipts()
+    review.agent_receipts()
     if required_operations is not None:
         review.required_coverage(required_operations)
     result = review.result()

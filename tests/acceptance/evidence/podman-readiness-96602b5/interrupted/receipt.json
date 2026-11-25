@@ -1,0 +1,168 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "captured_at": "2026-11-22T10:23:00.819760+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [
+      {
+        "absent": true,
+        "kind": "Job",
+        "name": "ci-skills-podman-probe-a6d3cc7f51a081ed",
+        "namespace": "ci-skills-a6d3cc7f51a081edc1d4",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "ConfigMap",
+        "name": "ci-skills-podman-scripts-a6d3cc7f51a081ed",
+        "namespace": "ci-skills-a6d3cc7f51a081edc1d4",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "RoleBinding",
+        "name": "ci-skills-scc-permission-5f4add9322d9458c-a6d3cc7f51a081ed",
+        "namespace": "ci-skills-a6d3cc7f51a081edc1d4",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "Namespace",
+        "name": "ci-skills-a6d3cc7f51a081edc1d4",
+        "namespace": "",
+        "status": "PASS"
+      }
+    ],
+    "status": "PASS"
+  },
+  "errors": [
+    {
+      "reason": "interrupted",
+      "source": "image_build_readiness"
+    }
+  ],
+  "filters": {},
+  "kind": "image_build_readiness",
+  "namespace": "ci-skills-a6d3cc7f51a081edc1d4",
+  "operation": "probe",
+  "plan": {
+    "authorization": {
+      "behavior": "reuse_existing_or_create_temporary_role_binding",
+      "cluster_role": "system:openshift:scc:privileged",
+      "constraint": "privileged",
+      "provider": "openshift_scc_access",
+      "service_account": "default"
+    },
+    "claim": "nested_podman_runtime_readiness",
+    "inner_image": "docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e",
+    "kind": "image_build_readiness",
+    "operation": "probe",
+    "probe_image": "quay.io/podman/stable@sha256:5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3",
+    "resources": {
+      "cpu_limit": "1",
+      "cpu_request": "250m",
+      "memory_limit": "1Gi",
+      "memory_request": "256Mi",
+      "storage_size": "8Gi"
+    },
+    "run_scope": {
+      "namespace": null,
+      "namespace_mode": "generated",
+      "service_account": "default"
+    },
+    "script_digest": "56910939591e750f910e8a8313a569125e72e9dca439b35bd76af03913f71110",
+    "selected_node": "node-125",
+    "side_effects_on_apply": [
+      "temporary_namespace",
+      "temporary_scc_role_binding_when_required",
+      "temporary_configmap",
+      "temporary_job"
+    ],
+    "target": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    },
+    "timeout_seconds": 300
+  },
+  "plan_digest": "8ae631f5eaf4a938caed299f5a8c63c0ee0cd565a5e54239287c109c314775c2",
+  "records": [
+    {
+      "action": "VERIFIED",
+      "callback": "SelectReadyWorker",
+      "node": {
+        "kernelVersion": "5.14.0-570.98.1.el9_6.x86_64",
+        "name": "node-125",
+        "osImage": "Red Hat Enterprise Linux CoreOS 9.6.20260309-0 (Plow)"
+      },
+      "selected_node": "node-125",
+      "selection": "requested",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ConfirmPodmanProbe",
+      "plan_digest": "8ae631f5eaf4a938caed299f5a8c63c0ee0cd565a5e54239287c109c314775c2",
+      "selected_node": "node-125",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "OpenProbeNamespace",
+      "namespace": "ci-skills-a6d3cc7f51a081edc1d4",
+      "owns_namespace": true,
+      "reused": false,
+      "run_id": "86cdf39d2d274096b978558982078857",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "EnsureSCCAccess",
+      "cluster_role": "system:openshift:scc:privileged",
+      "constraint": "privileged",
+      "outcome": "scc_access_ready",
+      "permission_source": "temporary_role_binding",
+      "role_binding": {
+        "action": "APPLIED",
+        "kind": "RoleBinding",
+        "name": "ci-skills-scc-permission-5f4add9322d9458c-a6d3cc7f51a081ed",
+        "namespace": "ci-skills-a6d3cc7f51a081edc1d4",
+        "uid": "4cff152c-cee2-4038-8aae-af7afa261e1b"
+      },
+      "service_account": "system:serviceaccount:ci-skills-a6d3cc7f51a081edc1d4:default",
+      "verified": true
+    }
+  ],
+  "run_id": "86cdf39d2d274096b978558982078857",
+  "schema_version": "1.0",
+  "selected_node": "node-125",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "e483db7f91b83252070657c000f1e9b769c6cd027ed9825f6d111be3857ab04b",
+    "file_count": 277,
+    "functional_digest": "62176432a00c9f3c7cbff6dcefc39a188d1307d329eb6e835ff85fc9b461366e",
+    "revision": {
+      "source": "installer_record",
+      "value": "96602b5bf500cf556baeac22d71da9a12674fdb4",
+      "verified": true
+    }
+  },
+  "status": "BLOCKED",
+  "summary": {
+    "error_count": 1,
+    "record_count": 4
+  },
+  "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user",
+  "tested_revision": "96602b5bf500cf556baeac22d71da9a12674fdb4"
+}

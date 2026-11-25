@@ -5,6 +5,13 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Coverage and mutation-testing run products.
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+mutants/
+
 # Operator-local material: credentials, target files, raw traces. A token file
 # already sits untracked under .internal/ in this working tree, and nothing
 # ignored it, so `git add -A` would have staged it into a public repository.

@@ -40,6 +40,7 @@ RESOURCE_TOKEN_LENGTH: Final = 16
 RESOURCE_NAME_SEPARATOR_COUNT: Final = 2
 MIN_NAME_COMPONENT_LENGTH: Final = 1
 RESOURCE_NAME_LIMIT_INVALID: Final = "run_scope_resource_name_limit_invalid"
+RUN_SCOPE_KIND_INVALID: Final = "run_scope_kind_invalid"
 _RUN_ID = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _DNS_LABEL = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _KIND_TOKEN = re.compile(r"[^a-z0-9-]+")
@@ -55,6 +56,23 @@ def validate_run_id(value: str) -> str:
     if not value or len(value) > RUN_ID_LIMIT or _RUN_ID.fullmatch(value) is None:
         raise ValueError("run_scope_id_invalid")
     return value
+
+
+def run_ownership_selector(run_id: str) -> str:
+    """Build the Kubernetes label selector shared by native run ownership reads.
+
+    :param run_id: Exact operation identifier returned by preparation.
+    :returns: Label selector for objects owned by this run.
+    :raises ValueError: The run identifier cannot be used for ownership.
+    """  # noqa: DOC502 - Shared run ID validation raises ValueError.
+    validate_run_id(run_id)
+    return ",".join(
+        (
+            f"{MANAGER_LABEL}={MANAGER_VALUE}",
+            f"{OPERATION_LABEL}={run_id}",
+            f"{RUN_ID_LABEL}={run_id}",
+        )
+    )
 
 
 def validate_namespace(value: str) -> str:
@@ -79,7 +97,7 @@ def dns_token(value: str, *, limit: int) -> str:
     """
     token = _KIND_TOKEN.sub("-", value.casefold()).strip("-")[:limit].rstrip("-")
     if not token:
-        raise ValueError("run_scope_kind_invalid")
+        raise ValueError(RUN_SCOPE_KIND_INVALID)
     return token
 
 
@@ -281,14 +299,7 @@ class RunScope:
         :raises KubernetesError: If a provider list or object is malformed.
         :raises ValueError: If the identifier is invalid.
         """  # noqa: DOC503 - validate_run_id raises the declared ValueError.
-        validate_run_id(run_id)
-        selector = ",".join(
-            (
-                f"{MANAGER_LABEL}={MANAGER_VALUE}",
-                f"{OPERATION_LABEL}={run_id}",
-                f"{RUN_ID_LABEL}={run_id}",
-            )
-        )
+        selector = run_ownership_selector(run_id)
         namespaces = _items(
             service.json("get", "namespaces", "-l", selector, "-o", "json"),
             "namespace",

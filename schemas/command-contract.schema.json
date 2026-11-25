@@ -307,6 +307,15 @@
           }
         }
       }
+    },
+    "credentials": {
+      "description": "Which credential each step of the command uses and where a created credential is stored, one line each.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   }
 }

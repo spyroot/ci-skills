@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import tomllib
-from collections.abc import Mapping, MutableSequence
+from collections.abc import Mapping, MutableMapping, MutableSequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -28,6 +28,7 @@ from lib.python.core.catalog import (
     GITLAB_TARGET_OPTION,
 )
 from lib.python.core.endpoints import (
+    BARE_TOML_KEY,
     GITHUB_AUTHORITY,
     GITLAB_AUTHORITY,
     GITLAB_DEFAULT_INSTANCE,
@@ -52,11 +53,13 @@ from lib.python.core.endpoints import (
     GITLAB_SELECTORS,
     HARBOR_AUTHORITY,
     KUBERNETES_AUTHORITY,
+    REGISTRY_AUTHORITY,
     ROUTING_ARGV_PREFIX,
     ROUTING_SELECTED_BY_DEFAULT,
     ROUTING_SELECTED_BY_KEY,
     ROUTING_SELECTED_BY_LEGACY,
     TARGET_CONTRACT,
+    TARGET_REPORT_KEYS,
 )
 from lib.python.core.logging import bound_log_settings, log_event
 from lib.python.core.paths import SKILL_ROOT
@@ -189,6 +192,55 @@ class HarborTarget:
     username_file: Optional[Path] = None
     password_file: Optional[Path] = None
     reference_toolbox: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RegistryTarget:
+    """Hold one ``[registry.<name>]`` pull-registry credential table.
+
+    A registry profile names the HTTPS origin whose images need a login; the
+    named table's presence is the caller's consent for a command to create a
+    pull Secret in its own run-scoped namespace. The keys and rules match
+    ``[harbor]``: either ``credential_file`` or the ``username_file`` and
+    ``password_file`` pair.
+
+    :param url: Registry HTTPS origin matching an image reference's host.
+    :param host: Network authority extracted from the origin.
+    :param credential_file: Combined credential file, or ``None`` when unconfigured.
+    :param username_file: Separate username file, or ``None`` when unconfigured.
+    :param password_file: Separate password file, or ``None`` when unconfigured.
+
+    .. attribute :: url
+        :type: str
+
+        Registry HTTPS origin matching an image reference's host.
+
+    .. attribute :: host
+        :type: str
+
+        Network authority extracted from the origin.
+
+    .. attribute :: credential_file
+        :type: Optional[Path]
+
+        Combined credential file, or ``None`` when unconfigured.
+
+    .. attribute :: username_file
+        :type: Optional[Path]
+
+        Separate username file, or ``None`` when unconfigured.
+
+    .. attribute :: password_file
+        :type: Optional[Path]
+
+        Separate password file, or ``None`` when unconfigured.
+    """
+
+    url: str
+    host: str
+    credential_file: Optional[Path] = None
+    username_file: Optional[Path] = None
+    password_file: Optional[Path] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -820,6 +872,13 @@ class Target:
         :type: Optional[HarborTarget]
 
         Selected registry authority, or ``None`` when not required.
+
+    .. attribute :: registries
+        :type: Mapping[str, RegistryTarget]
+
+        Selected ``[registry.<name>]`` pull-registry profiles keyed by profile
+        name; empty when the command does not select the registry authority or
+        the target declares no profile.
     """
 
     github: Optional[GitHubTarget]
@@ -836,6 +895,21 @@ class Target:
     kubernetes_source_reference: Optional[str] = None
     target_reference: Optional[str] = None
     harbor: Optional[HarborTarget] = None
+    registries: Mapping[str, RegistryTarget] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+
+    def registry_for(self, host: str) -> Optional[RegistryTarget]:
+        """Return the pull-registry profile whose origin matches one image host.
+
+        :param host: Registry host of an image reference, with any port.
+        :returns: Matching profile, or ``None`` when the target declares none
+            for this host.
+        """
+        for registry in self.registries.values():
+            if registry.host == host:
+                return registry
+        return None
 
     @property
     def routing(self) -> Optional[GitLabRoute]:
@@ -860,6 +934,22 @@ class Target:
             either option, otherwise ``source`` unchanged.
         """
         return self.gitlab.selection_source(source) if self.gitlab else source
+
+    def selection_report(self) -> JSONObject:
+        """Report the target file, the source that selected it, and the selection.
+
+        ``access_check`` and ``ci-api`` write these fields into their results.
+
+        :returns: ``TARGET_REPORT_KEYS`` mapped to ``target_file`` as a string,
+            ``target_source`` from ``source_kind`` and ``target_selection`` from
+            ``target_reference``; each is ``None`` before source resolution.
+        """
+        values = (
+            str(self.source_file) if self.source_file else None,
+            self.source_kind,
+            self.target_reference,
+        )
+        return dict(zip(TARGET_REPORT_KEYS, values, strict=True))
 
     def require_github(self) -> GitHubTarget:
         """Select the concrete github settings required by a caller.
@@ -1544,6 +1634,35 @@ def _parse_github(
     )
 
 
+def _registry_credential_files(
+    table: Mapping[str, object],
+    authority: str,
+    skill_root: Path,
+    *,
+    target_directory: Path,
+) -> dict[str, Optional[Path]]:
+    """Resolve the one valid credential-file selection of a registry table.
+
+    :param table: Parsed registry TOML table (``[harbor]`` or ``[registry.<name>]``).
+    :param authority: Declaring authority name used in the failure reason.
+    :param skill_root: Installed skill directory excluded from runtime inputs.
+    :param target_directory: Selected target directory anchoring relative paths.
+    :returns: The three optional file paths; exactly one selection form is set.
+    :raises TargetError: When neither or both of the two forms are given.
+    """
+    files = {
+        key: _optional_file(table, key, skill_root, target_directory=target_directory)
+        for key in ("credential_file", "username_file", "password_file")
+    }
+    combined = files["credential_file"] is not None
+    paired = files["username_file"] is not None and files["password_file"] is not None
+    if combined == paired or (
+        combined and any(files[key] for key in ("username_file", "password_file"))
+    ):
+        raise TargetError(f"{authority}_credential_selection_invalid")
+    return files
+
+
 def _parse_harbor(
     value: object, skill_root: Path, *, target_directory: Path
 ) -> HarborTarget:
@@ -1557,16 +1676,9 @@ def _parse_harbor(
     """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
     harbor = _table(value, HARBOR_AUTHORITY, TARGET_CONTRACT.names(HARBOR_AUTHORITY))
     url, host = _https_url(_string(harbor, "url", HARBOR_AUTHORITY), "harbor.url")
-    files = {
-        key: _optional_file(harbor, key, skill_root, target_directory=target_directory)
-        for key in ("credential_file", "username_file", "password_file")
-    }
-    combined = files["credential_file"] is not None
-    paired = files["username_file"] is not None and files["password_file"] is not None
-    if combined == paired or (
-        combined and any(files[key] for key in ("username_file", "password_file"))
-    ):
-        raise TargetError("harbor_credential_selection_invalid")
+    files = _registry_credential_files(
+        harbor, HARBOR_AUTHORITY, skill_root, target_directory=target_directory
+    )
     return HarborTarget(
         url,
         host,
@@ -1578,6 +1690,58 @@ def _parse_harbor(
         ),
         **files,
     )
+
+
+def _parse_registry(
+    name: str, value: object, skill_root: Path, *, target_directory: Path
+) -> RegistryTarget:
+    """Validate one named ``[registry.<name>]`` pull-registry table.
+
+    :param name: Profile name declared under the ``registry`` authority.
+    :param value: Parsed registry profile TOML table.
+    :param skill_root: Installed skill directory excluded from runtime inputs.
+    :param target_directory: Selected target directory anchoring relative credential paths.
+    :returns: Concrete registry configuration with its credential file selection.
+    :raises TargetError: A required field or credential selection is invalid.
+    """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
+    if not isinstance(value, Mapping):
+        raise TargetError("registry_profile_invalid")
+    table = _table(
+        value, f"{REGISTRY_AUTHORITY}.{name}", TARGET_CONTRACT.names(REGISTRY_AUTHORITY)
+    )
+    url, host = _https_url(
+        _string(table, "url", REGISTRY_AUTHORITY), f"{REGISTRY_AUTHORITY}.{name}.url"
+    )
+    return RegistryTarget(
+        url,
+        host,
+        **_registry_credential_files(
+            table, REGISTRY_AUTHORITY, skill_root, target_directory=target_directory
+        ),
+    )
+
+
+def _parse_registries(
+    value: object, skill_root: Path, *, target_directory: Path
+) -> Mapping[str, RegistryTarget]:
+    """Validate every named ``[registry.<name>]`` profile of the selected target.
+
+    :param value: Parsed ``registry`` TOML table holding one table per profile.
+    :param skill_root: Installed skill directory excluded from runtime inputs.
+    :param target_directory: Selected target directory anchoring relative credential paths.
+    :returns: Immutable name-to-registry mapping in declaration order.
+    :raises TargetError: One profile name or table is invalid.
+    """
+    if not isinstance(value, Mapping) or not value:
+        return MappingProxyType({})
+    parsed: MutableMapping[str, RegistryTarget] = {}
+    for name, table in value.items():
+        if not isinstance(name, str) or not BARE_TOML_KEY.fullmatch(name):
+            raise TargetError("registry_profile_name_invalid")
+        parsed[name] = _parse_registry(
+            name, table, skill_root, target_directory=target_directory
+        )
+    return MappingProxyType(parsed)
 
 
 def _parse_kubernetes(value: object, skill_root: Path) -> KubernetesTarget:
@@ -1790,10 +1954,18 @@ def load_target(
         if KUBERNETES_AUTHORITY in selected
         else None
     )
+    registries = (
+        _parse_registries(
+            data[REGISTRY_AUTHORITY], skill_root, target_directory=source.parent
+        )
+        if REGISTRY_AUTHORITY in selected
+        else MappingProxyType({})
+    )
     return Target(
         github=github_target,
         gitlab=gitlab_target,
         kubernetes=kubernetes_target,
         active_surfaces=selected,
         harbor=harbor_target,
+        registries=registries,
     )

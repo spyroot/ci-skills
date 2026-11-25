@@ -155,6 +155,8 @@ Routing, in short:
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
 | Probe Podman, or copy the prepared toolbox and configure its runner | `bin/image_build_readiness.py probe\|chain` |
+| Enable an OLM operator and apply its shipped resource | `bin/ocp_operator.py install\|apply\|remove` |
+| Inspect NVIDIA GPU Operator health or pause/resume | `bin/nvidia_gpu_operator.py health-check\|pause\|resume` |
 | Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | access to configured GitHub, GitLab and Kubernetes providers | `access_check.py` |
@@ -320,7 +322,14 @@ relative endpoint; host and token references resolve from the selected
 `check --provider PROVIDER` reads authenticated identity. For `get`, use
 `--field` for a dotted JSON field, `--decode-base64` for encoded file content,
 `--lines START:END` for a bounded text slice, and `--paginate` for array pages.
-Its output is the selected provider value, not an access-receipt envelope.
+`get` writes the selected provider value to stdout unchanged. `check` JSON or
+YAML and every `--dry-run` plan add `target_file`, `target_source`,
+`target_selection` and `credential_sources`, the fields `access_check.py`
+reports; a dry run names the credential source without reading the token. Once
+the host is selected, the stderr `result` event carries the same four fields, so
+read it for `get`; `--log-level warning` omits the PASS and DRY_RUN event. Target
+fields are null when `--host` names a host other than the target's or no target
+file exists.
 
 `reference.py gitlab_runner_manager.py` offers the focused runner-manager and
 SCC references. Use `--help` for arguments; read the focused reference when the
