@@ -25,8 +25,8 @@ The [CI11-TOOLS plan](../phases/CI11-TOOLS.md) distinguishes installed commands 
 | [CI11][ci11] | [Active][exec-ci11] | Help/ports/runner proof → C1–C9 and native hooks | [Tools][ci11-gates] |
 | [CI12][ci12] | [Completed][exec-ci12] | Tool Pod/ISO proved; accepted CSR/join mock boundary | [Onboarding][ci12-gates] |
 | [CI13][ci13] | [Active][exec-ci13] | Probe/historical chain proof → interruption/current-chain job | [Readiness][ci13-gates] |
-| [CI14][ci14] | [Active][exec-ci14] | Qualified mirror → approved Helm Agent delivery | [Connections][ci14-gates] |
-| [CI15][ci15] | [Active][exec-ci15] | Qualified baseline → remaining naming/Conda/ARC/executors | [Runners][ci15-gates] |
+| [CI14][ci14] | [Completed][exec-ci14] | Qualified mirror and Agent delivery; receipts accepted on main | [Connections][ci14-gates] |
+| [CI15][ci15] | [Active][exec-ci15] | Runner and Debian Conda proof → remaining qualification | [Runners][ci15-gates] |
 | [CI16][ci16] | [Active][exec-ci16] | No OLM code → enable operator, apply shipped resources | [Operator][ci16-gates] |
 
 The ExecPlans retain each phase's existing decisions and requirement boundaries. Source-phase status prose is
@@ -37,10 +37,9 @@ phases.
 [CI12 live evidence][ci12-evidence] retains its accepted mocked-join boundary;
 [CI13 evidence][ci13-evidence] retains outstanding interruption and chain proof.
 
-The active [CI14 evidence][mirror-proof] and [CI15 evidence][baseline] record the completed PRs and actual
-consumer job IDs/cleanup. Both whole phases remain active; no CI14/CI15 phase is filed under completed. Conda bootstrap
-remains approved unfinished CI15 work, not a new
-development-machine prerequisite.
+The completed [CI14 evidence][mirror-proof] and active [CI15 evidence][baseline] record the completed PRs and actual
+consumer job IDs and cleanup. CI14 is filed under completed. CI15 remains active, with historical Debian Conda
+consumer proof and current-candidate qualification still open.
 
 Completed records live in [completed/](../exec-plans/completed/); unfinished plans live in
 [active/](../exec-plans/active/).
@@ -86,7 +85,7 @@ The [portability gate][portability] and [endpoint gate][endpoints] retain their 
 [exec-ci08]: ../exec-plans/active/ci08-routing.md
 [exec-ci09]: ../exec-plans/active/ci09-reference-navigation.md
 [exec-ci11]: ../exec-plans/active/ci11-tool-delivery.md
-[exec-ci14]: ../exec-plans/active/ci14-gitlab-connections.md
+[exec-ci14]: ../exec-plans/completed/ci14-gitlab-connections.md
 [exec-ci15]: ../exec-plans/active/ci15-runner-workflows.md
 [exec-ci16]: ../exec-plans/active/ci16-olm-operator.md
 [exec-ci12]: ../exec-plans/completed/ci12-node-onboarding.md
@@ -147,4 +146,4 @@ the historical reference gaps. This reconciliation preserves those removals and 
 scope through the active ExecPlans.
 
 [baseline]: ../exec-plans/active/ci15-runner-workflows.md#artifacts-and-notes
-[mirror-proof]: ../exec-plans/active/ci14-gitlab-connections.md#artifacts-and-notes
+[mirror-proof]: ../exec-plans/completed/ci14-gitlab-connections.md#artifacts-and-notes
